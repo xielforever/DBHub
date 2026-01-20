@@ -1,0 +1,31 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: dev.Dockerfile
+      args:
+        IMAGE_VERSION: ${FRONTEND_IMAGE_VERSION}
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+    environment:
+      - VITE_PORT=${FRONTEND_PORT}
+    stdin_open: true
+    tty: true
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: dev.Dockerfile
+      args:
+        IMAGE_VERSION: ${BACKEND_IMAGE_VERSION}
+    volumes:
+      - ./backend:/app
+    ports:
+      - "${BACKEND_PORT}:${BACKEND_PORT}"
+    environment:
+      - APP_ENV=${APP_ENV}
+      - PORT=${BACKEND_PORT}
+    stdin_open: true
+    tty: true
