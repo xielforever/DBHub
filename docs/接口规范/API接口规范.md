@@ -5,7 +5,7 @@
 ## 1. 认证模块 (Auth)
 
 ### 1.1 用户登录
-**POST** `/api/v1/auth/login`
+**POST** `/api/v1/auth/login`（无需认证）
 
 **Request:**
 ```json
@@ -19,9 +19,12 @@
 ```json
 {
   "code": 0,
+  "message": "ok",
   "data": {
-    "token": "eyJhbGciOiJIUzI1Ni...",
-    "expire_at": "2026-01-21T10:00:00Z",
+    "token_type": "Bearer",
+    "access_token": "eyJhbGciOiJIUzI1Ni...",
+    "refresh_token": "eyJhbGciOiJIUzI1Ni...",
+    "expires_at": "2026-09-14T14:39:20Z",
     "user": {
       "id": 1,
       "username": "admin",
@@ -31,10 +34,64 @@
 }
 ```
 
-### 1.2 刷新令牌
-**POST** `/api/v1/auth/refresh`
+> 密码在服务端使用 PBKDF2-HMAC-SHA256（210,000 次迭代）校验；
+> Access Token 有效期 15 分钟，Refresh Token 有效期 7 天。
+> 用户不存在与密码错误均返回相同提示（`40100 用户名或密码错误`），防止账号枚举。
 
-使用 Header 中的旧 Token 换取新 Token（如果在刷新窗口期内）。
+**Curl 示例:**
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}'
+```
+
+### 1.2 刷新令牌
+**POST** `/api/v1/auth/refresh`（无需认证，请求体携带 Refresh Token）
+
+**Request:**
+```json
+{
+  "refresh_token": "eyJhbGciOiJIUzI1Ni..."
+}
+```
+
+响应结构与登录接口一致，返回全新的令牌对。服务端会重新加载用户状态，
+被禁用的账号即使持有有效 Refresh Token 也无法换取新令牌。
+
+### 1.3 获取当前用户
+**GET** `/api/v1/auth/me`
+
+**Request Header:**
+```
+Authorization: Bearer <ACCESS_TOKEN>
+```
+
+**Response:**
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": { "id": 1, "username": "admin", "role": "admin" }
+}
+```
+
+### 1.4 健康检查
+**GET** `/api/health`（无需认证，供容器探针使用）
+
+```bash
+curl http://localhost:8080/api/health
+```
+
+### 1.5 统一错误码
+
+| HTTP | code   | 含义         |
+|------|--------|--------------|
+| 400  | 40000  | 请求参数错误 |
+| 401  | 40100  | 未认证/令牌失效 |
+| 403  | 40300  | 无权限       |
+| 404  | 40400  | 资源不存在   |
+| 409  | 40900  | 资源冲突     |
+| 500  | 50000  | 服务器内部错误（细节仅写日志，不返回前端） |
 
 ---
 
