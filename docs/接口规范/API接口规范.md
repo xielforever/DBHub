@@ -75,14 +75,28 @@ Authorization: Bearer <ACCESS_TOKEN>
 }
 ```
 
-### 1.4 健康检查
+### 1.4 令牌携带的三种通道
+
+除登录/刷新/健康检查外，所有接口均需携带 Access Token，服务端按以下
+**优先级顺序**依次识别（三通道等价，便于浏览器、CLI 与嵌入场景）：
+
+1. `Authorization: Bearer <ACCESS_TOKEN>`（标准，推荐 API/CLI 使用）；
+2. `X-Access-Token: <ACCESS_TOKEN>` 请求头（适用于无法设置
+   Authorization 的网关/下载链接场景）；
+3. Cookie `dbhub_access_token=<ACCESS_TOKEN>`（浏览器同源场景兜底）。
+
+Access Token 过期（401）时，响应拦截器应使用 Refresh Token 静默换取新
+令牌对并自动重放原请求一次；Refresh Token 也失效时再跳转登录页。
+浏览器在登录后应同时写入 localStorage（供前两通道）与 Cookie（通道 3）。
+
+### 1.5 健康检查
 **GET** `/api/health`（无需认证，供容器探针使用）
 
 ```bash
 curl http://localhost:8080/api/health
 ```
 
-### 1.5 统一错误码
+### 1.6 统一错误码
 
 | HTTP | code   | 含义         |
 |------|--------|--------------|
@@ -95,71 +109,21 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 2. 连接管理 (Connection)
+## 2. 早期草案（已废弃，保留仅为变更追溯）
 
-### 2.1 测试连接
-**POST** `/api/v1/connections/test`
-
-不保存配置，仅尝试建立连接以验证有效性。
-
-**Request:**
-```json
-{
-  "type": "mysql",
-  "host": "192.168.1.10",
-  "port": 3306,
-  "username": "root",
-  "password": "password",
-  "ssh_tunnel_id": null
-}
-```
-
-### 2.2 创建连接
-**POST** `/api/v1/connections`
-
-**Request:**
-`password` 字段在传输时建议使用 RSA 公钥加密，防止中间人攻击（可选高安全模式）。
+> 以下接口路径均为设计草案，**从未实现，禁止对接**：
+> `POST /api/v1/connections/test`（现行为 POST `/api/v1/connections/test` 与
+> `POST /api/v1/connections/{id}/test`，见后文「数据源管理」）、
+> `GET /api/v1/db/:connection_id/databases`（现行为
+> `GET /api/v1/metadata/databases?connection_id=`）、
+> `POST /api/v1/db/:connection_id/query`（现行为
+> `POST /api/v1/query/execute`）。SQL 参数化安全要求仍然有效：
+> 平台侧所有动态值通过数据库驱动的参数绑定/simple 协议客户端转义传递，
+> 禁止拼接用户输入。请以后续同名章节为准。
 
 ---
 
-## 3. 数据库操作 (Database Ops)
-
-### 3.1 获取数据库列表
-**GET** `/api/v1/db/:connection_id/databases`
-
-### 3.2 执行 SQL 查询
-**POST** `/api/v1/db/:connection_id/query`
-
-**Request:**
-```json
-{
-  "sql": "SELECT * FROM users WHERE status = ? LIMIT ?",
-  "args": [1, 10],  // 参数化查询参数
-  "database": "app_db"
-}
-```
-
-**Response:**
-```json
-{
-  "code": 0,
-  "data": {
-    "columns": ["id", "username", "created_at"],
-    "rows": [
-      [1, "alice", "2026-01-01T12:00:00Z"],
-      [2, "bob", "2026-01-02T13:30:00Z"]
-    ],
-    "affected_rows": 0,
-    "execution_time_ms": 45
-  }
-}
-```
-
-> **安全警告**: 禁止直接凭借接字符串构建 SQL。必须通过 `args` 数组传递参数以防止 SQL 注入。
-
----
-
-## 4. WebSocket 实时接口
+## 3. WebSocket 实时接口（规划中，当前版本未实现）
 
 用于长时间运行的任务（如大表迁移、日志流）或实时通知。
 
@@ -171,12 +135,12 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 2. 数据源管理 (Connections)
+## 4. 数据源管理 (Connections)
 
-> 除标注外均需 Bearer Access Token。写操作（POST/PUT/DELETE）仅 `admin`、`developer` 角色可用，`readonly` 返回 `40300`。
-> 普通用户仅能访问自己创建的数据源，访问他人资源返回 `40400`（防枚举）；`admin` 可见全部。
+> 除标注外均需 Access Token（三通道任一）。写操作（POST/PUT/DELETE）仅 `admin`、`developer` 角色可用，`readonly` 返回 `40300`。
+> **数据源为团队共享资源**：任何登录用户均可查看完整连接列表，并可对全部数据源执行元数据浏览、表预览与（只读）SQL；列表与使用不再按创建人过滤。`user_id` 仅记录创建者用于审计，个人可见性维度预留给后续「个人连接」类型。写操作（增删改数据源、隧道）仍在路由层按角色鉴权。
 
-### 2.1 连接列表
+### 4.1 连接列表
 **GET** `/api/v1/connections?type=postgres&keyword=prod`
 
 **Response data:**
@@ -197,7 +161,7 @@ curl http://localhost:8080/api/health
 ```
 > 接口**绝不回传口令明文或密文**，仅返回 `has_password` 布尔标志。
 
-### 2.2 创建连接
+### 4.2 创建连接
 **POST** `/api/v1/connections`
 ```json
 {
@@ -209,13 +173,13 @@ curl http://localhost:8080/api/health
 ```
 `type` 仅允许 `mysql | postgres | redis`；口令经 AES-256-GCM 加密后落库。成功返回 `201` 与连接详情。
 
-### 2.3 修改连接
+### 4.3 修改连接
 **PUT** `/api/v1/connections/{id}`，请求体同创建。`password` 留空表示保留原口令不修改。
 
-### 2.4 删除连接
+### 4.4 删除连接
 **DELETE** `/api/v1/connections/{id}`，级联删除其查询历史。
 
-### 2.5 测试连接
+### 4.5 测试连接
 - **POST** `/api/v1/connections/test`：请求体同创建（用于保存前验证，口令不落库）
 - **POST** `/api/v1/connections/{id}/test`：使用已保存凭据测试
 
@@ -227,9 +191,9 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 3. SSH 隧道 (SSH Tunnels)
+## 5. SSH 隧道 (SSH Tunnels)
 
-### 3.1 列表 / 创建 / 修改 / 删除
+### 5.1 列表 / 创建 / 修改 / 删除
 - **GET** `/api/v1/ssh-tunnels` → `{ "items": [...], "total": n }`
 - **POST** `/api/v1/ssh-tunnels`（写角色）
 - **PUT** `/api/v1/ssh-tunnels/{id}`（写角色；凭据字段留空不覆盖）
@@ -245,14 +209,14 @@ curl http://localhost:8080/api/health
 ```
 > 列表仅返回 `has_private_key / has_passphrase / has_password` 标志；私钥与口令 AES-256-GCM 加密落库。
 
-### 3.2 测试跳板连通
+### 5.2 测试跳板连通
 **POST** `/api/v1/ssh-tunnels/test`，请求体同上（支持保存前验证），成功返回 `{ "ok": true }`。
 
 ---
 
-## 4. SQL 工作台 (Query & Metadata)
+## 6. SQL 工作台 (Query & Metadata)
 
-### 4.1 执行 SQL
+### 6.1 执行 SQL
 **POST** `/api/v1/query/execute`
 ```json
 { "connection_id": 1, "database": "orders", "sql": "SELECT id, name FROM users LIMIT 100" }
@@ -273,10 +237,14 @@ curl http://localhost:8080/api/health
 - 一次只允许执行一条语句（多语句返回 `40000`，防止批量注入）；
 - 单次结果最多返回 **1000 行**，超出 `truncated=true`；
 - 语句执行超时 30 秒；
-- `readonly` 角色仅允许查询类语句，且 PostgreSQL 强制服务端只读事务；
+- `readonly` 角色由执行引擎按首关键字拦截：仅放行
+  SELECT/WITH/SHOW/DESC/EXPLAIN/TABLE/VALUES 等查询类语句，
+  INSERT/UPDATE/DELETE/DDL 等一律返回
+  `40000 只读角色禁止执行非查询语句: <KEYWORD>`（在平台引擎层拦截，
+  不依赖数据库侧只读事务，MySQL/PostgreSQL/代理连接池环境行为一致）；
 - 无论成功失败均写入查询历史（失败含 `error_message`）。
 
-### 4.2 对象浏览（均为 GET）
+### 6.2 对象浏览（均为 GET）
 | 接口 | 说明 |
 | --- | --- |
 | `/metadata/databases?connection_id=` | 逻辑库列表（自动过滤系统库） |
@@ -284,21 +252,21 @@ curl http://localhost:8080/api/health
 | `/metadata/tables?connection_id=&database=&schema=` | 表与视图（`type=table/view`） |
 | `/metadata/columns?connection_id=&database=&schema=&table=` | 列结构（类型/可空/主键/默认值/序号） |
 
-### 4.3 表数据分页预览
+### 6.3 表数据分页预览
 **GET** `/api/v1/data/preview?connection_id=1&database=orders&schema=public&table=users&page=1&page_size=50`
 ```json
 { "columns": [...], "rows": [[...]], "total": 1320, "page": 1, "page_size": 50, "has_more": true }
 ```
 > 表名/模式名经服务端标识符转义（PG 双引号、MySQL 反引号），杜绝表名注入。
 
-### 4.4 Redis 浏览（GET）
+### 6.4 Redis 浏览（GET）
 | 接口 | 说明 |
 | --- | --- |
 | `/redis/overview?connection_id=` | 版本/模式/运行天数/客户端数/内存/键空间统计 |
 | `/redis/keys?connection_id=&pattern=user:*&limit=200` | SCAN 游标遍历键（默认上限 500），含类型与 TTL |
 | `/redis/value?connection_id=&key=k` | 按类型预览值（string/list/hash/set/zset，大元素截断 100 项） |
 
-### 4.5 查询历史
+### 6.5 查询历史
 - **GET** `/api/v1/query/history?connection_id=&status=success|failed&page=1&page_size=20`
   → `{ items, total, page, page_size }`，普通用户仅本人记录，admin 全部；
 - **DELETE** `/api/v1/query/history/{id}`：删除单条（仅本人/admin）；
@@ -306,7 +274,7 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 5. 用户与角色 RBAC（仅 admin）
+## 7. 用户与角色 RBAC（仅 admin）
 
 > 所有接口需 Bearer Token 且角色为 `admin`，否则返回 `40300`。
 
@@ -320,26 +288,27 @@ curl http://localhost:8080/api/health
 | POST `/api/v1/users/{id}/reset-password` | 管理员重置密码 `{new_password}` |
 | DELETE `/api/v1/users/{id}` | 删除用户（不能删除自己；级联清理其连接/历史） |
 
-### 5.1 修改自己的密码（任意登录用户）
+### 7.1 修改自己的密码（任意登录用户）
 **POST** `/api/v1/auth/change-password`
 ```json
 { "old_password": "...", "new_password": "至少 8 位" }
 ```
 原密码错误返回 `40000`；新密码不得与原密码相同。
 
-### 5.2 角色权限矩阵
+### 7.2 角色权限矩阵
 | 能力 | admin | developer | readonly |
 | --- | --- | --- | --- |
 | 仪表盘/查看数据源 | ✅ | ✅ | ✅ |
 | 数据源/隧道增删改、测试连接 | ✅ | ✅ | ❌（403） |
-| 执行 SELECT / SHOW / EXPLAIN 等查询 | ✅ | ✅ | ✅（PG 强制只读事务） |
-| 执行 INSERT/UPDATE/DDL 等写操作 | ✅ | ✅ | ❌（400 拒绝） |
+| 浏览共享数据源（库/模式/表/预览） | ✅ | ✅ | ✅ |
+| 执行 SELECT / SHOW / EXPLAIN 等查询 | ✅ | ✅ | ✅（引擎层关键字校验） |
+| 执行 INSERT/UPDATE/DDL 等写操作 | ✅ | ✅ | ❌（400 拒绝：只读角色禁止执行非查询语句） |
 | 用户与角色管理、审计日志 | ✅ | ❌ | ❌ |
 | 修改自己的密码 | ✅ | ✅ | ✅ |
 
 ---
 
-## 6. 审计日志（仅 admin）
+## 8. 审计日志（仅 admin）
 
 **GET** `/api/v1/audit-logs?days=7&username=&action=&resource_type=&status=success|failed&page=&page_size=`
 
@@ -348,7 +317,7 @@ curl http://localhost:8080/api/health
 请求体不落库以防泄密。返回 `{ items, total, page, page_size }`。
 `action` 取值：`LOGIN / CHANGE_PASSWORD / CREATE / UPDATE / DELETE / TEST / QUERY`。
 
-## 7. 仪表盘指标（Metrics）
+## 9. 仪表盘指标（Metrics）
 
 **GET** `/api/v1/metrics/overview?days=14`
 
