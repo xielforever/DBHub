@@ -49,9 +49,7 @@ func (h *Handler) loadOwnedConnection(r *http.Request, connID int64) (*db.Connec
 	if err != nil {
 		return nil, "", nil, mapNotFound(err)
 	}
-	if !isAdmin(c) && conn.UserID != c.Subject {
-		return nil, "", nil, &httpx.AppError{Code: httpx.CodeNotFound, Message: "连接不存在"}
-	}
+	// 数据源为团队共享资源，所有登录用户均可使用；只读角色在执行引擎内禁止写语句。
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
 		t, err := h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)

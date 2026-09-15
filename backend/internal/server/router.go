@@ -84,7 +84,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("POST /api/v1/connections",
 			middleware.Chain(http.HandlerFunc(dsH.Create), requireAuth, canWrite, auditMW))
 		mux.Handle("POST /api/v1/connections/test",
-			middleware.Chain(http.HandlerFunc(dsH.TestUnpersisted), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.TestUnpersisted), requireAuth, auditMW))
 		mux.Handle("GET /api/v1/connections/{id}",
 			middleware.Chain(http.HandlerFunc(dsH.Get), requireAuth))
 		mux.Handle("PUT /api/v1/connections/{id}",

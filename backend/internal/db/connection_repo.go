@@ -68,17 +68,18 @@ func scanConnection(row pgx.Row) (*Connection, error) {
 	return c, nil
 }
 
-// List 连接列表，可按类型/关键字过滤；管理员可查看全部。
-func (r *ConnectionRepository) List(ctx context.Context, userID int64, isAdmin bool, dbType, keyword string) ([]Connection, error) {
+// List 连接列表，可按类型/关键字过滤。
+// 数据源为团队共享资源：所有登录用户均可查看与使用；userID/isAdmin 仅用于
+// 未来的「个人连接」可见性扩展，当前不做归属过滤（写操作仍在 handler 层鉴权）。
+func (r *ConnectionRepository) List(ctx context.Context, dbType, keyword string) ([]Connection, error) {
 	like := "%" + keyword + "%"
 	q := `SELECT ` + connSelectCols + `
 		FROM sys_connections c
 		LEFT JOIN sys_ssh_tunnels t ON t.id = c.ssh_tunnel_id
-		WHERE ($2 OR c.user_id = $1)
-		  AND ($3 = '' OR c.type = $3)
-		  AND ($4 = '' OR c.name ILIKE $4 OR c.host ILIKE $4)
+		WHERE ($1 = '' OR c.type = $1)
+		  AND ($2 = '' OR c.name ILIKE $2 OR c.host ILIKE $2)
 		ORDER BY c.id DESC`
-	rows, err := r.pool.Query(ctx, q, userID, isAdmin, dbType, like)
+	rows, err := r.pool.Query(ctx, q, dbType, like)
 	if err != nil {
 		return nil, fmt.Errorf("查询连接列表失败: %w", err)
 	}

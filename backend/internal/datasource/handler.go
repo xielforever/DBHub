@@ -115,10 +115,10 @@ func idFromPath(r *http.Request) (int64, error) {
 
 // List GET /api/v1/connections
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
 	dbType := r.URL.Query().Get("type")
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
-	list, err := h.conns.List(r.Context(), c.Subject, isAdmin(c), dbType, keyword)
+	// 数据源为团队共享资源：列表对所有登录用户可见，写操作在路由中间件鉴权。
+	list, err := h.conns.List(r.Context(), dbType, keyword)
 	if err != nil {
 		httpx.Fail(w, httpx.Internal("查询连接列表失败", err))
 		return
@@ -165,7 +165,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Get GET /api/v1/connections/{id}
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
 	id, err := idFromPath(r)
 	if err != nil {
 		httpx.Fail(w, err)
@@ -176,10 +175,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	if !isAdmin(c) && conn.UserID != c.Subject {
-		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "连接不存在"})
-		return
-	}
+	// 数据源为团队共享资源，所有登录用户均可查看元数据；口令不随详情返回。
 	httpx.OK(w, conn)
 }
 
@@ -277,7 +273,6 @@ func (h *Handler) TestUnpersisted(w http.ResponseWriter, r *http.Request) {
 
 // TestPersisted POST /api/v1/connections/{id}/test 使用已保存凭据测试。
 func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
 	id, err := idFromPath(r)
 	if err != nil {
 		httpx.Fail(w, err)
@@ -288,10 +283,7 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	if !isAdmin(c) && conn.UserID != c.Subject {
-		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "连接不存在"})
-		return
-	}
+	// 共享数据源，所有登录用户均可发起连通性测试。
 	h.runTest(w, r, conn, password)
 }
 
