@@ -143,11 +143,19 @@
               >
                 <td class="py-3 text-white/80 whitespace-nowrap">{{ row.connection }}</td>
                 <td class="py-3">
-                  <code class="text-xs text-indigo-200/80 bg-indigo-400/10 px-2 py-1 rounded">{{ row.sql }}</code>
+                  <code
+                    class="text-xs px-2 py-1 rounded"
+                    :class="row.failed ? 'text-rose-200/80 bg-rose-400/10' : 'text-indigo-200/80 bg-indigo-400/10'"
+                  >{{ row.sql }}</code>
                 </td>
                 <td class="py-3 text-white/60 whitespace-nowrap">{{ row.duration }}</td>
-                <td class="py-3 text-white/60 tabular-nums">{{ row.rows }}</td>
+                <td class="py-3 tabular-nums" :class="row.failed ? 'text-rose-300/80' : 'text-white/60'">{{ row.rows }}</td>
                 <td class="py-3 text-white/35 whitespace-nowrap">{{ row.time }}</td>
+              </tr>
+              <tr v-if="!recentQueries.length">
+                <td colspan="5" class="py-10 text-center text-white/35 text-sm">
+                  暂无查询记录，去 SQL 工作台执行第一条查询吧
+                </td>
               </tr>
             </tbody>
           </table>
@@ -158,20 +166,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
 import { gsap } from 'gsap'
 import type { EChartsCoreOption } from 'echarts/core'
 import {
   Activity,
   BarChart3,
   Database,
-  Gauge,
   RefreshCw,
   ScrollText,
   TrendingUp,
+  Users,
 } from 'lucide-vue-next'
 import EChart from '../../components/base/EChart.vue'
 import { useUserStore } from '../../stores/user'
+import { dashboardApi, type MetricsOverview } from '../../api/dashboard'
 
 const userStore = useUserStore()
 const rootRef = ref<HTMLElement>()
@@ -192,15 +201,6 @@ const glassTooltip = {
   extraCssText: 'backdrop-filter: blur(20px); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4);',
 }
 
-/* ---------- 确定性伪随机（保证同一范围数据稳定） ---------- */
-function seededRandom(seed: number) {
-  let s = seed
-  return () => {
-    s = (s * 9301 + 49297) % 233280
-    return s / 233280
-  }
-}
-
 /* ---------- KPI ---------- */
 interface Kpi {
   key: string
@@ -214,10 +214,10 @@ interface Kpi {
   spark: number[]
 }
 const kpis = reactive<Kpi[]>([
-  { key: 'sources', label: '数据源总数', value: 24, delta: '+3 本周', up: true, icon: Database, color: '#818cf8', tint: 'rgba(102,126,234,0.18)', spark: [] },
-  { key: 'queries', label: '今日查询数', value: 1284, delta: '+12.4%', up: true, icon: Activity, color: '#34d399', tint: 'rgba(16,185,129,0.18)', spark: [] },
-  { key: 'sessions', label: '活跃会话', value: 37, delta: '+5', up: true, icon: Gauge, color: '#f472b6', tint: 'rgba(236,72,153,0.16)', spark: [] },
-  { key: 'audits', label: '审计事件', value: 592, delta: '-2.1%', up: false, icon: ScrollText, color: '#fbbf24', tint: 'rgba(251,191,36,0.16)', spark: [] },
+  { key: 'sources', label: '数据源总数', value: 0, delta: '已纳管', up: true, icon: Database, color: '#818cf8', tint: 'rgba(102,126,234,0.18)', spark: [] },
+  { key: 'queries', label: '今日查询数', value: 0, delta: '今日', up: true, icon: Activity, color: '#34d399', tint: 'rgba(16,185,129,0.18)', spark: [] },
+  { key: 'active_users', label: '今日活跃用户', value: 0, delta: '今日', up: true, icon: Users, color: '#f472b6', tint: 'rgba(236,72,153,0.16)', spark: [] },
+  { key: 'audits', label: '审计事件', value: 0, delta: '累计', up: true, icon: ScrollText, color: '#fbbf24', tint: 'rgba(251,191,36,0.16)', spark: [] },
 ])
 const animated = reactive<Record<string, number>>({})
 
@@ -263,25 +263,15 @@ const trend = reactive<{ labels: string[]; queries: number[]; slow: number[] }>(
   labels: [], queries: [], slow: [],
 })
 
-function buildTrend(days: number, salt = 0) {
-  const rand = seededRandom(days * 7919 + salt + 1)
-  const labels: string[] = []
-  const queries: number[] = []
-  const slow: number[] = []
-  const todayDate = new Date()
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(todayDate)
-    d.setDate(todayDate.getDate() - i)
-    labels.push(`${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
-    const weekday = d.getDay()
-    const weekendDip = weekday === 0 || weekday === 6 ? 0.55 : 1
-    const base = 420 + Math.sin(i / 2.4) * 160 + rand() * 380
-    queries.push(Math.round(base * weekendDip))
-    slow.push(Math.round(8 + rand() * 34))
-  }
-  trend.labels = labels
-  trend.queries = queries
-  trend.slow = slow
+function mmdd(iso: string) {
+  const [, m, d] = iso.split('-')
+  return `${m}-${d}`
+}
+
+function applyTrend(data: MetricsOverview['trend']) {
+  trend.labels = data.map((t) => mmdd(t.date))
+  trend.queries = data.map((t) => t.total)
+  trend.slow = data.map((t) => t.slow)
 }
 
 const axisCommon = {
@@ -393,16 +383,13 @@ const trendOption = computed<EChartsCoreOption>(() => {
 
 function switchRange(days: number) {
   rangeDays.value = days
-  buildTrend(days)
+  loadOverview(days, { animate: false })
 }
 
 /* ---------- 数据源分布环图（悬停中心联动） ---------- */
-const distribution = reactive([
-  { label: 'MySQL', value: 13, percent: 54, color: '#818cf8' },
-  { label: 'PostgreSQL', value: 7, percent: 29, color: '#a78bfa' },
-  { label: 'Redis', value: 4, percent: 17, color: '#f472b6' },
-])
-const centerValue = ref(24)
+const distribution = reactive<{ label: string; value: number; percent: number; color: string }[]>([])
+const totalSources = ref(0)
+const centerValue = ref(0)
 const centerName = ref('数据源')
 
 const donutOption = computed<EChartsCoreOption>(() => ({
@@ -472,18 +459,12 @@ function highlightSlice(index: number) {
 function clearHighlight() {
   const chart = donutChartRef.value?.getChart()
   chart?.dispatchAction({ type: 'downplay', seriesIndex: 0 })
-  centerValue.value = 24
+  centerValue.value = totalSources.value
   centerName.value = '数据源'
 }
 
 /* ---------- 库查询量排行 ---------- */
-const rankData = [
-  { name: 'sales_db', value: 4820 },
-  { name: 'user_center', value: 3660 },
-  { name: 'billing', value: 2410 },
-  { name: 'analytics', value: 1880 },
-  { name: 'session_cache', value: 960 },
-]
+const rankData = ref<{ name: string; value: number }[]>([])
 const rankOption = computed<EChartsCoreOption>(() => ({
   animationDuration: 900,
   animationDelay: (idx: number) => idx * 90,
@@ -503,7 +484,7 @@ const rankOption = computed<EChartsCoreOption>(() => ({
   yAxis: {
     type: 'category',
     inverse: true,
-    data: rankData.map((d) => d.name),
+    data: rankData.value.map((d) => d.name),
     axisLine: { show: false },
     axisTick: { show: false },
     axisLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 11 },
@@ -512,7 +493,7 @@ const rankOption = computed<EChartsCoreOption>(() => ({
     {
       type: 'bar',
       barWidth: 12,
-      data: rankData.map((d) => d.value),
+      data: rankData.value.map((d) => d.value),
       itemStyle: {
         borderRadius: [0, 6, 6, 0],
         color: {
@@ -546,13 +527,30 @@ const rankOption = computed<EChartsCoreOption>(() => ({
 }))
 
 /* ---------- 最近查询 ---------- */
-const recentQueries = [
-  { connection: 'sales-prod-mysql', sql: 'SELECT * FROM orders WHERE created_at > ?', duration: '45ms', rows: '2,130', time: '2 分钟前' },
-  { connection: 'user-center-pg', sql: 'UPDATE users SET status = ? WHERE id = ?', duration: '12ms', rows: '1', time: '14 分钟前' },
-  { connection: 'cache-redis-01', sql: 'GET session:user:8821', duration: '2ms', rows: '1', time: '31 分钟前' },
-  { connection: 'sales-prod-mysql', sql: 'SELECT COUNT(*) FROM customers', duration: '180ms', rows: '1', time: '1 小时前' },
-  { connection: 'billing-postgres', sql: 'SELECT sum(amount) FROM invoices', duration: '96ms', rows: '1', time: '2 小时前' },
-]
+interface RecentRow {
+  connection: string
+  sql: string
+  duration: string
+  rows: string
+  time: string
+  failed: boolean
+}
+const recentQueries = ref<RecentRow[]>([])
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return `${hour} 小时前`
+  return `${Math.floor(hour / 24)} 天前`
+}
+
+function compactSQL(sql: string): string {
+  const oneLine = sql.replace(/\s+/g, ' ').trim()
+  return oneLine.length > 60 ? oneLine.slice(0, 60) + '…' : oneLine
+}
 
 /* ---------- 数字滚动 ---------- */
 function countUp() {
@@ -570,24 +568,82 @@ function countUp() {
   })
 }
 
-function buildSparks(salt = 0) {
-  kpis.forEach((kpi, i) => {
-    const rand = seededRandom(i * 131 + salt + 7)
-    const base = [40, 30, 50, 55][i] ?? 40
-    kpi.spark = Array.from({ length: 14 }, (_, j) =>
-      Math.round(base + Math.sin(j / 2 + i) * 18 + rand() * 28),
+/* ---------- 数据加载 ---------- */
+const loading = ref(false)
+let loadedOnce = false
+
+async function loadOverview(days: number, opts: { animate?: boolean } = {}) {
+  loading.value = true
+  try {
+    const data = await dashboardApi.overview(days)
+    applyTrend(data.trend)
+
+    // KPI 数值
+    const valueByKey: Record<string, number> = {
+      sources: data.kpi.connections,
+      queries: data.kpi.today_queries,
+      active_users: data.kpi.today_active_users,
+      audits: data.kpi.audit_events,
+    }
+    kpis.forEach((kpi) => {
+      kpi.value = valueByKey[kpi.key] ?? 0
+    })
+
+    // 迷你走势：查询卡用真实每日总量，其余用平坦线表示累计/瞬时指标
+    const realTrend = data.trend.map((t) => t.total)
+    kpis.forEach((kpi) => {
+      kpi.spark = kpi.key === 'queries' && realTrend.length >= 2 ? realTrend : [kpi.value, kpi.value]
+    })
+
+    // 类型分布
+    const typeMeta: Array<{ key: string; label: string; color: string }> = [
+      { key: 'mysql', label: 'MySQL', color: '#818cf8' },
+      { key: 'postgres', label: 'PostgreSQL', color: '#a78bfa' },
+      { key: 'redis', label: 'Redis', color: '#f472b6' },
+    ]
+    totalSources.value = data.kpi.connections
+    distribution.splice(
+      0,
+      distribution.length,
+      ...typeMeta.map((t) => {
+        const value = data.connection_types?.[t.key] ?? 0
+        return {
+          label: t.label,
+          value,
+          percent: totalSources.value ? Math.round((value / totalSources.value) * 100) : 0,
+          color: t.color,
+        }
+      }),
     )
-  })
+    centerValue.value = totalSources.value
+    centerName.value = '数据源'
+
+    // 排行
+    rankData.value = data.rank.slice(0, 8).map((r) => ({ name: r.name, value: r.count }))
+
+    // 最近查询
+    recentQueries.value = data.recent.map((h) => ({
+      connection: h.connection_name || `#${h.connection_id}`,
+      sql: compactSQL(h.sql_text),
+      duration: `${h.execution_time_ms ?? 0}ms`,
+      rows: h.affected_rows != null ? h.affected_rows.toLocaleString() : h.status === 1 ? '—' : '失败',
+      time: relativeTime(h.created_at),
+      failed: h.status !== 1,
+    }))
+
+    if (opts.animate !== false || !loadedOnce) {
+      countUp()
+    }
+    loadedOnce = true
+  } finally {
+    loading.value = false
+  }
 }
 
 function refresh() {
   if (spinning.value) return
   spinning.value = true
-  // 模拟实时数据刷新：趋势数据加扰动
-  buildTrend(rangeDays.value, Date.now() % 1000)
-  buildSparks(Date.now() % 1000)
-  countUp()
-  setTimeout(() => (spinning.value = false), 700)
+  loadOverview(rangeDays.value).finally(() => setTimeout(() => (spinning.value = false), 600))
 }
 
 /* ---------- 入场动画 ---------- */
@@ -612,12 +668,11 @@ function playEntrance() {
 
 let entranceCtx: gsap.Context | undefined
 
-onMounted(() => {
-  buildTrend(rangeDays.value)
-  buildSparks()
-  countUp()
+onMounted(async () => {
+  await loadOverview(rangeDays.value)
   entranceCtx = playEntrance()
-  // 环形图悬停 -> 中心数字联动
+  // 环形图悬停 -> 中心数字联动（数据加载后绑定）
+  await nextTick()
   const chart = donutChartRef.value?.getChart()
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   chart?.on('mouseover', (params: any) => {
@@ -627,7 +682,7 @@ onMounted(() => {
     }
   })
   chart?.on('globalout', () => {
-    centerValue.value = 24
+    centerValue.value = totalSources.value
     centerName.value = '数据源'
   })
 })
