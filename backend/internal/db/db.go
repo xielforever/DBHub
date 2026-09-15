@@ -34,9 +34,15 @@ func Connect(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, er
 	config.MaxConnLifetime = time.Hour
 	config.MaxConnIdleTime = 10 * time.Minute
 	config.ConnConfig.ConnectTimeout = 8 * time.Second
-	// 使用扩展协议但不缓存服务端命名预编译语句，避免连接复用下的
-	// prepared statement 冲突，同时保留参数绑定与完整类型支持
-	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	// simple 协议：参数由 pgx 客户端按标准转义后内联，天然不存在连接复用下
+	// 的 prepared statement 冲突，也能兼容对扩展协议参数类型推断不完整的
+	// 线协议代理（如开发期 PGlite Server）与 PgBouncer 事务池；转义由 pgx
+	// 完成（要求 standard_conforming_strings=on），不引入字符串拼接注入面。
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	if config.ConnConfig.RuntimeParams == nil {
+		config.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	config.ConnConfig.RuntimeParams["standard_conforming_strings"] = "on"
 
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {

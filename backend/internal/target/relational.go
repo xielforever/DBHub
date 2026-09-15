@@ -212,7 +212,7 @@ func Databases(ctx context.Context, h *RelDB) ([]NameItem, error) {
 	case "mysql":
 		q = "SHOW DATABASES"
 	case "postgres":
-		q = "SELECT datname FROM pg_database WHERE datallowconn ORDER BY 1"
+		q = "SELECT datname FROM pg_database WHERE datallowconn AND datname NOT LIKE 'template%' ORDER BY 1"
 	}
 	rows, err := h.db.QueryContext(ctx, q)
 	if err != nil {
@@ -271,7 +271,7 @@ func Tables(ctx context.Context, h *RelDB, database, schema string) ([]TableInfo
 	case "postgres":
 		q = `SELECT table_schema, table_name, table_type
 			FROM information_schema.tables
-			WHERE table_schema = IFNULL(NULLIF($1, ''), 'public')
+			WHERE table_schema = COALESCE(NULLIF($1, ''), 'public')
 			ORDER BY table_name`
 		args = append(args, schema)
 	}
@@ -325,7 +325,7 @@ func Columns(ctx context.Context, h *RelDB, database, schema, table string) ([]C
 				LIMIT 1), ''),
 			COALESCE(c.column_default, ''), c.ordinal_position
 			FROM information_schema.columns c
-			WHERE c.table_schema = IFNULL(NULLIF($1, ''), 'public') AND c.table_name = $2
+			WHERE c.table_schema = COALESCE(NULLIF($1, ''), 'public') AND c.table_name = $2
 			ORDER BY c.ordinal_position`
 		args = append(args, schema, table)
 	}

@@ -127,10 +127,12 @@ func OpenRelational(ctx context.Context, conn *db.Connection, password string, t
 		}
 		// 使用 URL 形式 DSN，对口令/库名做百分号编码，避免特殊字符破坏解析。
 		u := &url.URL{
-			Scheme:   "postgres",
-			Host:     net.JoinHostPort(conn.Host, strconv.Itoa(conn.Port)),
-			Path:     "/" + dbName,
-			RawQuery: fmt.Sprintf("sslmode=%s&connect_timeout=%d", sslMode, int(timeout.Seconds())),
+			Scheme: "postgres",
+			Host:   net.JoinHostPort(conn.Host, strconv.Itoa(conn.Port)),
+			Path:   "/" + dbName,
+			// standard_conforming_strings 是 pgx simple 协议客户端转义参数的前提
+			RawQuery: fmt.Sprintf("sslmode=%s&connect_timeout=%d&standard_conforming_strings=on",
+				sslMode, int(timeout.Seconds())),
 		}
 		if conn.Username != "" {
 			u.User = url.UserPassword(conn.Username, password)
@@ -149,6 +151,10 @@ func OpenRelational(ctx context.Context, conn *db.Connection, password string, t
 			return nil, err
 		}
 		poolCfg.ConnConfig = pgCfg
+		// 目标库为请求级短连接，使用 simple 协议：由 pgx 在客户端完成参数转义
+		//（仍是驱动层参数化，防注入），同时兼容仅完整实现 simple 协议的
+		// 线协议网关（如 PGlite wire server）与 PgBouncer transaction 模式。
+		poolCfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 		poolCfg.MaxConns = 4
 		poolCfg.MaxConnLifetime = 3 * time.Minute
 		pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
@@ -167,7 +173,7 @@ func OpenRelational(ctx context.Context, conn *db.Connection, password string, t
 	defer cancel()
 	if err := handle.db.PingContext(pingCtx); err != nil {
 		handle.Close()
-		return nil, err
+		return nil, friendlyDialErr(err, conn.Host, conn.Port)
 	}
 	handle.Database = currentDatabase(ctx, handle)
 	return handle, nil
@@ -225,7 +231,7 @@ func OpenRedis(ctx context.Context, conn *db.Connection, password string, tunnel
 		if closeTunnel != nil {
 			_ = closeTunnel()
 		}
-		return nil, err
+		return nil, friendlyDialErr(err, conn.Host, conn.Port)
 	}
 	return &RedisClient{Client: client, closer: closeTunnel}, nil
 }
