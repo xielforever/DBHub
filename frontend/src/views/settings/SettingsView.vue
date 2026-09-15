@@ -7,7 +7,7 @@
 
     <section class="glass-card p-6">
       <h2 class="font-medium mb-4">个人资料</h2>
-      <div class="grid grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label class="block text-xs text-white/55 mb-1.5">用户名</label>
           <input class="glass-input" :value="userStore.username" disabled />

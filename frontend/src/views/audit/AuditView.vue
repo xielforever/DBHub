@@ -13,21 +13,20 @@
         range-separator="至"
         start-placeholder="开始日期"
         end-placeholder="结束日期"
-        class="!w-72"
+        class="!w-full sm:!w-72"
       />
-      <select v-model="actionFilter" class="glass-input w-36 appearance-none text-sm">
+      <select v-model="actionFilter" class="glass-input w-full sm:w-36 appearance-none text-sm">
         <option value="">全部操作</option>
         <option value="LOGIN">登录</option>
         <option value="QUERY">查询</option>
         <option value="CONNECT">连接</option>
         <option value="DELETE">删除</option>
       </select>
-      <div class="relative w-64">
+      <div class="relative w-full sm:w-64 sm:flex-1 sm:max-w-64">
         <Search class="w-4 h-4 text-white/35 absolute left-3.5 top-1/2 -translate-y-1/2" />
         <input v-model.trim="keyword" class="glass-input pl-10 text-sm" placeholder="搜索用户 / 资源名称" />
       </div>
-      <div class="flex-1" />
-      <button class="ghost-button flex items-center gap-2 text-sm" @click="todo">
+      <button class="ghost-button flex items-center justify-center gap-2 text-sm w-full sm:w-auto sm:ml-auto" @click="todo">
         <Download class="w-4 h-4" /> 导出
       </button>
     </div>
@@ -60,7 +59,7 @@
         </el-table-column>
         <el-table-column prop="duration" label="耗时" width="100" />
       </el-table>
-      <div class="flex items-center justify-between px-4 py-3 border-t border-white/10">
+      <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-white/10">
         <span class="text-xs text-white/40">共 {{ filteredLogs.length }} 条记录（示例数据）</span>
         <el-pagination
           v-model:current-page="page"
@@ -68,6 +67,7 @@
           :total="filteredLogs.length"
           layout="prev, pager, next"
           background
+          small
         />
       </div>
     </div>

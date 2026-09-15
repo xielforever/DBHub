@@ -175,3 +175,19 @@ html.dark {
 .glass-dialog .el-dialog__body {
   padding-top: 1.25rem;
 }
+
+/* 侧边抽屉玻璃化 */
+.glass-drawer .el-drawer {
+  background: rgba(15, 23, 42, 0.96);
+  backdrop-filter: blur(28px);
+}
+.glass-drawer .el-drawer__header {
+  margin-bottom: 0;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-weight: 600;
+}
+.glass-drawer .el-drawer__body {
+  padding: 0.75rem;
+}

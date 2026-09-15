@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- 欢迎条 -->
-    <header class="flex items-end justify-between">
+    <header class="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
       <div>
         <h1 class="text-xl font-semibold">早上好，{{ userStore.username || '管理员' }}</h1>
         <p class="text-sm text-white/45 mt-1">以下是平台今日运行概览（示例数据）</p>
@@ -96,7 +96,7 @@
     <section class="glass-card p-5">
       <h2 class="font-medium mb-4">最近查询历史</h2>
       <div class="overflow-x-auto">
-        <table class="w-full text-sm">
+        <table class="w-full min-w-[560px] text-sm">
           <thead>
             <tr class="text-left text-white/40 text-xs border-b border-white/10">
               <th class="pb-3 font-medium">数据源</th>

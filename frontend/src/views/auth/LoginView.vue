@@ -13,7 +13,7 @@
     />
 
     <section
-      class="glass-card w-full max-w-md p-10 relative z-10 animate-fade-up"
+      class="glass-card w-full max-w-md p-6 sm:p-10 relative z-10 animate-fade-up"
       aria-label="登录卡片"
     >
       <!-- 品牌区 -->

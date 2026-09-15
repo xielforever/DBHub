@@ -1,23 +1,23 @@
 <template>
   <div class="space-y-5">
-    <header class="flex items-center justify-between">
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">数据源管理</h1>
         <p class="text-sm text-white/45 mt-1">统一纳管 MySQL / PostgreSQL / Redis 连接，凭据全程加密存储</p>
       </div>
-      <button class="liquid-button flex items-center gap-2" @click="dialogVisible = true">
+      <button class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="dialogVisible = true">
         <Plus class="w-4 h-4" />
         新建连接
       </button>
     </header>
 
     <!-- 搜索筛选 -->
-    <div class="flex items-center gap-3">
-      <div class="relative w-72">
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="relative w-full sm:w-72">
         <Search class="w-4 h-4 text-white/35 absolute left-3.5 top-1/2 -translate-y-1/2" />
         <input v-model.trim="keyword" class="glass-input pl-10" placeholder="搜索数据源名称或主机" />
       </div>
-      <select v-model="typeFilter" class="glass-input w-44 appearance-none cursor-pointer">
+      <select v-model="typeFilter" class="glass-input w-full sm:w-44 appearance-none cursor-pointer">
         <option value="">全部类型</option>
         <option value="mysql">MySQL</option>
         <option value="postgres">PostgreSQL</option>
@@ -85,7 +85,7 @@
     <el-dialog
       v-model="dialogVisible"
       title="新建连接"
-      width="560px"
+      :width="dialogWidth"
       :close-on-click-modal="false"
       class="glass-dialog"
     >
@@ -103,8 +103,8 @@
         </el-form-item>
 
         <p class="text-xs text-white/45 mb-3 mt-4">连接信息</p>
-        <div class="grid grid-cols-3 gap-3">
-          <el-form-item label="主机" class="col-span-2">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <el-form-item label="主机" class="sm:col-span-2">
             <el-input v-model="form.host" placeholder="192.168.1.10" />
           </el-form-item>
           <el-form-item label="端口">
@@ -114,7 +114,7 @@
         <el-form-item label="默认数据库">
           <el-input v-model="form.database" placeholder="可选" />
         </el-form-item>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <el-form-item label="用户名">
             <el-input v-model="form.username" />
           </el-form-item>
@@ -140,7 +140,7 @@
             </span>
             <ChevronDown class="w-4 h-4 transition-transform" :class="{ 'rotate-180': sshExpanded }" />
           </button>
-          <div v-if="sshExpanded" class="grid grid-cols-2 gap-3 mt-3">
+          <div v-if="sshExpanded" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <el-form-item label="跳板机主机">
               <el-input v-model="form.sshHost" />
             </el-form-item>
@@ -161,11 +161,11 @@
       </el-form>
 
       <template #footer>
-        <div class="flex items-center justify-between">
+        <div class="flex flex-wrap items-center justify-between gap-2">
           <button class="ghost-button flex items-center gap-2" @click="todo">
             <Zap class="w-4 h-4" /> 测试连接
           </button>
-          <div class="flex gap-2">
+          <div class="flex gap-2 ml-auto">
             <button class="ghost-button" @click="dialogVisible = false">取消</button>
             <button class="liquid-button" @click="todo">保存</button>
           </div>
@@ -176,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -235,6 +235,15 @@ const form = reactive({
   username: '', password: '', sslMode: 'require',
   sshHost: '', sshPort: 22, sshUsername: '', sshAuthType: 'private_key',
 })
+
+/** 弹窗宽度随视口自适应 */
+const viewportWidth = ref(window.innerWidth)
+const dialogWidth = computed(() => (viewportWidth.value < 640 ? '92vw' : '600px'))
+function onResize() {
+  viewportWidth.value = window.innerWidth
+}
+onMounted(() => window.addEventListener('resize', onResize))
+onBeforeUnmount(() => window.removeEventListener('resize', onResize))
 
 function todo() {
   ElMessage.info('连接管理后端接口开发中，敬请期待')

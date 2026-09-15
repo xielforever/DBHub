@@ -1,80 +1,121 @@
 <template>
   <div class="h-screen flex overflow-hidden">
-    <!-- 一级：图标导航栏 -->
-    <nav
-      class="glass-rail w-16 shrink-0 flex flex-col items-center py-4 gap-2 z-20"
+    <!-- 移动端遮罩 -->
+    <Transition name="fade">
+      <div
+        v-if="mobileOpen"
+        class="fixed inset-0 z-30 bg-black/50 backdrop-blur-sm lg:hidden"
+        aria-hidden="true"
+        @click="mobileOpen = false"
+      />
+    </Transition>
+
+    <!-- 侧边栏：移动端抽屉，桌面端常驻且可折叠 -->
+    <aside
+      class="fixed lg:static inset-y-0 left-0 z-40 w-64 flex flex-col glass-rail
+             transition-all duration-300 ease-out"
+      :class="[
+        collapsed ? 'lg:w-[4.5rem]' : 'lg:w-60',
+        mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+      ]"
       aria-label="主导航"
     >
-      <RouterLink to="/dashboard" class="mb-3" aria-label="DBHub 首页">
+      <!-- 品牌区 -->
+      <div class="h-16 shrink-0 flex items-center gap-3 px-4 border-b border-white/10">
         <span
-          class="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg"
+          class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-lg"
           style="background-image: var(--image-liquid-gradient)"
         >
           <DatabaseZap class="w-5 h-5 text-white" />
         </span>
-      </RouterLink>
-
-      <RouterLink
-        v-for="item in railItems"
-        :key="item.name"
-        :to="item.to"
-        class="rail-icon"
-        :aria-label="item.title"
-      >
-        <component :is="item.icon" class="w-5 h-5" />
-      </RouterLink>
-
-      <div class="flex-1" />
-      <RouterLink to="/settings" class="rail-icon" aria-label="系统设置">
-        <Settings class="w-5 h-5" />
-      </RouterLink>
-    </nav>
-
-    <!-- 二级：功能侧边栏 -->
-    <aside
-      class="w-60 shrink-0 flex flex-col z-10 bg-white/[0.03] border-r border-white/10"
-      aria-label="模块导航"
-    >
-      <div class="px-5 pt-6 pb-4">
-        <h2 class="text-base font-semibold tracking-wide">{{ currentTitle }}</h2>
-        <p class="text-xs text-white/40 mt-1">{{ currentSubtitle }}</p>
+        <div v-if="!collapsed" class="leading-tight overflow-hidden">
+          <p class="font-bold tracking-wide whitespace-nowrap">DBHub</p>
+          <p class="text-[10px] text-white/40 whitespace-nowrap">数据管理平台</p>
+        </div>
+        <button
+          class="ml-auto w-8 h-8 flex items-center justify-center rounded-lg text-white/50 hover:bg-white/10 hover:text-white lg:hidden"
+          aria-label="关闭导航"
+          @click="mobileOpen = false"
+        >
+          <X class="w-4.5 h-4.5" />
+        </button>
       </div>
 
-      <nav class="flex-1 px-3 space-y-1 overflow-y-auto">
-        <template v-for="group in menuGroups" :key="group.label">
-          <p class="px-3.5 pt-4 pb-2 text-[11px] uppercase tracking-widest text-white/30">
-            {{ group.label }}
-          </p>
-          <RouterLink
-            v-for="item in group.items"
-            :key="item.name"
-            :to="item.to"
-            class="nav-item"
-          >
-            <component :is="item.icon" class="w-4 h-4 shrink-0" />
-            <span>{{ item.title }}</span>
-          </RouterLink>
-        </template>
+      <!-- 一级菜单（全站仅 5 个真实页面，不再设二级重复导航） -->
+      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+        <p
+          class="px-3 pb-2 text-[11px] uppercase tracking-widest text-white/30"
+          :class="collapsed ? 'lg:hidden' : ''"
+        >
+          导航菜单
+        </p>
+        <RouterLink
+          v-for="item in menu"
+          :key="item.name"
+          :to="item.to"
+          class="nav-item"
+          :class="collapsed ? 'lg:justify-center lg:px-2' : ''"
+          :title="item.label"
+        >
+          <component :is="item.icon" class="w-5 h-5 shrink-0" />
+          <span class="whitespace-nowrap" :class="collapsed ? 'lg:hidden' : ''">{{ item.label }}</span>
+        </RouterLink>
       </nav>
 
-      <!-- 后端健康状态 -->
-      <div class="m-3 p-3 rounded-xl bg-white/5 border border-white/10">
-        <div class="flex items-center gap-2 text-xs text-white/55">
+      <!-- 底部：健康状态 + 设置 -->
+      <div class="p-3 space-y-2 border-t border-white/10">
+        <div
+          class="flex items-center gap-2 px-2 py-2 rounded-xl text-xs text-white/55"
+          :class="collapsed ? 'lg:justify-center lg:px-0' : ''"
+        >
           <span
-            class="w-1.5 h-1.5 rounded-full"
+            class="w-1.5 h-1.5 rounded-full shrink-0"
             :class="healthOk ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'"
           />
-          后端 {{ healthOk ? '在线' : '检测中' }}
+          <span class="whitespace-nowrap" :class="collapsed ? 'lg:hidden' : ''">
+            后端{{ healthOk ? '在线' : '检测中' }}
+          </span>
         </div>
+        <RouterLink
+          to="/settings"
+          class="nav-item"
+          :class="collapsed ? 'lg:justify-center lg:px-2' : ''"
+          title="系统设置"
+        >
+          <Settings class="w-5 h-5 shrink-0" />
+          <span class="whitespace-nowrap" :class="collapsed ? 'lg:hidden' : ''">系统设置</span>
+        </RouterLink>
       </div>
     </aside>
 
     <!-- 主区域 -->
     <div class="flex-1 flex flex-col min-w-0">
       <header
-        class="h-16 shrink-0 flex items-center gap-4 px-6 border-b border-white/10 bg-white/5 backdrop-blur-xl z-10"
+        class="h-16 shrink-0 flex items-center gap-2 sm:gap-4 px-4 sm:px-6 border-b border-white/10 bg-white/5 backdrop-blur-xl z-10"
       >
-        <div class="flex-1 max-w-md relative">
+        <!-- 移动端汉堡按钮 -->
+        <button
+          class="w-9 h-9 flex items-center justify-center rounded-xl text-white/60 hover:bg-white/10 hover:text-white transition-colors lg:hidden"
+          aria-label="打开导航"
+          @click="mobileOpen = true"
+        >
+          <Menu class="w-5 h-5" />
+        </button>
+        <!-- 桌面端折叠按钮 -->
+        <button
+          class="hidden lg:flex w-9 h-9 items-center justify-center rounded-xl text-white/60 hover:bg-white/10 hover:text-white transition-colors"
+          :aria-label="collapsed ? '展开侧边栏' : '折叠侧边栏'"
+          @click="toggleCollapsed"
+        >
+          <PanelLeftClose v-if="!collapsed" class="w-5 h-5" />
+          <PanelLeftOpen v-else class="w-5 h-5" />
+        </button>
+
+        <!-- 当前页面标题 -->
+        <h1 class="text-sm sm:text-base font-medium whitespace-nowrap">{{ currentTitle }}</h1>
+
+        <!-- 全局搜索（中等屏幕以上） -->
+        <div class="flex-1 max-w-md mx-auto hidden md:block relative">
           <Search class="w-4 h-4 text-white/35 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             class="glass-input pl-10 py-2 text-sm"
@@ -82,21 +123,24 @@
             type="text"
           />
         </div>
-        <div class="flex-1" />
+        <div class="flex-1 md:hidden" />
 
-        <button class="w-9 h-9 rounded-xl flex items-center justify-center text-white/55 hover:bg-white/10 hover:text-white transition-colors" aria-label="通知">
+        <button
+          class="w-9 h-9 rounded-xl flex items-center justify-center text-white/55 hover:bg-white/10 hover:text-white transition-colors shrink-0"
+          aria-label="通知"
+        >
           <Bell class="w-5 h-5" />
         </button>
 
         <el-dropdown trigger="click" @command="onUserCommand">
-          <button class="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl hover:bg-white/10 transition-colors">
+          <button class="flex items-center gap-2.5 pl-1 pr-2 sm:pr-3 py-1.5 rounded-xl hover:bg-white/10 transition-colors">
             <span
-              class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold"
+              class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0"
               style="background-image: var(--image-liquid-gradient)"
             >
               {{ avatarText }}
             </span>
-            <span class="text-sm text-white/85">{{ userStore.username || '未登录' }}</span>
+            <span class="text-sm text-white/85 hidden sm:inline">{{ userStore.username || '未登录' }}</span>
             <ChevronDown class="w-4 h-4 text-white/40" />
           </button>
           <template #dropdown>
@@ -108,7 +152,7 @@
         </el-dropdown>
       </header>
 
-      <main class="flex-1 overflow-y-auto p-6">
+      <main class="flex-1 overflow-y-auto p-4 sm:p-6">
         <RouterView v-slot="{ Component }">
           <Transition name="page-fade" mode="out-in">
             <component :is="Component" />
@@ -120,22 +164,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Bell,
   ChevronDown,
-  Clock3,
   Database,
   DatabaseZap,
   LayoutDashboard,
   LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   Search,
   Settings,
   ShieldCheck,
   SquareTerminal,
-  Table2,
+  X,
 } from 'lucide-vue-next'
 import { useUserStore } from '../stores/user'
 import type { HealthInfo } from '../types/api'
@@ -144,46 +190,33 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const railItems = [
-  { name: 'dashboard', title: '仪表盘', to: '/dashboard', icon: LayoutDashboard },
-  { name: 'connections', title: '数据源管理', to: '/connections', icon: Database },
-  { name: 'query', title: 'SQL 工作台', to: '/query', icon: SquareTerminal },
-  { name: 'audit', title: '操作审计', to: '/audit', icon: ShieldCheck },
+/** 全站一级菜单：与路由一一对应，无重复、无假链接 */
+const menu = [
+  { name: 'dashboard', label: '仪表盘', to: '/dashboard', icon: LayoutDashboard },
+  { name: 'connections', label: '数据源管理', to: '/connections', icon: Database },
+  { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
+  { name: 'audit', label: '操作审计', to: '/audit', icon: ShieldCheck },
 ]
 
-const menuGroups = [
-  {
-    label: '概览',
-    items: [{ name: 'dashboard', title: '仪表盘', to: '/dashboard', icon: LayoutDashboard }],
-  },
-  {
-    label: '数据',
-    items: [
-      { name: 'connections', title: '数据源管理', to: '/connections', icon: Database },
-      { name: 'query', title: 'SQL 工作台', to: '/query', icon: SquareTerminal },
-      { name: 'tables', title: '表设计器', to: '/query', icon: Table2 },
-    ],
-  },
-  {
-    label: '安全',
-    items: [
-      { name: 'audit', title: '操作审计', to: '/audit', icon: ShieldCheck },
-      { name: 'history', title: '查询历史', to: '/audit', icon: Clock3 },
-    ],
-  },
-]
-
-const subtitles: Record<string, string> = {
-  dashboard: '平台运行状态一览',
-  connections: '统一管理多源数据库连接',
-  query: '编写、运行与分析 SQL',
-  audit: '全链路操作可追溯',
-  settings: '偏好与安全配置',
-}
+const COLLAPSE_KEY = 'dbhub_sidebar_collapsed'
+const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
+const mobileOpen = ref(false)
 
 const currentTitle = computed(() => (route.meta.title as string) ?? 'DBHub')
-const currentSubtitle = computed(() => subtitles[String(route.name)] ?? '')
 const avatarText = computed(() => (userStore.username || '?').slice(0, 1).toUpperCase())
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(COLLAPSE_KEY, collapsed.value ? '1' : '0')
+}
+
+// 路由切换后自动收起移动端抽屉
+watch(
+  () => route.fullPath,
+  () => {
+    mobileOpen.value = false
+  },
+)
 
 const healthOk = ref(false)
 onMounted(async () => {
@@ -223,6 +256,14 @@ async function onUserCommand(command: string) {
 }
 .page-fade-enter-from,
 .page-fade-leave-to {
+  opacity: 0;
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
 }
 </style>
