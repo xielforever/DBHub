@@ -2,204 +2,184 @@
   <div class="space-y-5">
     <header>
       <h1 class="text-xl font-semibold">操作审计</h1>
-      <p class="text-sm text-white/45 mt-1">所有连接、查询与管理操作均不可篡改地留痕</p>
+      <p class="text-sm text-white/45 mt-1">所有登录、连接管理与 SQL 执行均自动留痕，不可篡改</p>
     </header>
 
-    <!-- 筛选栏（每项 shrink-0，空间不足时整体换行，绝不互相压缩） -->
+    <!-- 筛选栏 -->
     <div class="glass-panel p-4 flex flex-wrap items-center gap-3">
-      <el-date-picker
-        v-model="dateRange"
-        type="daterange"
-        range-separator="至"
-        start-placeholder="开始日期"
-        end-placeholder="结束日期"
-        aria-label="日期范围筛选"
-        class="!w-full sm:!w-72 shrink-0"
-      />
       <div class="w-full sm:w-36 shrink-0">
-        <el-select
-          v-model="actionFilter"
-          aria-label="按操作类型筛选"
-          class="w-full"
-          popper-class="glass-popper"
-        >
-          <el-option label="全部操作" value="all" />
-          <el-option label="登录" value="LOGIN" />
-          <el-option label="查询" value="QUERY" />
-          <el-option label="连接" value="CONNECT" />
-          <el-option label="删除" value="DELETE" />
+        <el-select v-model="filters.days" aria-label="时间范围" class="w-full" popper-class="glass-popper" @change="reload">
+          <el-option label="近 1 天" :value="1" />
+          <el-option label="近 7 天" :value="7" />
+          <el-option label="近 30 天" :value="30" />
+          <el-option label="近 90 天" :value="90" />
         </el-select>
       </div>
-      <div class="relative w-full sm:w-60 md:w-64 shrink-0">
+      <div class="w-full sm:w-36 shrink-0">
+        <el-select v-model="filters.resource_type" placeholder="全部资源" aria-label="按资源类型筛选" class="w-full" popper-class="glass-popper" @change="reload">
+          <el-option label="全部资源" value="" />
+          <el-option v-for="(label, key) in resourceLabels" :key="key" :label="label" :value="key" />
+        </el-select>
+      </div>
+      <div class="w-full sm:w-32 shrink-0">
+        <el-select v-model="filters.action" placeholder="全部操作" aria-label="按操作类型筛选" class="w-full" popper-class="glass-popper" @change="reload">
+          <el-option label="全部操作" value="" />
+          <el-option v-for="(label, key) in actionLabels" :key="key" :label="label" :value="key" />
+        </el-select>
+      </div>
+      <div class="w-full sm:w-28 shrink-0">
+        <el-select v-model="filters.status" placeholder="全部结果" aria-label="按结果筛选" class="w-full" popper-class="glass-popper" @change="reload">
+          <el-option label="全部结果" value="" />
+          <el-option label="成功" value="success" />
+          <el-option label="失败" value="failed" />
+        </el-select>
+      </div>
+      <div class="relative w-full sm:w-56 shrink-0">
         <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
         <input
-          v-model.trim="keyword"
-          aria-label="按用户或资源名称搜索"
+          v-model.trim="filters.username"
+          aria-label="按用户名搜索"
           class="glass-input pl-10 text-sm"
-          placeholder="搜索用户 / 资源名称"
+          placeholder="搜索操作用户"
+          @keyup.enter="reload"
         />
       </div>
-      <button
-        class="ghost-button flex items-center justify-center gap-2 text-sm w-full sm:w-auto sm:ml-auto shrink-0"
-        @click="todo"
-      >
-        <Download class="w-4 h-4" /> 导出
+      <button class="ghost-button flex items-center gap-2 text-sm w-full sm:w-auto sm:ml-auto shrink-0" @click="reload">
+        <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" /> 刷新
       </button>
     </div>
 
-    <!-- 审计表格（窄屏自动隐藏次要列，保证状态等关键信息无需横滑即可见） -->
-    <div class="glass-panel overflow-hidden">
-      <el-table :data="pagedLogs" class="audit-table" style="width: 100%">
-        <el-table-column label="时间" :min-width="vp.sm ? 170 : 96">
-          <template #default="{ row }">
-            {{ vp.sm ? row.createdAt : shortTime(row.createdAt) }}
-          </template>
-        </el-table-column>
-        <el-table-column v-if="vp.sm" prop="username" label="用户" :min-width="vp.lg ? 110 : 80" />
-        <el-table-column label="操作" :width="vp.sm ? 100 : 68">
-          <template #default="{ row }">
-            <el-tag :type="actionTagType[row.action as string]" effect="dark" round size="small">
-              {{ actionLabels[row.action as string] ?? row.action }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column
-          v-if="vp.sm"
-          prop="resourceType"
-          label="资源类型"
-          min-width="120"
-          show-overflow-tooltip
-        />
-        <el-table-column
-          prop="resourceName"
-          label="资源名称"
-          :min-width="vp.sm ? 150 : 84"
-          show-overflow-tooltip
-        />
-        <el-table-column v-if="vp.lg" prop="ip" label="IP 地址" min-width="130" />
-        <el-table-column label="状态" :width="vp.sm ? 96 : 68">
-          <template #default="{ row }">
-            <span class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap">
-              <span
-                class="w-1.5 h-1.5 rounded-full shrink-0"
-                :class="row.status === 1 ? 'bg-emerald-400' : 'bg-rose-400'"
-              />
-              {{ row.status === 1 ? '成功' : '失败' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column v-if="vp.xl" prop="duration" label="耗时" width="90" />
-      </el-table>
-      <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-white/10">
-        <span class="text-xs text-white/40">共 {{ filteredLogs.length }} 条记录（示例数据）</span>
-        <el-pagination
-          v-model:current-page="page"
-          :page-size="pageSize"
-          :total="filteredLogs.length"
-          :layout="vp.sm ? 'prev, pager, next' : 'prev, next'"
-          background
-          small
-        />
+    <!-- 审计表 -->
+    <div class="glass-panel overflow-hidden" v-loading="loading">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm min-w-[820px]">
+          <thead>
+            <tr class="text-left text-white/40 text-xs border-b border-white/10">
+              <th class="font-medium px-5 py-3 whitespace-nowrap">时间</th>
+              <th class="font-medium px-5 py-3">用户</th>
+              <th class="font-medium px-5 py-3">操作</th>
+              <th class="font-medium px-5 py-3">资源</th>
+              <th class="font-medium px-5 py-3 hidden md:table-cell">来源 IP</th>
+              <th class="font-medium px-5 py-3">结果</th>
+              <th class="font-medium px-5 py-3 text-right whitespace-nowrap">耗时</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="a in logs" :key="a.id" class="border-b border-white/5 last:border-0 hover:bg-white/5 align-top">
+              <td class="px-5 py-3 text-white/60 whitespace-nowrap text-xs">{{ fmtTime(a.created_at) }}</td>
+              <td class="px-5 py-3">
+                <span class="flex items-center gap-2">
+                  <span class="w-6 h-6 rounded-full bg-indigo-400/20 text-indigo-200 text-[10px] flex items-center justify-center shrink-0">
+                    {{ (a.username || '?').slice(0, 1).toUpperCase() }}
+                  </span>
+                  {{ a.username || '匿名' }}
+                </span>
+              </td>
+              <td class="px-5 py-3">
+                <span class="px-2 py-0.5 rounded-full text-xs bg-white/8 text-white/75 whitespace-nowrap">
+                  {{ actionLabels[a.action] || a.action }}
+                </span>
+              </td>
+              <td class="px-5 py-3 text-white/65">
+                <span class="whitespace-nowrap">{{ resourceLabels[a.resource_type] || a.resource_type }}</span>
+                <span v-if="a.resource_name" class="text-white/40 ml-1 font-mono text-xs">#{{ a.resource_name }}</span>
+              </td>
+              <td class="px-5 py-3 text-white/50 text-xs hidden md:table-cell font-mono">{{ cleanIP(a.ip_address) }}</td>
+              <td class="px-5 py-3">
+                <span
+                  class="px-2 py-0.5 rounded-full text-xs whitespace-nowrap"
+                  :class="a.status === 1 ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'"
+                >
+                  {{ a.status === 1 ? '成功' : '失败' }}
+                </span>
+                <p v-if="a.error_message" class="text-[11px] text-rose-300/70 mt-1 max-w-[200px] truncate" :title="a.error_message">
+                  {{ a.error_message }}
+                </p>
+              </td>
+              <td class="px-5 py-3.5 text-right text-white/45 text-xs whitespace-nowrap">{{ a.duration_ms ?? '—' }} ms</td>
+            </tr>
+            <tr v-if="!logs.length && !loading">
+              <td colspan="7" class="px-5 py-12 text-center text-white/40 text-sm">所选条件下暂无审计记录</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="flex items-center justify-between px-5 py-3 border-t border-white/10 text-xs text-white/50">
+        <span>共 {{ total }} 条记录</span>
+        <div class="flex items-center gap-2">
+          <button class="ghost-button !py-1 !px-3" :disabled="page <= 1" @click="page--; reload()">上一页</button>
+          <span>第 {{ page }} 页</span>
+          <button class="ghost-button !py-1 !px-3" :disabled="page * pageSize >= total" @click="page++; reload()">下一页</button>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Download, Search } from 'lucide-vue-next'
+import { onMounted, reactive, ref } from 'vue'
+import { RefreshCw, Search } from 'lucide-vue-next'
+import { adminApi, type AuditLog } from '../../api/admin'
 
-/** 响应式断点（与 Tailwind 保持一致） */
-const vp = reactive({ sm: false, md: false, lg: false, xl: false })
-function syncViewport() {
-  const w = window.innerWidth
-  vp.sm = w >= 640
-  vp.md = w >= 768
-  vp.lg = w >= 1024
-  vp.xl = w >= 1280
-}
-onMounted(() => {
-  syncViewport()
-  window.addEventListener('resize', syncViewport)
+const logs = ref<AuditLog[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = 20
+const loading = ref(false)
+
+const filters = reactive({
+  days: 7,
+  resource_type: '',
+  action: '',
+  status: '',
+  username: '',
 })
-onBeforeUnmount(() => window.removeEventListener('resize', syncViewport))
-
-interface AuditLog {
-  createdAt: string
-  username: string
-  action: string
-  resourceType: string
-  resourceName: string
-  ip: string
-  status: 0 | 1
-  duration: string
-}
 
 const actionLabels: Record<string, string> = {
   LOGIN: '登录',
-  QUERY: '查询',
-  CONNECT: '连接',
+  CHANGE_PASSWORD: '修改密码',
+  CREATE: '新建',
+  UPDATE: '更新',
   DELETE: '删除',
+  TEST: '测试连接',
+  QUERY: '执行 SQL',
 }
-const actionTagType: Record<string, 'success' | 'warning' | 'info' | 'danger' | 'primary'> = {
-  LOGIN: 'primary',
-  QUERY: 'success',
-  CONNECT: 'info',
-  DELETE: 'danger',
-}
-
-const logs = ref<AuditLog[]>([
-  { createdAt: '2026-09-14 10:32:11', username: 'admin', action: 'QUERY', resourceType: 'TABLE', resourceName: 'sales-prod-mysql / orders', ip: '10.10.2.31', status: 1, duration: '45ms' },
-  { createdAt: '2026-09-14 10:18:02', username: 'alice', action: 'CONNECT', resourceType: 'CONNECTION', resourceName: 'user-center-pg', ip: '10.10.2.45', status: 1, duration: '320ms' },
-  { createdAt: '2026-09-14 09:58:47', username: 'bob', action: 'LOGIN', resourceType: 'SESSION', resourceName: 'Web 控制台登录', ip: '10.10.2.52', status: 1, duration: '120ms' },
-  { createdAt: '2026-09-14 09:41:19', username: 'bob', action: 'QUERY', resourceType: 'TABLE', resourceName: 'analytics-mysql / events', ip: '10.10.2.52', status: 0, duration: '1.8s' },
-  { createdAt: '2026-09-14 09:20:33', username: 'admin', action: 'DELETE', resourceType: 'CONNECTION', resourceName: 'old-redis-test', ip: '10.10.2.31', status: 1, duration: '88ms' },
-  { createdAt: '2026-09-14 08:55:07', username: 'alice', action: 'QUERY', resourceType: 'TABLE', resourceName: 'billing-postgres / invoices', ip: '10.10.2.45', status: 1, duration: '210ms' },
-  { createdAt: '2026-09-13 22:14:50', username: 'system', action: 'CONNECT', resourceType: 'SSH_TUNNEL', resourceName: 'bastion-hk-01', ip: '10.10.1.2', status: 1, duration: '940ms' },
-  { createdAt: '2026-09-13 21:02:11', username: 'admin', action: 'LOGIN', resourceType: 'SESSION', resourceName: 'Web 控制台登录', ip: '10.10.2.31', status: 1, duration: '96ms' },
-  { createdAt: '2026-09-13 18:40:36', username: 'charlie', action: 'LOGIN', resourceType: 'SESSION', resourceName: 'Web 控制台登录', ip: '203.0.113.8', status: 0, duration: '15ms' },
-  { createdAt: '2026-09-13 17:12:04', username: 'alice', action: 'QUERY', resourceType: 'TABLE', resourceName: 'user-center-pg / users', ip: '10.10.2.45', status: 1, duration: '63ms' },
-])
-
-const dateRange = ref<null | [Date, Date]>(null)
-const actionFilter = ref('all')
-const keyword = ref('')
-const page = ref(1)
-const pageSize = 8
-
-const filteredLogs = computed(() =>
-  logs.value.filter((row) => {
-    const matchAction = actionFilter.value === 'all' || row.action === actionFilter.value
-    const kw = keyword.value.toLowerCase()
-    const matchKw = !kw || row.username.includes(kw) || row.resourceName.toLowerCase().includes(kw)
-    return matchAction && matchKw
-  }),
-)
-const pagedLogs = computed(() =>
-  filteredLogs.value.slice((page.value - 1) * pageSize, page.value * pageSize),
-)
-
-function todo() {
-  ElMessage.info('审计导出功能开发中')
+const resourceLabels: Record<string, string> = {
+  AUTH: '认证',
+  CONNECTION: '数据源',
+  SSH_TUNNEL: 'SSH 隧道',
+  USER: '用户',
+  SQL: 'SQL',
+  QUERY_HISTORY: '查询历史',
 }
 
-/** 窄屏时间格式：2026-09-14 10:32:11 -> 09-14 10:32 */
-function shortTime(full: string): string {
-  const m = full.match(/^\d{4}-(\d{2}-\d{2}) (\d{2}:\d{2})/)
-  return m ? `${m[1]} ${m[2]}` : full
+async function reload() {
+  loading.value = true
+  try {
+    const res = await adminApi.auditLogs({
+      days: filters.days,
+      resource_type: filters.resource_type,
+      action: filters.action,
+      status: filters.status,
+      username: filters.username,
+      page: page.value,
+      page_size: pageSize,
+    })
+    logs.value = res.items
+    total.value = res.total
+  } finally {
+    loading.value = false
+  }
+}
+onMounted(reload)
+
+function fmtTime(s: string) {
+  return new Date(s).toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  })
+}
+function cleanIP(ip: string) {
+  return (ip || '').replace('/32', '')
 }
 </script>
-
-<style scoped>
-.audit-table {
-  background: transparent;
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: rgba(255, 255, 255, 0.04);
-  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.05);
-  --el-table-border-color: rgba(255, 255, 255, 0.08);
-  --el-table-text-color: rgba(255, 255, 255, 0.75);
-  --el-table-header-text-color: rgba(255, 255, 255, 0.55);
-}
-</style>

@@ -31,6 +31,26 @@
     </section>
 
     <section class="glass-card p-6">
+      <h2 class="font-medium mb-4">修改密码</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label for="old-pwd" class="block text-xs text-white/55 mb-1.5">当前密码</label>
+          <input id="old-pwd" v-model="pwd.oldPassword" type="password" autocomplete="current-password" class="glass-input" placeholder="当前密码" />
+        </div>
+        <div>
+          <label for="new-pwd" class="block text-xs text-white/55 mb-1.5">新密码</label>
+          <input id="new-pwd" v-model="pwd.newPassword" type="password" autocomplete="new-password" class="glass-input" placeholder="至少 8 个字符" />
+        </div>
+        <div class="flex items-end">
+          <button class="liquid-button w-full sm:w-auto flex items-center justify-center gap-2" :disabled="changing" @click="changePassword">
+            <KeyRound class="w-4 h-4" />{{ changing ? '提交中…' : '更新密码' }}
+          </button>
+        </div>
+      </div>
+      <p class="text-xs text-white/35 mt-3">修改成功后请使用新密码重新登录；其他已签发的 Token 在有效期内仍可用。</p>
+    </section>
+
+    <section class="glass-card p-6">
       <h2 class="font-medium mb-4">安全</h2>
       <ul class="space-y-3 text-sm text-white/65">
         <li class="flex items-center justify-between">
@@ -45,21 +65,53 @@
           <span>敏感凭据存储</span>
           <span class="text-emerald-300">AES-256-GCM 加密</span>
         </li>
+        <li class="flex items-center justify-between">
+          <span>密码哈希</span>
+          <span class="text-emerald-300">PBKDF2-HMAC-SHA256 / 21 万次</span>
+        </li>
       </ul>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { KeyRound } from 'lucide-vue-next'
 import { useUserStore } from '../../stores/user'
+import { adminApi } from '../../api/admin'
 
 const userStore = useUserStore()
 const darkMode = ref(true)
+const changing = ref(false)
+const pwd = reactive({ oldPassword: '', newPassword: '' })
+
 const roleLabels: Record<string, string> = {
   admin: '管理员',
   developer: '开发者',
   readonly: '只读用户',
 }
 const roleLabel = computed(() => roleLabels[userStore.role] ?? userStore.role ?? '-')
+
+async function changePassword() {
+  if (!pwd.oldPassword || pwd.newPassword.length < 8) {
+    ElMessage.warning('请填写当前密码，且新密码至少 8 个字符')
+    return
+  }
+  if (pwd.newPassword === pwd.oldPassword) {
+    ElMessage.warning('新密码不能与当前密码相同')
+    return
+  }
+  changing.value = true
+  try {
+    await adminApi.changePassword(pwd.oldPassword, pwd.newPassword)
+    ElMessage.success('密码已更新，请妥善保管')
+    pwd.oldPassword = ''
+    pwd.newPassword = ''
+  } catch {
+    /* 拦截器已提示 */
+  } finally {
+    changing.value = false
+  }
+}
 </script>

@@ -1,6 +1,16 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '../stores/user'
 
+declare module 'vue-router' {
+  interface RouteMeta {
+    title?: string
+    icon?: string
+    public?: boolean
+    /** 允许访问的角色编码；不设置表示所有登录用户均可访问 */
+    roles?: string[]
+  }
+}
+
 /** 全部业务页面采用路由懒加载 */
 const routes: RouteRecordRaw[] = [
   {
@@ -33,10 +43,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'SQL 工作台', icon: 'SquareTerminal' },
       },
       {
+        path: 'users',
+        name: 'users',
+        component: () => import('../views/admin/UsersView.vue'),
+        meta: { title: '用户与权限', icon: 'UsersRound', roles: ['admin'] },
+      },
+      {
         path: 'audit',
         name: 'audit',
         component: () => import('../views/audit/AuditView.vue'),
-        meta: { title: '操作审计', icon: 'ShieldCheck' },
+        meta: { title: '操作审计', icon: 'ShieldCheck', roles: ['admin'] },
       },
       {
         path: 'settings',
@@ -61,6 +77,11 @@ router.beforeEach((to) => {
   }
   if (to.name === 'login' && userStore.isLoggedIn) {
     return { path: '/' }
+  }
+  // 角色守卫：meta.roles 不包含当前角色时回退到仪表盘
+  const allowed = to.meta.roles
+  if (allowed && userStore.user && !allowed.includes(userStore.user.role)) {
+    return { path: '/dashboard' }
   }
   if (typeof to.meta.title === 'string') {
     document.title = `${to.meta.title} · DBHub`

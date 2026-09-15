@@ -41,25 +41,32 @@
         </button>
       </div>
 
-      <!-- 一级菜单（全站仅 5 个真实页面，不再设二级重复导航） -->
-      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-        <p
-          class="px-3 pb-2 text-[11px] uppercase tracking-widest text-white/40"
-          :class="collapsed ? 'lg:hidden' : ''"
-        >
-          导航菜单
-        </p>
-        <RouterLink
-          v-for="item in menu"
-          :key="item.name"
-          :to="item.to"
-          class="nav-item"
-          :class="collapsed ? 'lg:justify-center lg:px-2' : ''"
-          :title="item.label"
-        >
-          <component :is="item.icon" class="w-5 h-5 shrink-0" />
-          <span class="whitespace-nowrap" :class="collapsed ? 'lg:hidden' : ''">{{ item.label }}</span>
-        </RouterLink>
+      <!-- 分组一级菜单（每项与真实路由一一对应，按角色显隐） -->
+      <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-4">
+        <div v-for="group in visibleMenu" :key="group.title">
+          <p
+            v-if="!collapsed"
+            class="px-2 pb-1.5 text-[11px] uppercase tracking-widest text-white/40"
+          >
+            {{ group.title }}
+          </p>
+          <p v-else class="px-2 pb-1.5 flex justify-center">
+            <span class="w-6 h-px bg-white/15" />
+          </p>
+          <div class="space-y-1">
+            <RouterLink
+              v-for="item in group.items"
+              :key="item.name"
+              :to="item.to"
+              class="nav-item"
+              :class="collapsed ? 'lg:justify-center lg:px-2' : ''"
+              :title="item.label"
+            >
+              <component :is="item.icon" class="w-5 h-5 shrink-0" />
+              <span class="whitespace-nowrap" :class="collapsed ? 'lg:hidden' : ''">{{ item.label }}</span>
+            </RouterLink>
+          </div>
+        </div>
       </nav>
 
       <!-- 底部：健康状态 + 设置 -->
@@ -187,6 +194,7 @@ import {
   Settings,
   ShieldCheck,
   SquareTerminal,
+  UsersRound,
   X,
 } from 'lucide-vue-next'
 import { useUserStore } from '../stores/user'
@@ -196,13 +204,43 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-/** 全站一级菜单：与路由一一对应，无重复、无假链接 */
-const menu = [
-  { name: 'dashboard', label: '仪表盘', to: '/dashboard', icon: LayoutDashboard },
-  { name: 'connections', label: '数据源管理', to: '/connections', icon: Database },
-  { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
-  { name: 'audit', label: '操作审计', to: '/audit', icon: ShieldCheck },
+/** 全站一级菜单：分组、与路由一一对应、无重复无假链接；安全组仅 admin 可见 */
+interface MenuItem {
+  name: string
+  label: string
+  to: string
+  icon: unknown
+  roles?: string[]
+}
+const menuGroups: { title: string; items: MenuItem[] }[] = [
+  {
+    title: '概览',
+    items: [{ name: 'dashboard', label: '仪表盘', to: '/dashboard', icon: LayoutDashboard }],
+  },
+  {
+    title: '数据',
+    items: [
+      { name: 'connections', label: '数据源管理', to: '/connections', icon: Database },
+      { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
+    ],
+  },
+  {
+    title: '安全',
+    items: [
+      { name: 'users', label: '用户与权限', to: '/users', icon: UsersRound, roles: ['admin'] },
+      { name: 'audit', label: '操作审计', to: '/audit', icon: ShieldCheck, roles: ['admin'] },
+    ],
+  },
 ]
+const visibleMenu = computed(() => {
+  const role = userStore.user?.role ?? ''
+  return menuGroups
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((i) => !i.roles || i.roles.includes(role)),
+    }))
+    .filter((g) => g.items.length > 0)
+})
 
 const COLLAPSE_KEY = 'dbhub_sidebar_collapsed'
 const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
