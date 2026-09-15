@@ -44,7 +44,7 @@
       <!-- 一级菜单（全站仅 5 个真实页面，不再设二级重复导航） -->
       <nav class="flex-1 overflow-y-auto px-3 py-4 space-y-1">
         <p
-          class="px-3 pb-2 text-[11px] uppercase tracking-widest text-white/30"
+          class="px-3 pb-2 text-[11px] uppercase tracking-widest text-white/40"
           :class="collapsed ? 'lg:hidden' : ''"
         >
           导航菜单
@@ -116,11 +116,13 @@
 
         <!-- 全局搜索（中等屏幕以上） -->
         <div class="flex-1 max-w-md mx-auto hidden md:block relative">
-          <Search class="w-4 h-4 text-white/35 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <label for="global-search" class="sr-only">全局搜索</label>
           <input
+            id="global-search"
             class="glass-input pl-10 py-2 text-sm"
             placeholder="搜索数据源、数据表、查询历史..."
-            type="text"
+            type="search"
           />
         </div>
         <div class="flex-1 md:hidden" />
@@ -152,7 +154,11 @@
         </el-dropdown>
       </header>
 
-      <main class="flex-1 overflow-y-auto p-4 sm:p-6">
+      <main
+        class="flex-1 overflow-y-auto p-4 sm:p-6 outline-none"
+        tabindex="0"
+        aria-label="主内容区（可滚动）"
+      >
         <RouterView v-slot="{ Component }">
           <Transition name="page-fade" mode="out-in">
             <component :is="Component" />

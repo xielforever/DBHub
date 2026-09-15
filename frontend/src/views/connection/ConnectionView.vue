@@ -13,11 +13,20 @@
 
     <!-- 搜索筛选 -->
     <div class="flex flex-wrap items-center gap-3">
-      <div class="relative w-full sm:w-72">
-        <Search class="w-4 h-4 text-white/35 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        <input v-model.trim="keyword" class="glass-input pl-10" placeholder="搜索数据源名称或主机" />
+      <div class="relative w-full sm:w-72 shrink-0">
+        <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        <input
+          v-model.trim="keyword"
+          aria-label="搜索数据源名称或主机"
+          class="glass-input pl-10"
+          placeholder="搜索数据源名称或主机"
+        />
       </div>
-      <select v-model="typeFilter" class="glass-input w-full sm:w-44 appearance-none cursor-pointer">
+      <select
+        v-model="typeFilter"
+        aria-label="按数据库类型筛选"
+        class="glass-input w-full sm:w-44 appearance-none cursor-pointer shrink-0"
+      >
         <option value="">全部类型</option>
         <option value="mysql">MySQL</option>
         <option value="postgres">PostgreSQL</option>

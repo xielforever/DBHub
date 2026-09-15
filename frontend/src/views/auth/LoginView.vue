@@ -90,7 +90,7 @@
       </form>
 
       <!-- 开发期默认账号提示 -->
-      <p class="mt-6 text-center text-xs text-white/35 leading-relaxed">
+      <p class="mt-6 text-center text-xs text-white/45 leading-relaxed">
         开发环境默认账号
         <code class="text-white/55">admin / admin123</code>
         ，生产环境请通过环境变量注入

@@ -1,7 +1,20 @@
 <template>
   <div :class="['flex flex-col h-full min-h-0', embedded ? '' : 'glass-panel p-3']">
-    <div class="flex items-center justify-between px-1 pb-3">
+    <div
+      v-if="!embedded"
+      class="flex items-center justify-between px-1 pb-3"
+    >
       <h2 class="text-sm font-medium">数据库</h2>
+      <button
+        class="w-7 h-7 rounded-lg flex items-center justify-center text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+        aria-label="刷新连接树"
+        @click="refreshTree"
+      >
+        <RefreshCw class="w-4 h-4" />
+      </button>
+    </div>
+    <!-- 嵌入抽屉时仅保留刷新动作（标题由抽屉提供，避免重复） -->
+    <div v-else class="flex justify-end pb-2">
       <button
         class="w-7 h-7 rounded-lg flex items-center justify-center text-white/50 hover:bg-white/10 hover:text-white transition-colors"
         aria-label="刷新连接树"

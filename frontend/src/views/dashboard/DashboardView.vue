@@ -6,7 +6,7 @@
         <h1 class="text-xl font-semibold">早上好，{{ userStore.username || '管理员' }}</h1>
         <p class="text-sm text-white/45 mt-1">以下是平台今日运行概览（示例数据）</p>
       </div>
-      <span class="text-xs text-white/35">{{ today }}</span>
+      <span class="text-xs text-white/45">{{ today }}</span>
     </header>
 
     <!-- KPI 卡片 -->
@@ -78,7 +78,7 @@
           >
             <div class="w-24 h-24 m-6 rounded-full bg-premium-darker flex flex-col items-center justify-center">
               <span class="text-lg font-bold">24</span>
-              <span class="text-[10px] text-white/45">数据源</span>
+              <span class="text-[10px] text-white/60">数据源</span>
             </div>
           </div>
         </div>

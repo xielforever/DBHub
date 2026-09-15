@@ -5,7 +5,10 @@
       embedded ? '' : 'glass-panel overflow-hidden',
     ]"
   >
-    <header class="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0">
+    <header
+      v-if="!embedded"
+      class="flex items-center justify-between px-4 py-3 border-b border-white/10 shrink-0"
+    >
       <h2 class="text-sm font-medium flex items-center gap-2">
         <Sparkles class="w-4 h-4 text-indigo-300" /> AI 助手
       </h2>
@@ -30,7 +33,7 @@
       </div>
     </div>
     <div class="p-3 border-t border-white/10 shrink-0">
-      <div class="glass-input !py-2 text-xs text-white/35">AI 能力接入中...</div>
+      <div class="glass-input !py-2 text-xs text-white/50">AI 能力接入中...</div>
     </div>
   </div>
 </template>

@@ -9,12 +9,12 @@
       <h2 class="font-medium mb-4">个人资料</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <label class="block text-xs text-white/55 mb-1.5">用户名</label>
-          <input class="glass-input" :value="userStore.username" disabled />
+          <label for="settings-username" class="block text-xs text-white/55 mb-1.5">用户名</label>
+          <input id="settings-username" class="glass-input" :value="userStore.username" disabled />
         </div>
         <div>
-          <label class="block text-xs text-white/55 mb-1.5">角色</label>
-          <input class="glass-input" :value="roleLabel" disabled />
+          <label for="settings-role" class="block text-xs text-white/55 mb-1.5">角色</label>
+          <input id="settings-role" class="glass-input" :value="roleLabel" disabled />
         </div>
       </div>
     </section>
@@ -26,7 +26,7 @@
           <p class="text-sm">深色液态玻璃主题</p>
           <p class="text-xs text-white/40 mt-1">浅色主题与主题跟随系统将在后续版本提供</p>
         </div>
-        <el-switch v-model="darkMode" disabled />
+        <el-switch v-model="darkMode" disabled aria-label="深色液态玻璃主题开关" />
       </div>
     </section>
 

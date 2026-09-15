@@ -5,7 +5,7 @@
       <p class="text-sm text-white/45 mt-1">所有连接、查询与管理操作均不可篡改地留痕</p>
     </header>
 
-    <!-- 筛选栏 -->
+    <!-- 筛选栏（每项 shrink-0，空间不足时整体换行，绝不互相压缩） -->
     <div class="glass-panel p-4 flex flex-wrap items-center gap-3">
       <el-date-picker
         v-model="dateRange"
@@ -13,51 +13,79 @@
         range-separator="至"
         start-placeholder="开始日期"
         end-placeholder="结束日期"
-        class="!w-full sm:!w-72"
+        aria-label="日期范围筛选"
+        class="!w-full sm:!w-72 shrink-0"
       />
-      <select v-model="actionFilter" class="glass-input w-full sm:w-36 appearance-none text-sm">
+      <select
+        v-model="actionFilter"
+        aria-label="按操作类型筛选"
+        class="glass-input w-full sm:w-36 appearance-none text-sm shrink-0"
+      >
         <option value="">全部操作</option>
         <option value="LOGIN">登录</option>
         <option value="QUERY">查询</option>
         <option value="CONNECT">连接</option>
         <option value="DELETE">删除</option>
       </select>
-      <div class="relative w-full sm:w-64 sm:flex-1 sm:max-w-64">
-        <Search class="w-4 h-4 text-white/35 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        <input v-model.trim="keyword" class="glass-input pl-10 text-sm" placeholder="搜索用户 / 资源名称" />
+      <div class="relative w-full sm:w-60 md:w-64 shrink-0">
+        <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
+        <input
+          v-model.trim="keyword"
+          aria-label="按用户或资源名称搜索"
+          class="glass-input pl-10 text-sm"
+          placeholder="搜索用户 / 资源名称"
+        />
       </div>
-      <button class="ghost-button flex items-center justify-center gap-2 text-sm w-full sm:w-auto sm:ml-auto" @click="todo">
+      <button
+        class="ghost-button flex items-center justify-center gap-2 text-sm w-full sm:w-auto sm:ml-auto shrink-0"
+        @click="todo"
+      >
         <Download class="w-4 h-4" /> 导出
       </button>
     </div>
 
-    <!-- 审计表格 -->
+    <!-- 审计表格（窄屏自动隐藏次要列，保证状态等关键信息无需横滑即可见） -->
     <div class="glass-panel overflow-hidden">
       <el-table :data="pagedLogs" class="audit-table" style="width: 100%">
-        <el-table-column prop="createdAt" label="时间" width="180" />
-        <el-table-column prop="username" label="用户" width="120" />
-        <el-table-column label="操作" width="110">
+        <el-table-column label="时间" :min-width="vp.sm ? 170 : 96">
+          <template #default="{ row }">
+            {{ vp.sm ? row.createdAt : shortTime(row.createdAt) }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="vp.sm" prop="username" label="用户" :min-width="vp.lg ? 110 : 80" />
+        <el-table-column label="操作" :width="vp.sm ? 100 : 68">
           <template #default="{ row }">
             <el-tag :type="actionTagType[row.action as string]" effect="dark" round size="small">
               {{ actionLabels[row.action as string] ?? row.action }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="resourceType" label="资源类型" width="120" />
-        <el-table-column prop="resourceName" label="资源名称" min-width="200" />
-        <el-table-column prop="ip" label="IP 地址" width="140" />
-        <el-table-column label="状态" width="100">
+        <el-table-column
+          v-if="vp.sm"
+          prop="resourceType"
+          label="资源类型"
+          min-width="120"
+          show-overflow-tooltip
+        />
+        <el-table-column
+          prop="resourceName"
+          label="资源名称"
+          :min-width="vp.sm ? 150 : 84"
+          show-overflow-tooltip
+        />
+        <el-table-column v-if="vp.lg" prop="ip" label="IP 地址" min-width="130" />
+        <el-table-column label="状态" :width="vp.sm ? 96 : 68">
           <template #default="{ row }">
-            <span class="inline-flex items-center gap-1.5 text-xs">
+            <span class="inline-flex items-center gap-1.5 text-xs whitespace-nowrap">
               <span
-                class="w-1.5 h-1.5 rounded-full"
+                class="w-1.5 h-1.5 rounded-full shrink-0"
                 :class="row.status === 1 ? 'bg-emerald-400' : 'bg-rose-400'"
               />
               {{ row.status === 1 ? '成功' : '失败' }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="duration" label="耗时" width="100" />
+        <el-table-column v-if="vp.xl" prop="duration" label="耗时" width="90" />
       </el-table>
       <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-white/10">
         <span class="text-xs text-white/40">共 {{ filteredLogs.length }} 条记录（示例数据）</span>
@@ -65,7 +93,7 @@
           v-model:current-page="page"
           :page-size="pageSize"
           :total="filteredLogs.length"
-          layout="prev, pager, next"
+          :layout="vp.sm ? 'prev, pager, next' : 'prev, next'"
           background
           small
         />
@@ -75,9 +103,24 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Download, Search } from 'lucide-vue-next'
+
+/** 响应式断点（与 Tailwind 保持一致） */
+const vp = reactive({ sm: false, md: false, lg: false, xl: false })
+function syncViewport() {
+  const w = window.innerWidth
+  vp.sm = w >= 640
+  vp.md = w >= 768
+  vp.lg = w >= 1024
+  vp.xl = w >= 1280
+}
+onMounted(() => {
+  syncViewport()
+  window.addEventListener('resize', syncViewport)
+})
+onBeforeUnmount(() => window.removeEventListener('resize', syncViewport))
 
 interface AuditLog {
   createdAt: string
@@ -136,6 +179,12 @@ const pagedLogs = computed(() =>
 
 function todo() {
   ElMessage.info('审计导出功能开发中')
+}
+
+/** 窄屏时间格式：2026-09-14 10:32:11 -> 09-14 10:32 */
+function shortTime(full: string): string {
+  const m = full.match(/^\d{4}-(\d{2}-\d{2}) (\d{2}:\d{2})/)
+  return m ? `${m[1]} ${m[2]}` : full
 }
 </script>
 

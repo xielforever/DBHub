@@ -18,24 +18,23 @@
     <section class="flex-1 min-w-0 flex flex-col gap-4">
       <!-- 编辑器卡片 -->
       <div class="glass-panel flex flex-col h-[56vh] lg:h-auto lg:flex-1 min-h-[320px] overflow-hidden">
-        <el-tabs v-model="activeTab" class="query-tabs flex-1 flex flex-col min-h-0">
+        <el-tabs
+          v-model="activeTab"
+          class="query-tabs flex-1 flex flex-col min-h-0"
+          closable
+          @tab-remove="closeTab"
+        >
           <el-tab-pane
             v-for="tab in tabs"
             :key="tab.id"
             :name="tab.id"
+            :closable="tabs.length > 1"
             class="flex flex-col min-h-0 flex-1"
           >
             <template #label>
               <span class="flex items-center gap-2 px-1">
                 <FileCode2 class="w-3.5 h-3.5" />
                 {{ tab.name }}
-                <button
-                  class="text-white/30 hover:text-white ml-1"
-                  aria-label="关闭标签页"
-                  @click.stop="closeTab(tab.id)"
-                >
-                  <X class="w-3.5 h-3.5" />
-                </button>
               </span>
             </template>
 
@@ -52,7 +51,11 @@
                 <Play class="w-4 h-4" /> 运行
               </button>
               <div class="hidden sm:block h-5 w-px bg-white/10" />
-              <select v-model="tab.database" class="glass-input !py-1.5 !w-32 sm:!w-44 text-xs">
+              <select
+                v-model="tab.database"
+                aria-label="目标数据库"
+                class="glass-input !py-1.5 !w-32 sm:!w-44 text-xs"
+              >
                 <option>Sales_DB</option>
                 <option>User_Center</option>
               </select>
@@ -64,6 +67,7 @@
                   type="number"
                   min="1"
                   max="10000"
+                  aria-label="结果行数上限"
                   class="glass-input !py-1 w-16 sm:w-20 text-xs"
                 />
               </label>
@@ -75,14 +79,16 @@
               >
                 <Sparkles class="w-3.5 h-3.5" /> AI
               </button>
-              <span class="hidden xl:inline text-[11px] text-white/30">Monaco Editor 接入中</span>
+              <span class="hidden xl:inline text-[11px] text-white/45">Monaco Editor 接入中</span>
             </div>
 
             <!-- SQL 编辑区（Monaco 落地前的占位） -->
             <textarea
               v-model="tab.sql"
               spellcheck="false"
-              class="flex-1 w-full resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-indigo-100/90 outline-none"
+              role="textbox"
+              aria-label="SQL 编辑器"
+              class="flex-1 w-full resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-indigo-100/90 outline-none focus:outline-none"
               placeholder="-- 在此编写 SQL，例如：SELECT * FROM customers LIMIT 100;"
             />
           </el-tab-pane>
@@ -93,7 +99,7 @@
       <div class="glass-panel h-64 lg:h-72 shrink-0 flex flex-col overflow-hidden">
         <el-tabs v-model="resultTab" class="flex-1 flex flex-col min-h-0">
           <el-tab-pane label="结果" name="result" class="flex flex-col min-h-0 flex-1">
-            <div class="overflow-auto flex-1">
+            <div class="overflow-auto flex-1 outline-none" tabindex="0" aria-label="查询结果数据网格">
               <table class="w-full text-sm">
                 <thead class="sticky top-0 bg-white/10 backdrop-blur">
                   <tr class="text-left text-white/50 text-xs">
@@ -175,7 +181,6 @@ import {
   PanelRightOpen,
   Play,
   Sparkles,
-  X,
 } from 'lucide-vue-next'
 import ConnectionTreePanel from './components/ConnectionTreePanel.vue'
 import AiAssistantPanel from './components/AiAssistantPanel.vue'
