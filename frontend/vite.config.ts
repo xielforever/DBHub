@@ -20,6 +20,20 @@ export default defineConfig(({ mode }) => {
         '/api': {
           target: apiTarget,
           changeOrigin: true,
+          // 诊断：记录经预览网关到达 vite 的认证头是否被剥离
+          configure: (proxy) => {
+            proxy.on('proxyReq', (_proxyReq, req) => {
+              if (process.env.PROXY_AUTH_DEBUG === '1') {
+                // eslint-disable-next-line no-console
+                console.log(
+                  `[proxy] ${req.method} ${req.url} ` +
+                    `authorization=${req.headers.authorization ? 'Y' : 'N'} ` +
+                    `x-access-token=${req.headers['x-access-token'] ? 'Y' : 'N'} ` +
+                    `cookie-token=${(req.headers.cookie || '').includes('dbhub_access_token') ? 'Y' : 'N'}`,
+                )
+              }
+            })
+          },
         },
       },
     },

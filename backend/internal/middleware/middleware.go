@@ -110,7 +110,7 @@ func CORS(allowedOrigins []string) Middleware {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Add("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-Access-Token")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			}
 			if r.Method == http.MethodOptions {
@@ -122,16 +122,28 @@ func CORS(allowedOrigins []string) Middleware {
 	}
 }
 
-// RequireAuth 校验 Bearer Access Token，并把 Claims 注入 context。
+// RequireAuth 校验 Access Token，并把 Claims 注入 context。
+//
+// 令牌支持三种传递通道，按优先级依次尝试，以兼容会剥离 Authorization 头的
+// 预览/反向代理网关：
+//  1. Authorization: Bearer <token>（标准通道）
+//  2. X-Access-Token: <token>（自定义头兜底）
+//  3. Cookie: dbhub_access_token=<token>（浏览器同源自动携带，网关一般不剥离）
 func RequireAuth(secret []byte) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			header := r.Header.Get("Authorization")
-			if header == "" || !strings.HasPrefix(header, "Bearer ") {
+			tokenStr := extractAccessToken(r)
+			if tokenStr == "" {
+				_, hasCookie := r.Cookie("dbhub_access_token")
+				slog.Warn("受保护接口缺少认证令牌",
+					"method", r.Method, "path", r.URL.Path,
+					"has_authorization_header", r.Header.Get("Authorization") != "",
+					"has_x_access_token_header", r.Header.Get("X-Access-Token") != "",
+					"has_token_cookie", hasCookie,
+					"x_forwarded_for", r.Header.Get("X-Forwarded-For"))
 				httpx.Fail(w, httpx.Unauthorized("缺少认证令牌"))
 				return
 			}
-			tokenStr := strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
 			claims, err := auth.ParseToken(secret, tokenStr, auth.TokenTypeAccess)
 			if err != nil {
 				httpx.Fail(w, httpx.New(httpx.CodeUnauthorized, "认证令牌无效或已过期", err))
@@ -141,6 +153,20 @@ func RequireAuth(secret []byte) Middleware {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// extractAccessToken 按 Authorization → X-Access-Token → Cookie 的顺序取令牌。
+func extractAccessToken(r *http.Request) string {
+	if header := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(header, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(header, "Bearer "))
+	}
+	if t := strings.TrimSpace(r.Header.Get("X-Access-Token")); t != "" {
+		return t
+	}
+	if c, err := r.Cookie("dbhub_access_token"); err == nil {
+		return strings.TrimSpace(c.Value)
+	}
+	return ""
 }
 
 // RequireRoles 在 RequireAuth 之后使用，限制仅指定角色可访问。

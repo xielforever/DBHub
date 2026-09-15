@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import { setAuthCookie, clearAuthCookie } from '../utils/auth-cookie'
 import request from '../utils/request'
 import type { LoginResult, UserInfo } from '../types/api'
 
@@ -39,6 +40,8 @@ export const useUserStore = defineStore('user', () => {
     localStorage.setItem(TOKEN_KEY, data.access_token)
     localStorage.setItem(REFRESH_KEY, data.refresh_token)
     localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+    // Cookie 兜底通道，防止代理网关剥离 Authorization 头
+    setAuthCookie(data.access_token)
   }
 
   function clearAuth() {
@@ -48,6 +51,7 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(REFRESH_KEY)
     localStorage.removeItem(USER_KEY)
+    clearAuthCookie()
   }
 
   /** 登出并清空本地会话 */
