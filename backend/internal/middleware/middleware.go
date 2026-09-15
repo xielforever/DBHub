@@ -143,6 +143,28 @@ func RequireAuth(secret []byte) Middleware {
 	}
 }
 
+// RequireRoles 在 RequireAuth 之后使用，限制仅指定角色可访问。
+func RequireRoles(allowed ...string) Middleware {
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, r := range allowed {
+		allowedSet[r] = struct{}{}
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := auth.ClaimsFromContext(r.Context())
+			if !ok {
+				httpx.Fail(w, httpx.Unauthorized("未认证"))
+				return
+			}
+			if _, ok := allowedSet[claims.Role]; !ok {
+				httpx.Fail(w, httpx.Forbidden("当前角色无权执行此操作"))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -162,8 +184,11 @@ func clientIP(r *http.Request) string {
 	}
 	host := r.RemoteAddr
 	if idx := strings.LastIndex(host, ":"); idx > 0 {
-		return host[:idx]
+		host = host[:idx]
 	}
+	// IPv6 形式 [::1] 去除方括号，保证可写入 PostgreSQL inet 字段
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
 	return host
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -93,6 +94,8 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.log.Info("用户登录成功", "user_id", user.ID, "username", user.Username)
+	// 供审计中间件关联操作者（WriteHeader 时被提取并从响应头移除）
+	w.Header().Set("X-Audit-User-Id", strconv.FormatInt(user.ID, 10))
 	httpx.OK(w, tokenResponse{
 		TokenType:    "Bearer",
 		AccessToken:  pair.AccessToken,

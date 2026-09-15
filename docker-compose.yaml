@@ -10,8 +10,8 @@ services:
       - "${POSTGRES_PORT}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # 容器首次初始化时按文件名升序自动执行迁移脚本
-      - ./backend/internal/db/migrations:/docker-entrypoint-initdb.d:ro
+      # 数据库迁移由后端启动时统一执行（internal/db 内嵌迁移 + schema_migrations 记录），
+      # 不再挂载到 /docker-entrypoint-initdb.d，避免双执行导致对象已存在错误
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
       interval: 5s

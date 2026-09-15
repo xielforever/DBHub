@@ -2,7 +2,6 @@
 package auth
 
 import (
-	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -28,7 +27,7 @@ func HashPassword(password string) (string, error) {
 	if _, err := rand.Read(salt); err != nil {
 		return "", fmt.Errorf("生成盐值失败: %w", err)
 	}
-	dk, err := pbkdf2.Key(sha256.New, password, salt, pbkdf2Iterations, pbkdf2KeyBytes)
+	dk, err := pbkdf2Key(sha256.New, password, salt, pbkdf2Iterations, pbkdf2KeyBytes)
 	if err != nil {
 		return "", fmt.Errorf("密码派生失败: %w", err)
 	}
@@ -55,7 +54,7 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if err != nil {
 		return false, errors.New("密码哈希值非法")
 	}
-	got, err := pbkdf2.Key(sha256.New, password, salt, iter, len(want))
+	got, err := pbkdf2Key(sha256.New, password, salt, iter, len(want))
 	if err != nil {
 		return false, fmt.Errorf("密码派生失败: %w", err)
 	}

@@ -30,6 +30,8 @@ type Config struct {
 
 	// DatabaseURL PostgreSQL 元数据库 DSN
 	DatabaseURL string
+	// MetaDBMaxConns 元数据库连接池上限（单会话线协议代理应设为 1）
+	MetaDBMaxConns int32
 	// RedisURL Redis 缓存 DSN
 	RedisURL string
 }
@@ -43,11 +45,12 @@ type AdminConfig struct {
 // Load 从环境变量读取配置并执行必要的校验。
 func Load() (*Config, error) {
 	cfg := &Config{
-		Env:         getenv("APP_ENV", "development"),
-		Port:        getenv("PORT", "8080"),
-		LogLevel:    getenv("LOG_LEVEL", "info"),
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		RedisURL:    os.Getenv("REDIS_URL"),
+		Env:            getenv("APP_ENV", "development"),
+		Port:           getenv("PORT", "8080"),
+		LogLevel:       getenv("LOG_LEVEL", "info"),
+		DatabaseURL:    os.Getenv("DATABASE_URL"),
+		MetaDBMaxConns: int32(getenvInt("META_DB_MAX_CONNS", 10)),
+		RedisURL:       os.Getenv("REDIS_URL"),
 		Admin: AdminConfig{
 			Username: getenv("APP_ADMIN_USERNAME", "admin"),
 			Password: getenv("APP_ADMIN_PASSWORD", "admin123"),

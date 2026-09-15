@@ -25,6 +25,8 @@ backend/dist/
 *.test
 *.out
 vendor/
+# Go 后端依赖采用 vendor 模式以支持离线/容器构建，需纳入版本库
+!backend/vendor/
 
 # ---------- Node / 前端 ----------
 node_modules/

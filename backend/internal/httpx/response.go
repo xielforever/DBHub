@@ -53,6 +53,21 @@ func Unauthorized(message string) *AppError {
 	return &AppError{Code: CodeUnauthorized, Message: message}
 }
 
+// Forbidden 403 已认证但无权限。
+func Forbidden(message string) *AppError {
+	return &AppError{Code: CodeForbidden, Message: message}
+}
+
+// Conflict 409 资源冲突。
+func Conflict(message string) *AppError {
+	return &AppError{Code: CodeConflict, Message: message}
+}
+
+// NotFound 404 资源不存在。
+func NotFound(message string) *AppError {
+	return &AppError{Code: CodeNotFound, Message: message}
+}
+
 // Internal 500 系统错误。
 func Internal(message string, err error) *AppError {
 	return &AppError{Code: CodeInternal, Message: message, Err: err}
