@@ -22,16 +22,19 @@
           placeholder="搜索数据源名称或主机"
         />
       </div>
-      <select
-        v-model="typeFilter"
-        aria-label="按数据库类型筛选"
-        class="glass-input w-full sm:w-44 appearance-none cursor-pointer shrink-0"
-      >
-        <option value="">全部类型</option>
-        <option value="mysql">MySQL</option>
-        <option value="postgres">PostgreSQL</option>
-        <option value="redis">Redis</option>
-      </select>
+      <div class="w-full sm:w-44 shrink-0">
+        <el-select
+          v-model="typeFilter"
+          aria-label="按数据库类型筛选"
+          class="w-full"
+          popper-class="glass-popper"
+        >
+          <el-option label="全部类型" value="all" />
+          <el-option label="MySQL" value="mysql" />
+          <el-option label="PostgreSQL" value="postgres" />
+          <el-option label="Redis" value="redis" />
+        </el-select>
+      </div>
     </div>
 
     <!-- 连接卡片网格 -->
@@ -202,7 +205,7 @@ import {
 
 const router = useRouter()
 const keyword = ref('')
-const typeFilter = ref('')
+const typeFilter = ref('all')
 const dialogVisible = ref(false)
 const sshExpanded = ref(false)
 
@@ -232,7 +235,7 @@ const typeMeta: Record<Connection['type'], { label: string; color: string; tint:
 
 const filteredConnections = computed(() =>
   connections.value.filter((c) => {
-    const matchType = !typeFilter.value || c.type === typeFilter.value
+    const matchType = typeFilter.value === 'all' || c.type === typeFilter.value
     const kw = keyword.value.toLowerCase()
     const matchKw = !kw || c.name.toLowerCase().includes(kw) || c.host.includes(kw)
     return matchType && matchKw

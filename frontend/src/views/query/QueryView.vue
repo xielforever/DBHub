@@ -51,14 +51,18 @@
                 <Play class="w-4 h-4" /> 运行
               </button>
               <div class="hidden sm:block h-5 w-px bg-white/10" />
-              <select
-                v-model="tab.database"
-                aria-label="目标数据库"
-                class="glass-input !py-1.5 !w-32 sm:!w-44 text-xs"
-              >
-                <option>Sales_DB</option>
-                <option>User_Center</option>
-              </select>
+              <div class="w-32 sm:w-44 shrink-0">
+                <el-select
+                  v-model="tab.database"
+                  size="small"
+                  aria-label="目标数据库"
+                  class="w-full"
+                  popper-class="glass-popper"
+                >
+                  <el-option label="Sales_DB" value="Sales_DB" />
+                  <el-option label="User_Center" value="User_Center" />
+                </el-select>
+              </div>
               <label class="flex items-center gap-1.5 text-xs text-white/45">
                 <span class="hidden sm:inline">限制行数</span>
                 <span class="sm:hidden">行</span>

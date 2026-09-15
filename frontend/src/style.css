@@ -146,8 +146,7 @@
   background-color: rgba(255, 255, 255, 0.1) !important;
 }
 
-/* 对话框玻璃化（暗色变量基础上叠加通透感） */
-html.dark {
+/* 对话框玻璃化（暗色变量基础上叠加通透感） */html.dark {
   --el-bg-color: rgba(20, 28, 48, 0.92);
   --el-bg-color-overlay: rgba(24, 33, 56, 0.96);
   --el-fill-color-blank: transparent;
@@ -174,6 +173,112 @@ html.dark {
 }
 .glass-dialog .el-dialog__body {
   padding-top: 1.25rem;
+}
+
+/* ===== 下拉弹层 / 日期面板 / 用户菜单 玻璃化（teleport 到 body，需全局样式） =====
+   仅作用于 select / date-picker / dropdown 三类 popper，不影响 tooltip、popover 等 */
+.el-select__popper.el-popper,
+.el-picker__popper.el-popper,
+.el-dropdown__popper.el-popper {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+.el-select__popper .el-popper__arrow::before,
+.el-picker__popper .el-popper__arrow::before,
+.el-dropdown__popper .el-popper__arrow::before {
+  background: rgba(20, 28, 48, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+.el-select__popper .el-select-dropdown,
+.glass-popper .el-select-dropdown {
+  background: rgba(20, 28, 48, 0.94) !important;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 0.9rem !important;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45) !important;
+  padding: 0.35rem;
+}
+.el-select-dropdown__item {
+  color: rgba(255, 255, 255, 0.72);
+  border-radius: 0.6rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.el-select-dropdown__item.is-hovering,
+.el-select-dropdown__item:hover {
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #fff;
+}
+.el-select-dropdown__item.is-selected {
+  color: #a5b4fc;
+  font-weight: 600;
+  background: rgba(102, 126, 234, 0.16) !important;
+}
+.el-select-dropdown__item.is-disabled {
+  color: rgba(255, 255, 255, 0.28);
+}
+.el-select-dropdown__empty {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* el-select 收起态与玻璃输入框对齐 */
+.el-select {
+  --el-select-border-color-hover: rgba(102, 126, 234, 0.7);
+}
+.el-select .el-input__wrapper {
+  cursor: pointer;
+}
+
+/* 日期选择面板玻璃化 */
+.el-picker__popper .el-picker-panel {
+  background: rgba(20, 28, 48, 0.96) !important;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 0.9rem !important;
+  color: rgba(255, 255, 255, 0.75);
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45) !important;
+}
+.el-date-table th {
+  color: rgba(255, 255, 255, 0.4);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+.el-date-table td .el-date-table-cell__text {
+  color: rgba(255, 255, 255, 0.75);
+}
+.el-date-table td.in-range .el-date-table-cell {
+  background: rgba(102, 126, 234, 0.18);
+}
+.el-date-table td.current:not(.disabled) .el-date-table-cell__text {
+  background-image: var(--image-liquid-gradient);
+  color: #fff;
+}
+.el-picker-panel .el-input__wrapper {
+  background: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* 下拉菜单（用户头像菜单等）玻璃化 */
+.el-dropdown__popper .el-dropdown-menu {
+  background: rgba(20, 28, 48, 0.96) !important;
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 0.9rem !important;
+  padding: 0.35rem;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45) !important;
+}
+.el-dropdown-menu__item {
+  color: rgba(255, 255, 255, 0.75);
+  border-radius: 0.6rem;
+}
+.el-dropdown-menu__item:not(.is-disabled):hover,
+.el-dropdown-menu__item:focus {
+  background: rgba(255, 255, 255, 0.09) !important;
+  color: #fff;
+}
+.el-dropdown-menu__item--divided {
+  border-top-color: rgba(255, 255, 255, 0.1);
 }
 
 /* 侧边抽屉玻璃化 */

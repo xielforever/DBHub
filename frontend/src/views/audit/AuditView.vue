@@ -16,17 +16,20 @@
         aria-label="日期范围筛选"
         class="!w-full sm:!w-72 shrink-0"
       />
-      <select
-        v-model="actionFilter"
-        aria-label="按操作类型筛选"
-        class="glass-input w-full sm:w-36 appearance-none text-sm shrink-0"
-      >
-        <option value="">全部操作</option>
-        <option value="LOGIN">登录</option>
-        <option value="QUERY">查询</option>
-        <option value="CONNECT">连接</option>
-        <option value="DELETE">删除</option>
-      </select>
+      <div class="w-full sm:w-36 shrink-0">
+        <el-select
+          v-model="actionFilter"
+          aria-label="按操作类型筛选"
+          class="w-full"
+          popper-class="glass-popper"
+        >
+          <el-option label="全部操作" value="all" />
+          <el-option label="登录" value="LOGIN" />
+          <el-option label="查询" value="QUERY" />
+          <el-option label="连接" value="CONNECT" />
+          <el-option label="删除" value="DELETE" />
+        </el-select>
+      </div>
       <div class="relative w-full sm:w-60 md:w-64 shrink-0">
         <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
         <input
@@ -160,14 +163,14 @@ const logs = ref<AuditLog[]>([
 ])
 
 const dateRange = ref<null | [Date, Date]>(null)
-const actionFilter = ref('')
+const actionFilter = ref('all')
 const keyword = ref('')
 const page = ref(1)
 const pageSize = 8
 
 const filteredLogs = computed(() =>
   logs.value.filter((row) => {
-    const matchAction = !actionFilter.value || row.action === actionFilter.value
+    const matchAction = actionFilter.value === 'all' || row.action === actionFilter.value
     const kw = keyword.value.toLowerCase()
     const matchKw = !kw || row.username.includes(kw) || row.resourceName.toLowerCase().includes(kw)
     return matchAction && matchKw
