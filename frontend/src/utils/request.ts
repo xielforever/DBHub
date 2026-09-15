@@ -113,6 +113,11 @@ request.interceptors.response.use(
       } else {
         ElMessage.error('网络异常，请检查后端服务状态')
       }
+      // 统一以服务端中文消息（或网络兜底文案）拒绝，避免调用方拿到
+      // axios 原始英文 "Request failed with status code xxx"
+      const cn = error.response?.data?.message
+        || (error.code === 'ECONNABORTED' ? '请求超时，请稍后重试' : '网络异常，请检查后端服务状态')
+      return Promise.reject(new Error(cn))
     }
     return Promise.reject(error)
   },

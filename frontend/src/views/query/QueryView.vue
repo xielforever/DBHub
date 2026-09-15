@@ -5,15 +5,17 @@
       ref="treeRef"
       class="hidden lg:flex w-60 xl:w-64 shrink-0"
       @select-connection="onSelectConnection"
+      @databases-loaded="onDatabasesLoaded"
       @preview-table="onPreviewTable"
       @redis-overview="onRedisOverview"
       @redis-keys="onRedisKeys"
     />
 
-    <el-drawer v-model="treeDrawerOpen" title="数据库" direction="ltr" size="82%" class="glass-drawer">
+    <el-drawer v-model="treeDrawerOpen" title="数据源" direction="ltr" size="82%" lazy class="glass-drawer">
       <ConnectionTreePanel
         embedded
-        @select-connection="(c) => { onSelectConnection(c); treeDrawerOpen = false }"
+        @select-connection="onSelectConnection"
+        @databases-loaded="onDatabasesLoaded"
         @preview-table="(p) => { onPreviewTable(p); treeDrawerOpen = false }"
         @redis-overview="(c) => { onRedisOverview(c); treeDrawerOpen = false }"
         @redis-keys="(c) => { onRedisKeys(c); treeDrawerOpen = false }"
@@ -371,7 +373,7 @@ function resetGrid() {
   writeResult.value = null
 }
 
-async function onSelectConnection(conn: ConnectionItem) {
+function onSelectConnection(conn: ConnectionItem) {
   currentConn.value = conn
   viewMode.value = conn.type === 'redis' ? 'redis' : 'sql'
   if (conn.type === 'redis') {
@@ -381,15 +383,17 @@ async function onSelectConnection(conn: ConnectionItem) {
     return
   }
   resultTab.value = 'result'
-  try {
-    const res = await workbenchApi.databases(conn.id)
-    databaseOptions.value = res.items
-    const preferred = res.items.find((d) => d.name === conn.database) ?? res.items[0]
-    if (preferred && !currentTab.value.database) {
-      currentTab.value.database = preferred.name
-    }
-  } catch {
-    /* 拦截器已提示 */
+  // 库列表由连接树懒加载后经 databases-loaded 事件回填，避免重复请求
+  databaseOptions.value = []
+}
+
+function onDatabasesLoaded({ conn, items }: { conn: ConnectionItem; items: { name: string }[] }) {
+  // 快速切换连接时，仅采纳当前连接的结果，避免串库
+  if (currentConn.value?.id !== conn.id) return
+  databaseOptions.value = items
+  const preferred = items.find((d) => d.name === conn.database) ?? items[0]
+  if (preferred && !currentTab.value.database) {
+    currentTab.value.database = preferred.name
   }
 }
 

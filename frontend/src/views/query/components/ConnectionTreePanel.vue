@@ -2,9 +2,9 @@
   <aside class="glass-panel w-full flex flex-col overflow-hidden">
     <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between">
       <h2 class="text-sm font-medium flex items-center gap-2">
-        <FolderTree class="w-4 h-4 text-indigo-300" /> 数据库
+        <FolderTree class="w-4 h-4 text-indigo-300" /> 数据源
       </h2>
-      <button class="text-white/40 hover:text-white" aria-label="刷新连接树" @click="reload">
+      <button class="text-white/40 hover:text-white" aria-label="刷新连接树" @click="reload(true)">
         <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
       </button>
     </div>
@@ -104,7 +104,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, shallowReactive } from 'vue'
 import {
   Activity,
   ChevronRight,
@@ -121,6 +121,7 @@ import { workbenchApi, type TableInfo } from '../../../api/workbench'
 
 const emit = defineEmits<{
   (e: 'select-connection', conn: ConnectionItem): void
+  (e: 'databases-loaded', payload: { conn: ConnectionItem; items: { name: string }[] }): void
   (e: 'preview-table', payload: { conn: ConnectionItem; database: string; schema: string; table: TableInfo }): void
   (e: 'redis-overview', conn: ConnectionItem): void
   (e: 'redis-keys', conn: ConnectionItem): void
@@ -134,21 +135,29 @@ const expandedConns = ref<Set<number>>(new Set())
 const activeConnId = ref<number | null>(null)
 const activeTableKey = ref('')
 
-// 懒加载缓存
-const dbs = reactive<Record<number, { name: string }[]>>({})
-const schemas = reactive<Record<string, string[]>>({})
-const tables = reactive<Record<string, TableInfo[]>>({})
+// 懒加载缓存（列表整体替换，使用 shallowReactive 避免深层解包影响类型）
+const dbs = shallowReactive<Record<number, { name: string }[]>>({})
+const schemas = shallowReactive<Record<string, string[]>>({})
+const tables = shallowReactive<Record<string, TableInfo[]>>({})
 const openSchemaNodes = ref<Set<string>>(new Set())
 const openTableNodes = ref<Set<string>>(new Set())
 
-async function reload() {
-  loading.value = true
-  try {
-    const res = await connectionApi.list()
-    connections.value = res.items
-  } finally {
-    loading.value = false
-  }
+// in-flight 去重：setup 首次加载与父组件 whenLoaded()/手动刷新可能并发，
+// 共用同一个 Promise，确保连接列表全局只发一次请求。
+let loadingPromise: Promise<void> | null = null
+async function reload(force = false) {
+  if (loadingPromise && !force) return loadingPromise
+  loadingPromise = (async () => {
+    loading.value = true
+    try {
+      const res = await connectionApi.list()
+      connections.value = res.items
+    } finally {
+      loading.value = false
+    }
+  })()
+  await loadingPromise
+  loadingPromise = null
 }
 reload()
 
@@ -167,15 +176,23 @@ async function toggleConnection(conn: ConnectionItem) {
     return
   }
   expandedConns.value.add(conn.id)
-  if (conn.type === 'redis' || dbs[conn.id]) return
+  if (conn.type === 'redis') return
+
+  // 库列表统一在此处加载一次，通过 databases-loaded 事件回传父组件，避免重复请求
+  const cached = dbs[conn.id]
+  if (cached) {
+    emit('databases-loaded', { conn, items: cached })
+    return
+  }
 
   loadingConns[conn.id] = true
   try {
     const res = await workbenchApi.databases(conn.id)
     dbs[conn.id] = res.items
     delete errors[conn.id]
+    emit('databases-loaded', { conn, items: res.items })
   } catch (err) {
-    errors[conn.id] = err instanceof Error ? err.message : '加载失败'
+    errors[conn.id] = err instanceof Error ? err.message : '无法连接该数据源，请检查配置或网络'
   } finally {
     loadingConns[conn.id] = false
   }
