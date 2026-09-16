@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>07 · 全局搜索（⌘K）</title>
+<link rel="stylesheet" href="../assets/app.css">
+<style>
+  body { overflow:hidden; }
+  .palette-backdrop { position:fixed; inset:0; background:rgba(5,8,18,.55); backdrop-filter:blur(6px); z-index:50; display:flex; justify-content:center; align-items:flex-start; padding-top:6vh; }
+  .palette { width:min(680px,92vw); background:rgba(18,24,44,.92); border:1px solid rgba(255,255,255,.16); border-radius:20px; box-shadow:0 30px 90px rgba(0,0,0,.6); overflow:hidden; }
+  .palette-input { display:flex; align-items:center; gap:10px; padding:15px 18px; border-bottom:1px solid rgba(255,255,255,.08); }
+  .palette-input input { flex:1; background:transparent; border:0; outline:none; color:#fff; font-size:15px; }
+  .palette-body { max-height:64vh; overflow:auto; padding:8px; }
+  .p-group { font-size:10.5px; letter-spacing:.12em; color:rgba(255,255,255,.4); padding:10px 12px 5px; text-transform:uppercase; }
+  .p-row { display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:11px; cursor:pointer; }
+  .p-row:hover, .p-row.cursor { background:rgba(102,126,234,.2); }
+  .p-row .grow { flex:1; min-width:0; }
+  .p-row .t { font-size:13px; }
+  .p-row .s { font-size:11px; color:rgba(255,255,255,.42); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  mark { background:rgba(251,191,36,.28); color:#fde68a; border-radius:3px; padding:0 2px; }
+  .p-foot { display:flex; align-items:center; gap:14px; padding:10px 18px; border-top:1px solid rgba(255,255,255,.08); font-size:11px; color:rgba(255,255,255,.42); }
+  .p-foot .keys { display:flex; gap:12px; flex-shrink:0; }
+  .p-foot .keys span { white-space:nowrap; }
+  .p-foot .tip { margin-left:auto; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .p-foot b { display:inline-flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,.18); border-radius:5px; padding:0 5px; margin-right:5px; color:rgba(255,255,255,.65); font-weight:500; }
+</style>
+</head>
+<body data-page="dashboard" data-title="仪表盘" data-user-initial="A" data-user-name="admin">
+<div class="app-shell">
+  <aside class="rail" id="rail"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="filter:blur(2px);pointer-events:none">
+      <div class="glass-card kpi-card" style="margin-bottom:14px"><div class="label dim">（仪表盘底层页面，仅作衬托）</div></div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+        <div class="glass-card" style="height:220px"></div>
+        <div class="glass-card" style="height:220px"></div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="palette-backdrop">
+  <div class="palette">
+    <div class="palette-input">
+      <span id="si"></span>
+      <input value="order" autofocus spellcheck="false">
+      <span class="kbd">ESC</span>
+    </div>
+    <div class="palette-body">
+      <div class="p-group">数据源</div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(102,126,234,.18);color:#a5b4fc" id="r1"></span>
+        <div class="grow"><div class="t">订单核心库 <span class="env env-prod">生产</span></div><div class="s">PostgreSQL 16 · postgres@10.0.12.21:5432 · 6 张表</div></div>
+        <span class="muted" style="font-size:10.5px">↵ 进入</span>
+      </div>
+
+      <div class="p-group">数据表 · 3 张</div>
+      <div class="p-row cursor">
+        <span class="kpi-icon" style="background:rgba(102,126,234,.2);color:#a5b4fc" id="r2"></span>
+        <div class="grow"><div class="t mono"><mark>order</mark>s <span class="sens sens-internal">内部</span></div><div class="s">订单核心库 / shop · 订单主表，记录下单与支付状态流转 · <svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>128</div></div>
+        <span class="tag">回车查详情</span>
+      </div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(236,72,153,.16);color:#f9a8d4" id="r3"></span>
+        <div class="grow"><div class="t mono"><mark>order</mark>_items <span class="sens sens-normal">普通</span></div><div class="s">订单核心库 / shop · 订单明细行 · <svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>96</div></div>
+      </div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(16,185,129,.16);color:#6ee7b7" id="r4"></span>
+        <div class="grow"><div class="t mono"><mark>order</mark>_no <span class="sens sens-internal">内部</span></div><div class="s">字段 · orders.order_no varchar(32) · 对外订单编号，唯一</div></div>
+        <span class="tag">字段</span>
+      </div>
+
+      <div class="p-group">报表 · 2 份</div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(236,72,153,.15);color:#f9a8d4" id="r5"></span>
+        <div class="grow"><div class="t">近 14 天<mark>订单</mark>趋势 <span class="vis-shared vis" style="background:rgba(16,185,129,.16);color:#6ee7b7">已共享</span></div><div class="s">折线图 · 订单核心库 · admin · 运行 28 次</div></div>
+      </div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(102,126,234,.18);color:#a5b4fc" id="r6"></span>
+        <div class="grow"><div class="t"><mark>订单</mark>状态分布（9 月） <span class="vis-private vis">私有</span></div><div class="s">柱状图 · 订单核心库 · admin · 10 分钟前运行</div></div>
+      </div>
+
+      <div class="p-group">查询历史 · 命中 6 条，展示 2 条</div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(148,163,184,.14);color:#cbd5e1" id="r7"></span>
+        <div class="grow"><div class="t mono" style="font-size:12px">SELECT * FROM shop.<mark>orders</mark> WHERE status = 'paid'</div><div class="s">订单核心库 · 2 分钟前 · 3 ms</div></div>
+      </div>
+      <div class="p-row">
+        <span class="kpi-icon" style="background:rgba(148,163,184,.14);color:#cbd5e1" id="r8"></span>
+        <div class="grow"><div class="t mono" style="font-size:12px">SELECT status, COUNT(*) FROM shop.<mark>orders</mark> GROUP BY status</div><div class="s">订单核心库 · 1 小时前 · 3 ms</div></div>
+      </div>
+    </div>
+    <div class="p-foot">
+      <div class="keys">
+        <span><b>↑↓</b>选择</span><span><b>↵</b>打开</span><span><b>⌘K</b>唤起</span><span><b>ESC</b>关闭</span>
+      </div>
+      <span class="tip">数据源 · 表 · 字段 · 报表 · 历史统一检索（PostgreSQL 全文索引）</span>
+    </div>
+  </div>
+</div>
+
+<script src="../assets/shell.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+  const m={si:'search',r1:'datasource',r2:'table',r3:'table',r4:'columns',r5:'line',r6:'bar',r7:'history',r8:'history'};
+  for(const [id,n] of Object.entries(m)) document.getElementById(id).innerHTML=icon(n,'ico');
+  const inp=document.querySelector('.palette-input input');
+  inp.focus(); inp.setSelectionRange(inp.value.length,inp.value.length);
+});
+</script>
+</body>
+</html>

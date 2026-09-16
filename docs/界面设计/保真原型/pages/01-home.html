@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>01 · 仪表盘 / 我的工作台</title>
+<link rel="stylesheet" href="../assets/app.css">
+</head>
+<body data-page="dashboard" data-title="仪表盘" data-user-initial="A" data-user-name="admin">
+<div class="app-shell">
+  <aside class="rail" id="rail"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h2>早上好，admin</h2>
+          <div class="sub">2026 年 9 月 15 日 · 以下是与你相关的数据工作</div>
+        </div>
+        <div class="spacer"></div>
+        <div class="glass-panel" style="display:flex;padding:4px;gap:2px">
+          <button class="btn btn-sm" style="border:0;background:transparent">运营概览</button>
+          <button class="btn btn-sm btn-primary" style="border:0">我的工作台</button>
+        </div>
+      </div>
+
+      <!-- 个人 KPI -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px">
+        <div class="glass-card kpi-card">
+          <div style="display:flex;justify-content:space-between">
+            <div class="label">我的查询 · 近 7 天</div>
+            <div class="kpi-icon" style="background:rgba(102,126,234,.18);color:#a5b4fc" id="i1"></div>
+          </div>
+          <div class="value">86</div>
+          <div class="delta up">▲ 12% 环比上周</div>
+          <div id="spark1" style="height:34px;margin-top:6px"></div>
+        </div>
+        <div class="glass-card kpi-card">
+          <div style="display:flex;justify-content:space-between">
+            <div class="label">我的报表</div>
+            <div class="kpi-icon" style="background:rgba(236,72,153,.15);color:#f9a8d4" id="i2"></div>
+          </div>
+          <div class="value">7</div>
+          <div class="delta muted">2 份共享 · 0 份被分享给我</div>
+          <div id="spark2" style="height:34px;margin-top:6px"></div>
+        </div>
+        <div class="glass-card kpi-card">
+          <div style="display:flex;justify-content:space-between">
+            <div class="label">我的收藏</div>
+            <div class="kpi-icon" style="background:rgba(245,158,11,.15);color:#fcd34d" id="i3"></div>
+          </div>
+          <div class="value">14</div>
+          <div class="delta muted">9 张表 · 5 份报表</div>
+          <div id="spark3" style="height:34px;margin-top:6px"></div>
+        </div>
+        <div class="glass-card kpi-card">
+          <div style="display:flex;justify-content:space-between">
+            <div class="label">平均查询耗时</div>
+            <div class="kpi-icon" style="background:rgba(16,185,129,.15);color:#6ee7b7" id="i4"></div>
+          </div>
+          <div class="value">38<span style="font-size:14px;color:rgba(255,255,255,.45)"> ms</span></div>
+          <div class="delta up">▼ 9% 优于上周</div>
+          <div id="spark4" style="height:34px;margin-top:6px"></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.25fr 1fr;gap:14px;margin-bottom:18px">
+        <!-- 最近访问资产 -->
+        <div class="glass-card" style="padding:18px 20px">
+          <div class="section-title"><span id="i5"></span>最近访问的数据资产
+            <span class="more">查看全部 →</span></div>
+          <div class="list-row">
+            <span class="env env-prod">生产</span>
+            <div class="grow"><div class="t mono">shop.orders</div><div class="s">订单主表，记录下单与支付状态流转 · 订单核心库</div></div>
+            <span class="sens sens-internal">内部</span>
+          </div>
+          <div class="list-row">
+            <span class="env env-prod">生产</span>
+            <div class="grow"><div class="t mono">shop.order_items</div><div class="s">订单明细行 · 订单核心库</div></div>
+            <span class="sens sens-normal">普通</span>
+          </div>
+          <div class="list-row">
+            <span class="env env-test">测试</span>
+            <div class="grow"><div class="t mono">shop.customers</div><div class="s">客户主数据 · 订单只读从库</div></div>
+            <span class="sens sens-sensitive">敏感</span>
+          </div>
+          <div class="list-row">
+            <span class="env env-dev">开发</span>
+            <div class="grow"><div class="t mono">shop.products</div><div class="s">商品目录与库存 · 开发示例库</div></div>
+            <span class="sens sens-normal">普通</span>
+          </div>
+        </div>
+
+        <!-- 我的收藏 -->
+        <div class="glass-card" style="padding:18px 20px">
+          <div class="section-title"><span id="i6"></span>我的收藏 <span class="more">管理 →</span></div>
+          <div class="list-row">
+            <div class="kpi-icon" style="background:rgba(236,72,153,.15);color:#f9a8d4;width:32px;height:32px" id="i7"></div>
+            <div class="grow"><div class="t">订单状态分布</div><div class="s">报表 · 饼图 · 已共享</div></div>
+          </div>
+          <div class="list-row">
+            <div class="kpi-icon" style="background:rgba(102,126,234,.18);color:#a5b4fc;width:32px;height:32px" id="i8"></div>
+            <div class="grow"><div class="t">近 14 天订单趋势</div><div class="s">报表 · 折线图 · 私有</div></div>
+          </div>
+          <div class="list-row">
+            <div class="kpi-icon" style="background:rgba(16,185,129,.15);color:#6ee7b7;width:32px;height:32px" id="i9"></div>
+            <div class="grow"><div class="t mono">shop.orders</div><div class="s">数据表 · 热度 Top 1</div></div>
+          </div>
+          <div class="list-row">
+            <div class="kpi-icon" style="background:rgba(245,158,11,.15);color:#fcd34d;width:32px;height:32px" id="i10"></div>
+            <div class="grow"><div class="t">类目销售占比</div><div class="s">报表 · 饼图 · 张运维共享给我</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.25fr 1fr;gap:14px">
+        <!-- 最近查询 -->
+        <div class="glass-card" style="padding:18px 20px">
+          <div class="section-title"><span id="i11"></span>最近查询 <span class="more">查询历史 →</span></div>
+          <div class="list-row">
+            <div class="grow"><div class="t mono" style="font-size:12px">SELECT status, COUNT(*) FROM shop.orders GROUP BY status</div>
+              <div class="s">订单核心库 · postgres · 2 分钟前 · 3 ms · 5 行</div></div>
+            <span class="tag">成功</span>
+          </div>
+          <div class="list-row">
+            <div class="grow"><div class="t mono" style="font-size:12px">SELECT p.category, SUM(oi.qty*oi.price) FROM shop.order_items oi JOIN shop.products p …</div>
+              <div class="s">订单核心库 · postgres · 1 小时前 · 12 ms · 6 行</div></div>
+            <span class="tag">成功</span>
+          </div>
+          <div class="list-row">
+            <div class="grow"><div class="t mono" style="font-size:12px">DELETE FROM shop.orders WHERE id &lt; 10</div>
+              <div class="s" style="color:#fda4af">只读角色禁止执行非查询语句: DELETE · 昨天 18:02</div></div>
+            <span class="sens sens-confidential">已拦截</span>
+          </div>
+          <div style="display:flex;margin-top:10px"><button class="btn btn-sm" style="margin-left:auto">在 SQL 工作台打开</button></div>
+        </div>
+
+        <!-- 我的报表 -->
+        <div class="glass-card" style="padding:18px 20px">
+          <div class="section-title"><span id="i12"></span>我的报表 <span class="more">报表中心 →</span></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div class="glass-panel" style="padding:12px">
+              <div class="t" style="font-size:12.5px;margin-bottom:2px">订单状态分布</div>
+              <div id="mini1" style="height:74px"></div>
+            </div>
+            <div class="glass-panel" style="padding:12px">
+              <div class="t" style="font-size:12.5px;margin-bottom:2px">近 14 天订单趋势</div>
+              <div id="mini2" style="height:74px"></div>
+            </div>
+          </div>
+          <div style="display:flex;margin-top:10px"><button class="btn btn-sm btn-primary" style="margin-left:auto">+ 从查询创建报表</button></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../assets/lib/echarts.min.js"></script>
+<script src="../assets/echarts-theme.js"></script>
+<script src="../assets/shell.js"></script>
+<script>
+const AXIS = { axisLine:{lineStyle:{color:'rgba(255,255,255,.12)'}}, axisLabel:{color:'rgba(255,255,255,.35)',fontSize:9}, splitLine:{lineStyle:{color:'rgba(255,255,255,.06)'}}, axisTick:{show:false} };
+function chart(id, opt){ const el=document.getElementById(id); if(el) echarts.init(el).setOption(opt); }
+document.addEventListener('DOMContentLoaded',()=>{
+  const ic = {'i1':'activity','i2':'reports','i3':'star','i4':'zap','i5':'harddrive','i6':'star','i7':'pie','i8':'line','i9':'table','i10':'reports','i11':'history','i12':'bar'};
+  for(const [id,name] of Object.entries(ic)) document.getElementById(id).innerHTML = icon(name,'ico');
+  const spark=(data,color)=>chart(data[0],{grid:{left:0,right:0,top:4,bottom:0},xAxis:{type:'category',show:false,data:data[2]},yAxis:{type:'value',show:false},series:[{type:'line',data:data[1],smooth:true,showSymbol:false,lineStyle:{color,width:2},areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:color+'55'},{offset:1,color:color+'00'}])}}]});
+  spark(['spark1',[8,12,9,14,11,16,18],[]],'#818cf8');
+  spark(['spark2',[1,1,2,2,3,4,7],[]],'#f472b6');
+  spark(['spark3',[5,6,8,7,9,11,14],[]],'#fbbf24');
+  spark(['spark4',[52,48,44,41,46,40,38],[]],'#34d399');
+  chart('mini1',{tooltip:{},series:[{type:'pie',radius:['45%','72%'],center:['50%','52%'],label:{show:false},data:[{value:81,name:'done',itemStyle:{color:'#818cf8'}},{value:56,name:'shipped',itemStyle:{color:'#38bdf8'}},{value:51,name:'paid',itemStyle:{color:'#34d399'}},{value:26,name:'cancelled',itemStyle:{color:'#fb7185'}},{value:25,name:'pending',itemStyle:{color:'#fbbf24'}}]}]});
+  chart('mini2',{grid:{left:4,right:4,top:6,bottom:4},xAxis:{type:'category',show:false,data:Array.from({length:14},(_,i)=>i)},yAxis:{type:'value',show:false},series:[{type:'line',smooth:true,showSymbol:false,data:[8,12,9,15,13,18,14,20,17,22,19,25,21,24],lineStyle:{color:'#818cf8',width:2},areaStyle:{color:'rgba(129,140,248,.18)'}}]});
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>02 · 数据资产</title>
+<link rel="stylesheet" href="../assets/app.css">
+<style>
+  .assets-grid { display:grid; grid-template-columns:296px 1fr; gap:14px; height:calc(100vh - 64px - 44px - 36px); }
+  .asset-card { display:flex; align-items:flex-start; gap:14px; padding:15px 18px; border-radius:16px;
+    background:var(--glass); border:1px solid var(--border); cursor:pointer; transition:all .2s; }
+  .asset-card:hover { background:var(--glass-strong); transform:translateY(-1px); box-shadow:var(--shadow-glass); }
+  .asset-card.selected { border-color:rgba(129,140,248,.6); background:rgba(102,126,234,.12); }
+  .stat-pills { display:flex; gap:16px; font-size:11.5px; color:rgba(255,255,255,.5); margin-top:5px; }
+  .stat-pills b { color:rgba(255,255,255,.85); font-weight:600; }
+</style>
+</head>
+<body data-page="assets" data-title="数据资产" data-user-initial="A" data-user-name="admin">
+<div class="app-shell">
+  <aside class="rail" id="rail"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <h2>数据资产</h2>
+          <div class="sub">统一浏览、检索与标注全平台数据源 · 表 · 字段元数据</div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn btn-sm" id="btnSync">立即同步元数据</button>
+      </div>
+
+      <!-- 资产总览 KPI -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">
+        <div class="glass-card kpi-card"><div class="label" id="l1"></div><div class="value" style="font-size:22px">3</div><div class="delta muted">2 PostgreSQL · 1 MySQL</div></div>
+        <div class="glass-card kpi-card"><div class="label" id="l2"></div><div class="value" style="font-size:22px">24</div><div class="delta muted">跨库逻辑表 · 2 张重复表</div></div>
+        <div class="glass-card kpi-card"><div class="label" id="l3"></div><div class="value" style="font-size:22px">187</div><div class="delta muted">含 12 个敏感字段</div></div>
+        <div class="glass-card kpi-card"><div class="label" id="l4"></div><div class="value" style="font-size:22px">2<span style="font-size:13px;color:rgba(255,255,255,.45)"> 个</span></div><div class="delta down">待处理数据质量问题</div></div>
+      </div>
+
+      <div class="assets-grid">
+        <!-- 左侧资产树 -->
+        <div class="glass-card" style="padding:14px;overflow:auto">
+          <div style="position:relative;margin-bottom:10px">
+            <span id="treeSearchIco" style="position:absolute;left:10px;top:8px"></span>
+            <input class="glass-input" placeholder="过滤表名 / 字段名" style="width:100%;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:10px;padding:8px 10px 8px 32px;color:#fff;font-size:12px;outline:none">
+          </div>
+          <div class="tree">
+            <button class="tree-row"><span class="chev open" id="c1"></span><span class="leaf" id="t1"></span><span class="grow">订单核心库</span><span class="env env-prod">生产</span></button>
+            <div class="tree-children">
+              <button class="tree-row"><span class="chev open" id="c2"></span><span class="leaf" id="f1"></span>shop</button>
+              <div class="tree-children">
+                <button class="tree-row active"><span class="leaf" id="tb1"></span><span class="grow mono">orders</span><span class="muted">239</span></button>
+                <button class="tree-row"><span class="leaf" id="tb2"></span><span class="grow mono">order_items</span><span class="muted">479</span></button>
+                <button class="tree-row"><span class="leaf" id="tb3"></span><span class="grow mono">customers</span><span class="muted">24</span></button>
+                <button class="tree-row"><span class="leaf" id="tb4"></span><span class="grow mono">products</span><span class="muted">28</span></button>
+                <button class="tree-row"><span class="leaf" id="tb5"></span><span class="grow mono">categories</span><span class="muted">6</span></button>
+                <button class="tree-row"><span class="leaf" id="tb6"></span><span class="grow mono">payments</span><span class="muted">231</span></button>
+              </div>
+            </div>
+            <button class="tree-row"><span class="chev" id="c3"></span><span class="leaf" id="t2"></span><span class="grow">订单只读从库</span><span class="env env-test">测试</span></button>
+            <button class="tree-row"><span class="chev" id="c4"></span><span class="leaf" id="t3"></span><span class="grow">开发示例库</span><span class="env env-dev">开发</span></button>
+          </div>
+          <div class="note" style="margin-top:14px">元数据每日 02:00 自动同步；手动同步在树节点右键或右上角发起，只读账号仅采集结构。</div>
+        </div>
+
+        <!-- 右侧表列表 -->
+        <div class="glass-card" style="padding:16px 18px;display:flex;flex-direction:column;min-height:0">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+            <span class="chip active">全部 6</span>
+            <span class="chip">普通 3</span>
+            <span class="chip" style="color:#93c5fd">内部 1</span>
+            <span class="chip" style="color:#fcd34d">敏感 2</span>
+            <div class="spacer" style="flex:1"></div>
+            <span class="chip" id="sortBtn">按热度排序</span>
+            <button class="btn btn-sm" id="viewBtn">切换为目录视图</button>
+          </div>
+          <div style="overflow:auto;display:flex;flex-direction:column;gap:10px;min-height:0">
+            <div class="asset-card selected">
+              <div class="kpi-icon" style="background:rgba(102,126,234,.2);color:#a5b4fc" id="tc1"></div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <b class="mono" style="font-size:13.5px">shop.orders</b>
+                  <span class="sens sens-internal">内部</span>
+                  <span class="tag">订单域</span><span class="tag">核心</span>
+                  <span class="muted" style="font-size:11px"><svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>热度 128</span>
+                </div>
+                <div class="dim" style="font-size:12px;margin:4px 0 5px">订单主表，记录下单与支付状态流转</div>
+                <div class="stat-pills"><span><b>12</b> 列</span><span><b>239</b> 行</span><span><b>48 KB</b></span><span>Owner：张运维</span><span>更新：3 分钟前</span></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-sm btn-primary">查看详情</button>
+                <button class="btn btn-sm">查询数据</button>
+              </div>
+            </div>
+            <div class="asset-card">
+              <div class="kpi-icon" style="background:rgba(236,72,153,.16);color:#f9a8d4" id="tc2"></div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <b class="mono" style="font-size:13.5px">shop.order_items</b>
+                  <span class="sens sens-normal">普通</span>
+                  <span class="tag">订单域</span>
+                  <span class="muted" style="font-size:11px"><svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>热度 96</span>
+                </div>
+                <div class="dim" style="font-size:12px;margin:4px 0 5px">订单明细行，一单多行商品与成交单价</div>
+                <div class="stat-pills"><span><b>7</b> 列</span><span><b>479</b> 行</span><span><b>64 KB</b></span><span>Owner：张运维</span><span>更新：3 分钟前</span></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-sm btn-primary">查看详情</button>
+                <button class="btn btn-sm">查询数据</button>
+              </div>
+            </div>
+            <div class="asset-card">
+              <div class="kpi-icon" style="background:rgba(245,158,11,.16);color:#fcd34d" id="tc3"></div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <b class="mono" style="font-size:13.5px">shop.customers</b>
+                  <span class="sens sens-sensitive">敏感</span>
+                  <span class="tag">客户域</span>
+                  <span class="muted" style="font-size:11px"><svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>热度 71 · 含 3 个敏感列</span>
+                </div>
+                <div class="dim" style="font-size:12px;margin:4px 0 5px">客户主数据：含手机号、邮箱等个人信息，查询受脱敏策略约束</div>
+                <div class="stat-pills"><span><b>9</b> 列</span><span><b>24</b> 行</span><span><b>16 KB</b></span><span>Owner：李开发</span><span>更新：昨天 22:00</span></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-sm btn-primary">查看详情</button>
+                <button class="btn btn-sm">查询数据</button>
+              </div>
+            </div>
+            <div class="asset-card">
+              <div class="kpi-icon" style="background:rgba(16,185,129,.16);color:#6ee7b7" id="tc4"></div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <b class="mono" style="font-size:13.5px">shop.products</b>
+                  <span class="sens sens-normal">普通</span>
+                  <span class="tag">商品域</span>
+                  <span class="muted" style="font-size:11px"><svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>热度 58 · 与开发示例库重名</span>
+                </div>
+                <div class="dim" style="font-size:12px;margin:4px 0 5px">商品目录与库存快照</div>
+                <div class="stat-pills"><span><b>8</b> 列</span><span><b>28</b> 行</span><span><b>24 KB</b></span><span>Owner：李开发</span><span>更新：3 分钟前</span></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-sm btn-primary">查看详情</button>
+                <button class="btn btn-sm">查询数据</button>
+              </div>
+            </div>
+            <div class="asset-card">
+              <div class="kpi-icon" style="background:rgba(245,158,11,.16);color:#fcd34d" id="tc5"></div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <b class="mono" style="font-size:13.5px">shop.payments</b>
+                  <span class="sens sens-sensitive">敏感</span>
+                  <span class="tag">交易域</span>
+                  <span class="muted" style="font-size:11px"><svg class="ico" style="width:11px;height:11px;color:#fb923c;vertical-align:-1px;margin-right:2px" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z"/></svg>热度 44 · 含 2 个敏感列</span>
+                </div>
+                <div class="dim" style="font-size:12px;margin:4px 0 5px">支付流水记录，含交易号与第三方通道信息</div>
+                <div class="stat-pills"><span><b>10</b> 列</span><span><b>231</b> 行</span><span><b>40 KB</b></span><span>Owner：张运维</span><span>更新：12 分钟前</span></div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-sm btn-primary">查看详情</button>
+                <button class="btn btn-sm">查询数据</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../assets/shell.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+  const m = {l1:'datasource',l2:'table',l3:'columns',l4:'zap',t1:'datasource',t2:'datasource',t3:'datasource',
+    c1:'chevronDown',c2:'chevronDown',c3:'chevronRight',c4:'chevronRight',f1:'folder',
+    tb1:'table',tb2:'table',tb3:'table',tb4:'table',tb5:'table',tb6:'table',tc1:'table',tc2:'table',tc3:'table',tc4:'table',tc5:'table',
+    treeSearchIco:'search'};
+  for(const [id,n] of Object.entries(m)) document.getElementById(id).innerHTML=icon(n);
+  document.getElementById('btnSync').innerHTML = icon('refresh','ico')+' 立即同步元数据';
+  document.getElementById('viewBtn').innerHTML = icon('grid','ico')+' 切换为目录视图';
+  document.getElementById('sortBtn').innerHTML = icon('activity','ico')+' 按热度排序';
+});
+</script>
+</body>
+</html>

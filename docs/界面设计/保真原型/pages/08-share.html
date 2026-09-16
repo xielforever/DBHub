@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>08 · 匿名分享页（只读）</title>
+<link rel="stylesheet" href="../assets/app.css">
+<style>
+  .share-wrap { max-width:1080px; margin:0 auto; padding:26px 24px 60px; position:relative; }
+  .share-top { display:flex; align-items:center; gap:14px; margin-bottom:18px; }
+  .share-banner { display:flex; align-items:center; gap:10px; font-size:12px; color:rgba(255,255,255,.6);
+    background:rgba(16,185,129,.08); border:1px solid rgba(16,185,129,.25); border-radius:12px; padding:8px 14px; }
+  .watermark { position:absolute; inset:0; pointer-events:none; z-index:5; overflow:hidden; }
+  .watermark span { position:absolute; transform:rotate(-28deg); color:rgba(255,255,255,.05); font-size:13px; white-space:nowrap; }
+  .kpi-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px; }
+</style>
+</head>
+<body data-page="">
+<div class="share-wrap">
+  <div class="watermark" id="wm"></div>
+
+  <div class="share-top">
+    <div class="brand-logo">DB</div>
+    <div>
+      <b style="font-size:15px">DBHub 安全分享</b>
+      <div class="muted" style="font-size:11px">由 admin 创建 · 链接 2026-09-22 过期 · 已被查看 6 次</div>
+    </div>
+    <div style="flex:1"></div>
+    <div class="share-banner" id="banner1"></div>
+  </div>
+
+  <div class="glass-card" style="padding:20px 24px 8px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">
+      <h2 style="font-size:19px;font-weight:700">订单状态分布（9 月）</h2>
+      <span class="env env-prod">数据来自生产环境</span>
+    </div>
+    <div class="muted" style="font-size:12px;margin-bottom:4px">数据源 订单核心库 · 最近取数 2026-09-15 09:42 · 统计区间 2026-09-01 至今</div>
+    <div id="shareChart" style="height:380px"></div>
+  </div>
+
+  <div class="kpi-strip">
+    <div class="glass-card kpi-card"><div class="label">总订单数</div><div class="value" style="font-size:24px">239</div></div>
+    <div class="glass-card kpi-card"><div class="label">已完成</div><div class="value" style="font-size:24px;color:#818cf8">81</div><div class="delta muted">占比 33.9%</div></div>
+    <div class="glass-card kpi-card"><div class="label">进行中（paid+shipped）</div><div class="value" style="font-size:24px;color:#38bdf8">107</div><div class="delta muted">占比 44.8%</div></div>
+    <div class="glass-card kpi-card"><div class="label">已取消</div><div class="value" style="font-size:24px;color:#fb7185">26</div><div class="delta muted">取消率 10.9%</div></div>
+  </div>
+
+  <div class="glass-card" style="padding:6px 12px;margin-bottom:14px">
+    <table class="grid">
+      <thead><tr><th>订单状态</th><th>订单数</th><th>金额（万元）</th><th>占比</th></tr></thead>
+      <tbody>
+        <tr><td>done（已完成）</td><td>81</td><td>12.4</td><td>33.9%</td></tr>
+        <tr><td>shipped（已发货）</td><td>56</td><td>9.1</td><td>23.4%</td></tr>
+        <tr><td>paid（已支付）</td><td>51</td><td>7.8</td><td>21.3%</td></tr>
+        <tr><td>cancelled（已取消）</td><td>26</td><td>3.2</td><td>10.9%</td></tr>
+        <tr><td>pending（待支付）</td><td>25</td><td>2.1</td><td>10.5%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center">
+    <button class="btn btn-sm" id="bPng"></button>
+    <button class="btn btn-sm" disabled style="opacity:.45;cursor:not-allowed" id="bCsv"></button>
+    <div style="flex:1"></div>
+    <span class="muted" style="font-size:11px" id="safeNote"></span>
+  </div>
+</div>
+
+<script src="../assets/lib/echarts.min.js"></script>
+<script src="../assets/echarts-theme.js"></script>
+<script>
+document.getElementById('banner1').innerHTML='<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>只读分享 · 无需登录 · 服务端仅允许 SELECT';
+document.getElementById('bPng').innerHTML='<svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出 PNG';
+document.getElementById('bCsv').innerHTML='导出 CSV（管理员已禁用）';
+document.getElementById('safeNote').innerHTML='平台对查询结果强制 1000 行上限；敏感列按数据源脱敏策略输出；本页 SQL 与连接信息不对外暴露。';
+// 水印
+const wm=document.getElementById('wm');
+for(let r=0;r<6;r++)for(let c=0;c<5;c++){
+  const s=document.createElement('span');
+  s.textContent='DBHub 分享 · admin · 2026-09-15';
+  s.style.left=(c*22-6)+'%'; s.style.top=(r*20+4)+'%';
+  wm.appendChild(s);
+}
+echarts.init(document.getElementById('shareChart')).setOption({
+  tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+  legend:{data:['订单数','金额(万元)'],textStyle:{color:'rgba(255,255,255,.6)',fontSize:11},top:2,left:72,icon:'roundRect'},
+  grid:{left:54,right:54,top:38,bottom:34},
+  xAxis:{type:'category',data:['done 已完成','shipped 已发货','paid 已支付','cancelled 已取消','pending 待支付'],axisLine:{lineStyle:{color:'rgba(255,255,255,.15)'}},axisTick:{show:false},axisLabel:{color:'rgba(255,255,255,.65)',fontSize:11}},
+  yAxis:[
+    {type:'value',axisLabel:{color:'rgba(255,255,255,.4)'},splitLine:{lineStyle:{color:'rgba(255,255,255,.06)'}}},
+    {type:'value',axisLabel:{color:'rgba(255,255,255,.4)'},splitLine:{show:false}}
+  ],
+  series:[
+    {name:'订单数',type:'bar',barWidth:'42%',data:[81,56,51,26,25],itemStyle:{borderRadius:[6,6,0,0],color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#818cf8'},{offset:1,color:'rgba(129,140,248,.25)'}])},label:{show:true,position:'top',color:'rgba(255,255,255,.8)'}},
+    {name:'金额(万元)',type:'line',yAxisIndex:1,smooth:true,data:[12.4,9.1,7.8,3.2,2.1],lineStyle:{color:'#f472b6',width:2.5},itemStyle:{color:'#f472b6'},symbolSize:8}
+  ]
+});
+</script>
+</body>
+</html>

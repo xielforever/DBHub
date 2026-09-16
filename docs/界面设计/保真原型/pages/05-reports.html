@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>05 · 报表中心</title>
+<link rel="stylesheet" href="../assets/app.css">
+<style>
+  .rep-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .rep-card { padding:0; overflow:hidden; cursor:pointer; transition:all .2s; }
+  .rep-card:hover { transform:translateY(-3px); box-shadow:0 16px 48px rgba(31,38,135,.5); }
+  .rep-thumb { height:120px; position:relative; border-bottom:1px solid rgba(255,255,255,.08); overflow:hidden; }
+  .mini-table { width:calc(100% - 20px); margin:10px; border-collapse:collapse; font-size:11px; }
+  .mini-table th { color:rgba(255,255,255,.4); font-weight:500; text-align:left; padding:4px 6px; border-bottom:1px solid rgba(255,255,255,.1); }
+  .mini-table td { padding:5px 6px; color:rgba(255,255,255,.72); border-bottom:1px solid rgba(255,255,255,.05); }
+  .mini-table tr:last-child td { border-bottom:0; }
+  .rep-body { padding:12px 14px 14px; }
+  .rep-title { font-size:13px; font-weight:600; margin-bottom:4px; display:flex;align-items:center;gap:6px; }
+  .rep-meta { font-size:11px; color:rgba(255,255,255,.42); line-height:1.7; }
+  .rep-actions { display:flex; gap:6px; margin-top:10px; }
+  .vis { font-size:10px; padding:1.5px 7px; border-radius:6px; display:inline-flex;align-items:center;gap:4px; }
+  .vis-private { background:rgba(148,163,184,.14); color:#cbd5e1; }
+  .vis-shared { background:rgba(16,185,129,.16); color:#6ee7b7; border:1px solid rgba(16,185,129,.3); }
+</style>
+</head>
+<body data-page="reports" data-title="报表中心" data-user-initial="A" data-user-name="admin">
+<div class="app-shell">
+  <aside class="rail" id="rail"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="page-head">
+        <div><h2>报表中心</h2><div class="sub">用 SQL 查询结果一键生成图表报表，私有保存或共享给团队</div></div>
+        <div class="spacer"></div>
+        <button class="btn btn-sm" id="bImport"></button>
+        <button class="btn btn-sm btn-primary" id="bNew"></button>
+      </div>
+
+      <div class="glass-card" style="padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="chip active">全部 8</span>
+        <span class="chip">我创建的 6</span>
+        <span class="chip">共享给我的 2</span>
+        <span class="chip">我收藏的 3</span>
+        <span style="width:1px;height:20px;background:rgba(255,255,255,.1);margin:0 6px"></span>
+        <span class="chip">全部数据源</span>
+        <span class="chip">全部图表类型</span>
+        <div style="flex:1"></div>
+        <div style="position:relative;width:220px">
+          <span style="position:absolute;left:10px;top:7px" id="fsi"></span>
+          <input placeholder="搜索报表名称 / SQL" style="width:100%;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:10px;padding:8px 10px 8px 32px;color:#fff;font-size:12px;outline:none">
+        </div>
+      </div>
+
+      <div class="rep-grid" id="repGrid"></div>
+
+      <div class="note" style="margin-top:16px">报表保存的是「SQL + 图表配置」，每次运行实时取数；数据源连接删除或权限回收后报表自动停用，不会缓存过期数据。</div>
+    </main>
+  </div>
+</div>
+
+<script src="../assets/lib/echarts.min.js"></script>
+<script src="../assets/echarts-theme.js"></script>
+<script src="../assets/shell.js"></script>
+<script>
+const REPORTS=[
+  {t:'订单状态分布（9 月）',type:'bar',typeName:'柱状图',ds:'订单核心库',owner:'admin',vis:'shared',runs:42,at:'10 分钟前',mini:'bar'},
+  {t:'近 14 天订单趋势',type:'line',typeName:'折线图',ds:'订单核心库',owner:'admin',vis:'private',runs:28,at:'1 小时前',mini:'line'},
+  {t:'订单支付方式占比',type:'pie',typeName:'饼图',ds:'订单核心库',owner:'admin',vis:'shared',runs:17,at:'昨天',mini:'pie'},
+  {t:'今日核心指标',type:'metric',typeName:'指标卡',ds:'订单核心库',owner:'admin',vis:'private',runs:66,at:'5 分钟前',mini:'metric'},
+  {t:'类目销售占比',type:'pie',typeName:'饼图',ds:'订单核心库',owner:'张运维',vis:'shared',runs:9,at:'3 天前',mini:'pie2'},
+  {t:'客单价周环比',type:'line',typeName:'折线图',ds:'订单只读从库',owner:'张运维',vis:'shared',runs:11,at:'2 天前',mini:'line2'},
+  {t:'热销商品 Top 10',type:'bar',typeName:'柱状图',ds:'开发示例库',owner:'admin',vis:'private',runs:5,at:'4 天前',mini:'bar2'},
+  {t:'订单明细（透视）',type:'table',typeName:'表格',ds:'订单核心库',owner:'admin',vis:'private',runs:3,at:'上周',mini:'table'},
+];
+document.addEventListener('DOMContentLoaded',()=>{
+  document.getElementById('bNew').innerHTML=icon('plus','ico')+' 新建报表';
+  document.getElementById('bImport').innerHTML=icon('download','ico')+' 导入';
+  document.getElementById('fsi').innerHTML=icon('search','ico');
+  const grid=document.getElementById('repGrid');
+  grid.innerHTML=REPORTS.map((r,i)=>`
+    <div class="glass-card rep-card">
+      <div class="rep-thumb" id="thumb${i}"></div>
+      <div class="rep-body">
+        <div class="rep-title">${r.t}
+          <span style="flex:1"></span>
+          <span class="vis ${r.vis==='shared'?'vis-shared':'vis-private'}">${r.vis==='shared'?icon('share','ico')+icon('check','ico'):''}${r.vis==='shared'?'已共享':'私有'}</span>
+        </div>
+        <div class="rep-meta">${r.typeName} · ${r.ds}<br>作者 ${r.owner} · 运行 ${r.runs} 次 · ${r.at}</div>
+        <div class="rep-actions">
+          <button class="btn btn-sm btn-primary" style="flex:1;justify-content:center">${icon('play','ico')}运行</button>
+          <button class="btn btn-sm">${icon('bar','ico')}</button>
+          <button class="btn btn-sm">${icon('share','ico')}</button>
+          <button class="btn btn-sm">${icon('star','ico')}</button>
+        </div>
+      </div>
+    </div>`).join('');
+  const baseAxis={axisLine:{lineStyle:{color:'rgba(255,255,255,.1)'}},axisLabel:{show:false},axisTick:{show:false},splitLine:{show:false}};
+  REPORTS.forEach((r,i)=>{
+    const c=echarts.init(document.getElementById('thumb'+i));
+    const common={grid:{left:6,right:6,top:10,bottom:6}};
+    let opt;
+    if(r.mini==='bar'||r.mini==='bar2') opt={...common,xAxis:{type:'category',data:['a','b','c','d','e'],...baseAxis},yAxis:{type:'value',...baseAxis},series:[{type:'bar',barWidth:'50%',data:miniData(r.mini),itemStyle:{borderRadius:[3,3,0,0],color:r.mini==='bar2'?'#f472b6':'#818cf8'}}]};
+    else if(r.mini.startsWith('line')) opt={...common,xAxis:{type:'category',data:Array(10),...baseAxis},yAxis:{type:'value',...baseAxis},series:[{type:'line',smooth:true,showSymbol:false,data:miniData(r.mini),lineStyle:{color:r.mini==='line2'?'#34d399':'#818cf8',width:2},areaStyle:{color:'rgba(129,140,248,.12)'}}]};
+    else if(r.mini==='metric') opt={series:[{type:'gauge',startAngle:200,endAngle:-20,min:0,max:100,radius:'95%',center:['50%','62%'],progress:{show:true,width:7,itemStyle:{color:'#34d399'}},axisLine:{lineStyle:{width:7,color:[[1,'rgba(255,255,255,.08)']]}},axisTick:{show:false},splitLine:{show:false},axisLabel:{show:false},pointer:{show:false},detail:{valueAnimation:true,formatter:'¥{value}万',color:'#fff',fontSize:15,offsetCenter:[0,'0']},data:[{value:88}]}]};
+    else if(r.mini==='table') opt={grid:{left:10,right:10,top:14,bottom:10},xAxis:{show:false,data:['a','b','c']},yAxis:{show:false},series:[{type:'bar',data:[]}]};
+    else opt={series:[{type:'pie',radius:['48%','75%'],center:['50%','52%'],label:{show:false},data:miniPie(r.mini)}]};
+    c.setOption(opt);
+    if(r.mini==='table'){
+      document.getElementById('thumb'+i).innerHTML=
+        '<table class="mini-table"><tr><th>订单号</th><th>状态</th><th style="text-align:right">金额</th></tr>'
+        +['O-10091|done|¥329','O-10090|paid|¥118','O-10089|shipped|¥860','O-10088|done|¥56']
+          .map(rr=>{const c=rr.split('|');return `<tr><td class="mono">${c[0]}</td><td>${c[1]}</td><td style="text-align:right" class="mono">${c[2]}</td></tr>`;}).join('')
+        +'</table>';
+    }
+  });
+  function miniData(k){ return {'bar':[30,60,45,80,55],bar2:[12,34,55,40,72,60,90],line:[20,35,28,44,38,52,47,60,55,68],line2:[40,38,44,42,50,48,56,54,60,63]}[k]; }
+  function miniPie(k){ const pal=k==='pie2'?['#f472b6','#818cf8','#34d399','#fbbf24']:['#818cf8','#38bdf8','#34d399','#fb7185','#fbbf24']; return [40,28,18,9,5].slice(0,k==='pie2'?4:5).map((v,i)=>({value:v,itemStyle:{color:pal[i]}})); }
+});
+</script>
+</body>
+</html>

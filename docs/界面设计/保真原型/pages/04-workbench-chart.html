@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>04 · SQL 工作台 · 结果图表化</title>
+<link rel="stylesheet" href="../assets/app.css">
+<style>
+  .wb-grid { display:flex; flex-direction:column; gap:12px; height:calc(100vh - 64px - 44px - 22px); }
+  .editor-card { flex:0 0 auto; }
+  .result-card { flex:1; min-height:0; display:flex; flex-direction:column; padding:0; overflow:hidden; }
+  .code-line { display:flex; font-family:ui-monospace,'SF Mono',Menlo,Consolas,'Noto Sans SC',monospace; font-size:12.5px; line-height:1.9; }
+  .code-line .ln { width:38px; text-align:right; padding-right:12px; color:rgba(255,255,255,.25); user-select:none; }
+  .kw { color:#c084fc; } .fn { color:#7dd3fc; } .str { color:#86efac; } .num { color:#fbbf24; } .cm { color:rgba(255,255,255,.32); }
+  .cfg-row { margin-bottom:12px; }
+  .cfg-row label { display:block; font-size:11px; color:rgba(255,255,255,.45); margin-bottom:5px; }
+  .fake-select { background:rgba(255,255,255,.06); border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:12.5px; display:flex; align-items:center; gap:8px; }
+  .type-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+  .type-btn { padding:8px 0; border-radius:9px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:rgba(255,255,255,.55); font-size:10.5px; display:flex;flex-direction:column;align-items:center;gap:4px; }
+  .type-btn.active { background:rgba(102,126,234,.22); border-color:rgba(129,140,248,.7); color:#c7d2fe; }
+  .type-btn .ico { width:17px;height:17px; }
+</style>
+</head>
+<body data-page="workbench" data-title="SQL 工作台" data-user-initial="A" data-user-name="admin">
+<div class="app-shell">
+  <aside class="rail" id="rail"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="wb-grid">
+        <!-- 编辑器 -->
+        <div class="glass-card editor-card">
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08)">
+            <span class="chip active" id="selConn"></span>
+            <span class="chip" id="selDb"></span>
+            <span class="chip" id="selSchema"></span>
+            <div style="flex:1"></div>
+            <button class="btn btn-sm" id="btnFmt"></button>
+            <button class="btn btn-sm" id="btnSave"></button>
+            <button class="btn btn-sm btn-primary" id="btnRun"></button>
+          </div>
+          <div style="padding:12px 6px 14px">
+            <div class="code-line"><span class="ln">1</span><span><span class="cm">-- 订单状态分布（生产只读）</span></span></div>
+            <div class="code-line"><span class="ln">2</span><span><span class="kw">SELECT</span> status,</span></div>
+            <div class="code-line"><span class="ln">3</span><span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="fn">COUNT</span>(*) <span class="kw">AS</span> order_count,</span></div>
+            <div class="code-line"><span class="ln">4</span><span>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="fn">ROUND</span>(<span class="fn">SUM</span>(total_amount) / <span class="num">10000</span>, <span class="num">1</span>) <span class="kw">AS</span> amount_wan</span></div>
+            <div class="code-line"><span class="ln">5</span><span><span class="kw">FROM</span> shop.orders</span></div>
+            <div class="code-line"><span class="ln">6</span><span><span class="kw">WHERE</span> created_at &gt;= <span class="str">'2026-09-01'</span></span></div>
+            <div class="code-line"><span class="ln">7</span><span><span class="kw">GROUP BY</span> status</span></div>
+            <div class="code-line"><span class="ln">8</span><span><span class="kw">ORDER BY</span> order_count <span class="kw">DESC</span>;</span></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;padding:7px 16px;border-top:1px solid rgba(255,255,255,.08);font-size:11.5px;color:rgba(255,255,255,.5)">
+            <span style="color:#6ee7b7" id="runOk"></span>
+            <span>5 行</span><span>耗时 3 ms</span><span>参数化执行 · 只读连接</span>
+            <div style="flex:1"></div>
+            <span>Ctrl+Enter 执行</span>
+          </div>
+        </div>
+
+        <!-- 结果区 -->
+        <div class="glass-card result-card">
+          <div style="display:flex;align-items:center;padding:0 14px;border-bottom:1px solid rgba(255,255,255,.08)">
+            <button class="tab">数据结果</button>
+            <button class="tab active">图表</button>
+            <button class="tab">执行计划</button>
+            <button class="tab">查询历史</button>
+            <button class="tab">Redis</button>
+            <button class="tab">消息</button>
+            <div style="flex:1"></div>
+            <button class="btn btn-sm" id="btnAddDash" style="margin-right:8px"></button>
+            <button class="btn btn-sm btn-primary" id="btnSaveReport"></button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 272px;flex:1;min-height:0">
+            <div style="padding:10px 8px;min-width:0;display:flex;flex-direction:column">
+              <div id="mainChart" style="flex:1;min-height:0"></div>
+              <div class="note" style="margin:0 8px">图表基于本次查询结果在浏览器端渲染；保存为报表后，图表配置随 SQL 一起持久化，再次运行自动取数重绘。</div>
+            </div>
+            <div style="border-left:1px solid rgba(255,255,255,.08);padding:16px;overflow:auto">
+              <div class="cfg-row">
+                <label>图表类型</label>
+                <div class="type-grid">
+                  <button class="type-btn" id="tt1"></button>
+                  <button class="type-btn active" id="tt2"></button>
+                  <button class="type-btn" id="tt3"></button>
+                  <button class="type-btn" id="tt4"></button>
+                  <button class="type-btn" id="tt5"></button>
+                </div>
+              </div>
+              <div class="cfg-row">
+                <label>维度（X 轴 / 分组）</label>
+                <div class="fake-select mono"><span id="cDim"></span> status</div>
+              </div>
+              <div class="cfg-row">
+                <label>数值指标</label>
+                <div class="fake-select mono" id="cM1" style="margin-bottom:7px"></div>
+                <div class="fake-select mono" id="cM2"></div>
+              </div>
+              <div class="cfg-row">
+                <label>排序</label>
+                <div class="fake-select" id="cSort"></div>
+              </div>
+              <div class="cfg-row">
+                <label>图表标题</label>
+                <input class="glass-input" value="订单状态分布（9 月）" style="width:100%;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:10px;padding:8px 10px;color:#fff;font-size:12.5px;outline:none">
+              </div>
+              <div class="cfg-row">
+                <label style="display:flex;align-items:center;gap:8px">
+                  <span style="width:15px;height:15px;border-radius:5px;background:linear-gradient(135deg,#667eea,#764ba2);display:inline-flex;align-items:center;justify-content:center" id="ck"></span>
+                  显示数据标签</label>
+              </div>
+              <button class="btn btn-sm" style="width:100%;justify-content:center;margin-top:4px" id="btnPng"></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../assets/lib/echarts.min.js"></script>
+<script src="../assets/echarts-theme.js"></script>
+<script src="../assets/shell.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+  const m={selConn:'datasource',btnFmt:'zap',btnSave:'save',btnRun:'play',btnSaveReport:'reports',btnAddDash:'grid',
+    cDim:'columns',cM1:'bar',cM2:'bar',cSort:'bar',tt1:'table',tt2:'bar',tt3:'line',tt4:'pie',tt5:'metric',btnPng:'download',ck:'check',runOk:'check'};
+  for(const [id,n] of Object.entries(m)) document.getElementById(id).innerHTML=icon(n,'ico');
+  document.getElementById('selConn').innerHTML=icon('datasource','ico')+'订单核心库 <span class="env env-prod">生产</span>';
+  document.getElementById('selDb').innerHTML='shop';
+  document.getElementById('selSchema').innerHTML='public';
+  document.getElementById('btnFmt').innerHTML+=' 格式化';
+  document.getElementById('btnSave').innerHTML+=' 保存查询';
+  document.getElementById('btnRun').innerHTML+=' 运行 (Ctrl+Enter)';
+  document.getElementById('btnSaveReport').innerHTML+=' 保存为报表';
+  document.getElementById('btnAddDash').innerHTML+=' 添加到仪表盘';
+  document.getElementById('btnPng').innerHTML+=' 导出 PNG';
+  document.getElementById('runOk').innerHTML=icon('check','ico')+' 执行成功';
+  document.getElementById('cM1').innerHTML+='<span style="flex:1">order_count · 求和</span>';
+  document.getElementById('cM2').innerHTML+='<span style="flex:1">amount_wan · 求和（右轴）</span>';
+  document.getElementById('cSort').innerHTML+='<span style="flex:1">按 order_count 降序</span>';
+  document.getElementById('tt1').innerHTML+=icon('table')+'表格';
+  document.getElementById('tt2').innerHTML+=icon('bar')+'柱状';
+  document.getElementById('tt3').innerHTML+=icon('line')+'折线';
+  document.getElementById('tt4').innerHTML+=icon('pie')+'饼图';
+  document.getElementById('tt5').innerHTML+=icon('metric')+'指标';
+  const labels=['done','shipped','paid','cancelled','pending'];
+  const chart=echarts.init(document.getElementById('mainChart'));
+  chart.setOption({
+    tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+    legend:{data:['订单数','金额(万元)'],textStyle:{color:'rgba(255,255,255,.6)',fontSize:11},top:2,left:72,icon:'roundRect'},
+    grid:{left:48,right:52,top:40,bottom:30},
+    xAxis:{type:'category',data:labels,axisLine:{lineStyle:{color:'rgba(255,255,255,.15)'}},axisTick:{show:false},axisLabel:{color:'rgba(255,255,255,.6)'}},
+    yAxis:[
+      {type:'value',name:'订单数',nameTextStyle:{color:'rgba(255,255,255,.4)',fontSize:10},axisLabel:{color:'rgba(255,255,255,.4)'},splitLine:{lineStyle:{color:'rgba(255,255,255,.06)'}}},
+      {type:'value',name:'万元',nameTextStyle:{color:'rgba(255,255,255,.4)',fontSize:10},axisLabel:{color:'rgba(255,255,255,.4)'},splitLine:{show:false}}
+    ],
+    series:[
+      {name:'订单数',type:'bar',barWidth:'42%',data:[81,56,51,26,25],itemStyle:{borderRadius:[6,6,0,0],color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#818cf8'},{offset:1,color:'rgba(129,140,248,.25)'}])},label:{show:true,position:'top',color:'rgba(255,255,255,.75)',fontSize:11}},
+      {name:'金额(万元)',type:'line',yAxisIndex:1,smooth:true,data:[12.4,9.1,7.8,3.2,2.1],lineStyle:{color:'#f472b6',width:2.5},itemStyle:{color:'#f472b6'},symbolSize:7}
+    ]
+  });
+  window.addEventListener('resize',()=>chart.resize());
+});
+</script>
+</body>
+</html>

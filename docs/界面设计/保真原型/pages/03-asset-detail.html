@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>03 · 表资产详情</title>
+<link rel="stylesheet" href="../assets/app.css">
+<style>
+  .crumb { font-size:12px; color:rgba(255,255,255,.45); display:flex; align-items:center; gap:6px; margin-bottom:14px; }
+  .crumb a { color:rgba(255,255,255,.6); text-decoration:none; cursor:pointer; }
+  .kv { display:grid; grid-template-columns:72px 1fr; gap:7px 12px; font-size:12.5px; }
+  .kv .k { color:rgba(255,255,255,.4); }
+  .lineage-node { fill:rgba(102,126,234,.14); stroke:rgba(129,140,248,.55); stroke-width:1; }
+  .lineage-node-hot { fill:rgba(236,72,153,.16); stroke:rgba(244,114,182,.6); }
+  .lineage-node-bi { fill:rgba(16,185,129,.14); stroke:rgba(52,211,153,.55); }
+</style>
+</head>
+<body data-page="assets" data-title="数据资产 · 表详情" data-user-initial="A" data-user-name="admin">
+<div class="app-shell">
+  <aside class="rail" id="rail"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content">
+      <div class="crumb">
+        <span id="bc1"></span><a>数据资产</a><span>/</span>
+        <span class="env env-prod">订单核心库</span><span>/</span>
+        <a class="mono">shop</a><span>/</span><b class="mono" style="color:#fff">orders</b>
+      </div>
+
+      <div class="glass-card" style="padding:18px 22px;margin-bottom:16px;display:flex;align-items:center;gap:16px">
+        <div class="kpi-icon" style="width:46px;height:46px;border-radius:14px;background:rgba(102,126,234,.2);color:#a5b4fc" id="h1"></div>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+            <b style="font-size:17px" class="mono">orders</b>
+            <span class="sens sens-internal">内部</span>
+            <span class="tag">订单域</span><span class="tag">核心</span>
+          </div>
+          <div class="dim" style="font-size:12.5px">订单主表，记录下单与支付状态流转 · 每日凌晨自动同步元数据 · 最近同步 3 分钟前</div>
+        </div>
+        <button class="btn btn-sm" id="aFav"></button>
+        <button class="btn btn-sm" id="aQuery"></button>
+        <button class="btn btn-sm" id="aReport"></button>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active">字段 (12)</button>
+        <button class="tab">数据预览 (239)</button>
+        <button class="tab">DDL</button>
+        <button class="tab">血缘</button>
+        <button class="tab">查询历史 (128)</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 348px;gap:14px;align-items:start">
+        <!-- 字段表 -->
+        <div class="glass-card" style="padding:6px 10px">
+          <table class="grid">
+            <thead><tr><th>列名</th><th>类型</th><th>可空</th><th>键</th><th>业务注释</th><th>敏感度</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">id</td><td class="mono">bigint</td><td>NO</td><td><span class="tag" style="background:rgba(245,158,11,.18);color:#fcd34d;border-color:rgba(245,158,11,.35)">PK</span></td><td>订单号（雪花 ID）</td><td><span class="sens sens-normal">普通</span></td></tr>
+              <tr><td class="mono">customer_id</td><td class="mono">bigint</td><td>NO</td><td><span class="tag" style="background:rgba(102,126,234,.2);color:#a5b4fc">FK</span></td><td>下单客户，关联 customers.id</td><td><span class="sens sens-normal">普通</span></td></tr>
+              <tr><td class="mono">order_no</td><td class="mono">varchar(32)</td><td>NO</td><td>—</td><td>对外订单编号，唯一</td><td><span class="sens sens-internal">内部</span></td></tr>
+              <tr><td class="mono">status</td><td class="mono">varchar(16)</td><td>NO</td><td>—</td><td>订单状态：pending/paid/shipped/done/cancelled</td><td><span class="sens sens-normal">普通</span></td></tr>
+              <tr><td class="mono">total_amount</td><td class="mono">numeric(12,2)</td><td>NO</td><td>—</td><td>订单总金额（元）</td><td><span class="sens sens-internal">内部</span></td></tr>
+              <tr><td class="mono">phone</td><td class="mono">varchar(20)</td><td>YES</td><td>—</td><td>收货联系电话</td><td><span class="sens sens-sensitive">敏感</span></td></tr>
+              <tr><td class="mono">address</td><td class="mono">text</td><td>YES</td><td>—</td><td>收货地址</td><td><span class="sens sens-sensitive">敏感</span></td></tr>
+              <tr><td class="mono">channel</td><td class="mono">varchar(16)</td><td>NO</td><td>—</td><td>下单渠道：app/web/miniapp</td><td><span class="sens sens-normal">普通</span></td></tr>
+              <tr><td class="mono">paid_at</td><td class="mono">timestamptz</td><td>YES</td><td>—</td><td>支付完成时间</td><td><span class="sens sens-normal">普通</span></td></tr>
+              <tr><td class="mono">created_at</td><td class="mono">timestamptz</td><td>NO</td><td>—</td><td>下单时间</td><td><span class="sens sens-normal">普通</span></td></tr>
+              <tr><td class="mono">updated_at</td><td class="mono">timestamptz</td><td>NO</td><td>—</td><td>最近状态变更时间</td><td><span class="sens sens-normal">普通</span></td></tr>
+            </tbody>
+          </table>
+          <div class="note" style="margin:10px 6px">点击任一敏感列可发起「脱敏申请」；业务注释与敏感度由 Owner 维护并记入审计。</div>
+        </div>
+
+        <!-- 右栏 -->
+        <div style="display:flex;flex-direction:column;gap:14px">
+          <div class="glass-card" style="padding:16px 18px">
+            <div class="section-title"><span id="s1"></span>基础信息</div>
+            <div class="kv">
+              <span class="k">数据源</span><span>订单核心库（PostgreSQL 16）</span>
+              <span class="k">环境</span><span><span class="env env-prod">生产</span></span>
+              <span class="k">规模</span><span class="mono">239 行 · 48 KB · 12 列</span>
+              <span class="k">Owner</span><span>张运维（ops@corp）</span>
+              <span class="k">收藏</span><span>5 人已收藏</span>
+              <span class="k">热度</span><span>128 次查询 / 30 天</span>
+            </div>
+            <div id="hot" style="height:84px;margin-top:8px"></div>
+          </div>
+
+          <div class="glass-card" style="padding:16px 18px">
+            <div class="section-title"><span id="s2"></span>业务标注
+              <span class="more" id="editAnn"></span></div>
+            <div class="glass-panel" style="padding:10px 12px;font-size:12.5px;line-height:1.7;color:rgba(255,255,255,.75)">
+              下单即写入；status 流转 pending → paid → shipped → done，取消走 cancelled。财务对账以 paid_at 非空为准。<br>
+              <span style="display:inline-flex;gap:6px;margin-top:8px"><span class="tag">订单域</span><span class="tag">核心</span><span class="tag">对账口径</span></span>
+            </div>
+          </div>
+
+          <div class="glass-card" style="padding:16px 18px">
+            <div class="section-title"><span id="s3"></span>血缘（上下游）</div>
+            <svg viewBox="0 0 300 210" style="width:100%;height:210px">
+              <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="rgba(255,255,255,.35)"/></marker></defs>
+              <!-- 上游 -->
+              <rect class="lineage-node" x="8" y="12" width="92" height="30" rx="8"/>
+              <text x="54" y="31" text-anchor="middle" fill="#c7d2fe" font-size="11" font-family="monospace">customers</text>
+              <rect class="lineage-node" x="8" y="56" width="92" height="30" rx="8"/>
+              <text x="54" y="75" text-anchor="middle" fill="#c7d2fe" font-size="11" font-family="monospace">order_items</text>
+              <rect class="lineage-node" x="8" y="100" width="92" height="30" rx="8"/>
+              <text x="54" y="119" text-anchor="middle" fill="#c7d2fe" font-size="11" font-family="monospace">payments</text>
+              <!-- 中心 -->
+              <rect class="lineage-node-hot" x="118" y="56" width="82" height="34" rx="9"/>
+              <text x="159" y="77" text-anchor="middle" fill="#f9a8d4" font-size="12" font-family="monospace" font-weight="700">orders</text>
+              <!-- 下游 -->
+              <rect class="lineage-node-bi" x="218" y="24" width="76" height="30" rx="8"/>
+              <text x="256" y="40" text-anchor="middle" fill="#6ee7b7" font-size="10">订单状态分布</text>
+              <text x="256" y="51" text-anchor="middle" fill="rgba(255,255,255,.4)" font-size="9">报表</text>
+              <rect class="lineage-node-bi" x="218" y="86" width="76" height="30" rx="8"/>
+              <text x="256" y="102" text-anchor="middle" fill="#6ee7b7" font-size="10">近14天趋势</text>
+              <text x="256" y="113" text-anchor="middle" fill="rgba(255,255,255,.4)" font-size="9">报表</text>
+              <rect class="lineage-node" x="218" y="148" width="76" height="30" rx="8"/>
+              <text x="256" y="167" text-anchor="middle" fill="#c7d2fe" font-size="10">经营概览</text>
+              <line x1="100" y1="27" x2="118" y2="62" stroke="rgba(255,255,255,.3)" marker-end="url(#arrow)"/>
+              <line x1="100" y1="71" x2="118" y2="73" stroke="rgba(255,255,255,.3)" marker-end="url(#arrow)"/>
+              <line x1="100" y1="115" x2="118" y2="84" stroke="rgba(255,255,255,.3)" marker-end="url(#arrow)"/>
+              <line x1="200" y1="66" x2="218" y2="44" stroke="rgba(255,255,255,.3)" marker-end="url(#arrow)"/>
+              <line x1="200" y1="76" x2="218" y2="100" stroke="rgba(255,255,255,.3)" marker-end="url(#arrow)"/>
+              <line x1="159" y1="90" x2="240" y2="148" stroke="rgba(255,255,255,.3)" marker-end="url(#arrow)"/>
+            </svg>
+            <div class="muted" style="font-size:11px;text-align:center">完整字段级血缘见「血缘」页签（后续迭代）</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script src="../assets/lib/echarts.min.js"></script>
+<script src="../assets/echarts-theme.js"></script>
+<script src="../assets/shell.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+  const m={h1:'table',s1:'harddrive',s2:'edit',s3:'lineage',bc1:'assets',editAnn:'编辑'};
+  for(const [id,n] of Object.entries(m)) document.getElementById(id).innerHTML=icon(n,id==='editAnn'?'ico':'ico');
+  document.getElementById('aFav').innerHTML=icon('star','ico')+' 收藏';
+  document.getElementById('aQuery').innerHTML=icon('workbench','ico')+' 查询数据';
+  document.getElementById('aReport').innerHTML=icon('bar','ico')+' 创建报表';
+  echarts.init(document.getElementById('hot')).setOption({
+    grid:{left:4,right:4,top:8,bottom:4},
+    xAxis:{type:'category',data:['9/9','9/10','9/11','9/12','9/13','9/14','9/15'],axisLine:{lineStyle:{color:'rgba(255,255,255,.12)'}},axisTick:{show:false},axisLabel:{color:'rgba(255,255,255,.4)',fontSize:9}},
+    yAxis:{type:'value',show:false},
+    tooltip:{trigger:'axis'},
+    series:[{type:'bar',barWidth:'48%',data:[8,15,11,23,19,27,25],itemStyle:{borderRadius:[4,4,0,0],color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:'#818cf8'},{offset:1,color:'rgba(129,140,248,.25)'}])}}]
+  });
+});
+</script>
+</body>
+</html>
