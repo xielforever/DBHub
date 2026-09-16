@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>DBHub 高保真原型评审看板</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  body { overflow: auto; }
+  .review-wrap { max-width: 1280px; margin: 0 auto; padding: 36px 28px 80px; }
+  .hero { border-radius: 24px; padding: 28px 32px; margin-bottom: 26px; background: linear-gradient(135deg, rgba(102,126,234,.22), rgba(118,75,162,.18)); border: 1px solid var(--border); }
+  .hero h1 { font-size: 24px; margin-bottom: 8px; }
+  .hero p { color: rgba(255,255,255,.6); font-size: 13px; line-height: 1.8; }
+  .shot { margin-bottom: 34px; }
+  .shot-head { display: flex; align-items: baseline; gap: 12px; margin: 0 4px 12px; }
+  .shot-head h3 { font-size: 16px; }
+  .shot-head .no { font-size: 11px; font-weight: 800; color: #1f2937; background: var(--amber); border-radius: 999px; padding: 2px 9px; }
+  .shot-head .pts { font-size: 12px; color: rgba(255,255,255,.5); }
+  .shot-head a { margin-left: auto; font-size: 12px; color: #a5b4fc; text-decoration: none; border: 1px solid var(--border); padding: 6px 12px; border-radius: 10px; background: rgba(255,255,255,.05); white-space: nowrap; }
+  .shot-head a:hover { background: rgba(102,126,234,.2); }
+  .shot img { width: 100%; border-radius: 18px; border: 1px solid var(--border); box-shadow: 0 20px 60px rgba(0,0,0,.45); display: block; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: rgba(255,255,255,.55); margin-top: 14px; }
+  .legend i { width: 18px; height: 18px; border-radius: 50%; background: var(--amber); color: #1f2937; font-weight: 800; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; margin-right: 6px; }
+</style>
+</head>
+<body style="background:var(--premium-darker)">
+<div class="review-wrap">
+  <div class="hero">
+    <h1>DBHub 高保真原型评审看板</h1>
+    <p>数据资产 · 报表中心 · IA 收口 · 表数据编辑预研 —— 共 7 屏，视觉令牌全部取自 <span class="mono">frontend/src/style.css</span>，未引入新视觉语言。<br>
+    图中 <b style="color:#fcd34d">琥珀色编号 ①–⑲</b> 为待确认设计决策，索引见设计方案文档第 10.1 节。点击右上角可打开对应的可交互静态原型。</p>
+    <div class="legend">
+      <span><i>✓</i>评审重点：新 IA 导航与现有路由一一对应，无重复入口 / 假链接</span>
+      <span><i>✓</i>暗色玻璃弹层（搜索、分享）展开态规范</span>
+      <span><i>✓</i>原型为静态保真稿，非功能代码</span>
+    </div>
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">01</span><h3>数据资产目录（全局搜索展开态）</h3>
+      <span class="pts">全局搜索分组结果 · 资产树 · Owner/标签/分级/热度列表 · 同步字典（标注 1–4）</span>
+      <a href="01-assets.html">打开可交互原型 →</a></div>
+    <img src="png/01-assets.png" alt="数据资产目录">
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">02</span><h3>表详情 · 字段 Tab</h3>
+      <span class="pts">库内注释与业务说明分行 · 列级分级 · Owner/热度右侧栏（标注 5–8）</span>
+      <a href="02-asset-detail.html">打开可交互原型 →</a></div>
+    <img src="png/02-asset-detail.png" alt="表详情字段">
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">03</span><h3>表详情 · 血缘 Tab</h3>
+      <span class="pts">外键 / SQL 依赖 / 仪表盘引用三类边 · 影响分析（标注 9）</span>
+      <a href="03-asset-lineage.html">打开可交互原型 →</a></div>
+    <img src="png/03-asset-lineage.png" alt="表级血缘">
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">04</span><h3>SQL 工作台 · 结果转图表</h3>
+      <span class="pts">ChartCard 维度/指标配置 · 另存为报表（标注 10–11）</span>
+      <a href="04-query-chart.html">打开可交互原型 →</a></div>
+    <img src="png/04-query-chart.png" alt="工作台图表">
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">05</span><h3>报表中心</h3>
+      <span class="pts">共享仪表盘 · 我的/共享/收藏报表卡片 · 行内操作（标注 12–13）</span>
+      <a href="05-reports-home.html">打开可交互原型 →</a></div>
+    <img src="png/05-reports-home.png" alt="报表中心">
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">06</span><h3>仪表盘 · 只读分享弹层</h3>
+      <span class="pts">KPI/双轴趋势/漏斗/明细 · 12 栅格布局 · 免登录只读链接（标注 14–15）</span>
+      <a href="06-dashboard.html">打开可交互原型 →</a></div>
+    <img src="png/06-dashboard.png" alt="仪表盘">
+  </div>
+
+  <div class="shot">
+    <div class="shot-head"><span class="no">07</span><h3>表数据行内编辑（M6 预研）</h3>
+      <span class="pts">RBAC 编辑开关 · 改动高亮 · 浮动变更条 · 参数化 SQL 预览与风险校验（标注 16–19）</span>
+      <a href="07-table-edit.html">打开可交互原型 →</a></div>
+    <img src="png/07-table-edit.png" alt="表数据编辑">
+  </div>
+</div>
+</body>
+</html>

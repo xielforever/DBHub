@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>SQL 工作台 · 图表 · DBHub 保真原型</title>
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="app">
+  <aside class="rail" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="padding:14px 18px;display:flex;flex-direction:column;gap:12px">
+
+      <div style="display:grid;grid-template-columns:236px 1fr 232px;gap:12px;align-items:start;flex:1;min-height:0">
+
+        <!-- 数据源树 -->
+        <div class="panel" style="padding:10px;height:calc(100vh - 96px);display:flex;flex-direction:column;gap:8px">
+          <div class="select"><span class="status ok"></span>订单核心库 · postgres<span class="caret"></span></div>
+          <div class="tree-row" style="font-size:11.5px"><span class="chev" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#7dd3fc" data-ic="database"></span>postgres</div>
+          <div style="margin-left:14px">
+            <div class="tree-row active" style="font-size:11.5px"><span class="chev open" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#c4b5fd" data-ic="folder"></span>shop</div>
+            <div style="margin-left:14px">
+              <div class="tree-row" style="font-size:11.5px"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span>customers</div>
+              <div class="tree-row" style="font-size:11.5px"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span>order_items</div>
+              <div class="tree-row active" style="font-size:11.5px"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span>orders</div>
+              <div class="tree-row" style="font-size:11.5px"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span>products</div>
+            </div>
+          </div>
+          <div style="flex:1"></div>
+          <button class="btn btn-ghost btn-sm" style="width:100%" data-ic="refresh">刷新元数据</button>
+        </div>
+
+        <!-- 编辑器 + 结果 -->
+        <div style="display:flex;flex-direction:column;gap:12px;min-width:0">
+
+          <!-- 编辑器 -->
+          <div class="panel" style="padding:0;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border-soft)">
+              <span class="chip chip-indigo">查询 3</span>
+              <span class="chip chip-slate" data-ic="database" data-size="11">postgres</span>
+              <span class="chip chip-slate" data-ic="folder" data-size="11">shop</span>
+              <div style="flex:1"></div>
+              <span class="dim" style="font-size:11px">已保存草稿 · 自动保存于 14:21</span>
+              <button class="btn btn-ghost btn-sm" data-ic="save">保存</button>
+              <button class="btn btn-primary btn-sm" data-ic="play">运行</button>
+            </div>
+            <pre class="editor"><code><span class="tk-kw">SELECT</span> status,
+       <span class="tk-fn">COUNT</span>(*) <span class="tk-kw">AS</span> cnt
+<span class="tk-kw">FROM</span>   shop.orders
+<span class="tk-kw">WHERE</span>  created_at &gt;= <span class="tk-fn">CURRENT_DATE</span> - <span class="tk-fn">INTERVAL</span> <span class="tk-str">'14 days'</span>
+<span class="tk-kw">GROUP BY</span> status
+<span class="tk-kw">ORDER BY</span> cnt <span class="tk-kw">DESC</span>;</code></pre>
+          </div>
+
+          <!-- 结果 -->
+          <div class="panel" style="padding:0;overflow:hidden">
+            <div style="display:flex;align-items:center;gap:4px;padding:6px 10px;border-bottom:1px solid var(--border-soft);position:relative">
+              <div class="tabs" style="border:none;margin:0">
+                <div class="tab">数据 <span class="dim">5</span></div>
+                <div class="tab active">图表</div>
+                <div class="tab">历史</div>
+                <div class="tab">Redis</div>
+                <div class="tab">消息</div>
+              </div>
+              <div style="flex:1"></div>
+              <span class="dim" style="font-size:11px">返回 5 行 · 12 ms</span>
+              <span style="position:relative">
+                <button class="btn btn-primary btn-sm" data-ic="fileChart">另存为报表</button>
+                <span class="anno" style="top:-9px;right:-10px">10</span>
+              </span>
+            </div>
+
+            <!-- 图表配置条 -->
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap;position:relative">
+              <div class="switcher">
+                <span style="display:inline-flex;align-items:center;gap:5px" data-ic="table" data-size="13">表格</span>
+                <span class="on" style="display:inline-flex;align-items:center;gap:5px" data-ic="barChart" data-size="13">柱状</span>
+                <span style="display:inline-flex;align-items:center;gap:5px" data-ic="lineChart" data-size="13">折线</span>
+                <span style="display:inline-flex;align-items:center;gap:5px" data-ic="pieChart" data-size="13">饼图</span>
+                <span style="display:inline-flex;align-items:center;gap:5px" data-ic="gauge" data-size="13">数值</span>
+              </div>
+              <span class="dim" style="font-size:11.5px">维度（X 轴）</span>
+              <div class="select" style="width:118px;height:30px;font-size:12px">status<span class="caret"></span></div>
+              <span class="dim" style="font-size:11.5px">指标（Y 轴）</span>
+              <div class="select" style="width:170px;height:30px;font-size:12px">cnt · 自动聚合<span class="caret"></span></div>
+              <span class="dim" style="font-size:11.5px">排序</span>
+              <div class="select" style="width:118px;height:30px;font-size:12px">数值降序<span class="caret"></span></div>
+              <span class="anno" style="top:-9px;left:260px">11</span>
+            </div>
+
+            <!-- 图表本体（ChartCard 雏形） -->
+            <div style="padding:14px 18px 8px">
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px">
+                <div class="section-title" style="font-size:14px">订单状态分布（近 14 天）</div>
+                <div style="flex:1"></div>
+                <div style="display:flex;gap:14px;font-size:11px">
+                  <span style="display:flex;align-items:center;gap:5px"><i style="width:9px;height:9px;border-radius:3px;background:#818cf8"></i>cnt</span>
+                </div>
+              </div>
+              <div id="bar"></div>
+              <div class="dim" style="font-size:11px;padding:0 4px 10px">图表随查询结果即时渲染；“另存为报表”后可命名、共享、放入仪表盘或生成只读分享链接。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI 面板 -->
+        <div class="panel" style="height:calc(100vh - 96px);display:flex;flex-direction:column;padding:12px;gap:10px">
+          <div class="section-title" style="color:#a5b4fc" data-ic="ai">AI 智能助手</div>
+          <div style="background:rgba(255,255,255,.05);border:1px solid var(--border-soft);border-radius:12px;padding:9px 11px;font-size:11.5px;line-height:1.7;color:rgba(255,255,255,.72)">
+            检测到结果集含分类维度 <b style="color:#fff">status</b> 与计数 <b style="color:#fff">cnt</b>，已推荐<b>柱状图</b>；是否改为饼图查看占比？
+            <div style="margin-top:8px;display:flex;gap:6px"><span class="field-tag">用饼图</span><span class="field-tag">加趋势</span></div>
+          </div>
+          <div style="margin-left:auto;background:var(--liquid);border-radius:12px;padding:9px 11px;font-size:11.5px;max-width:90%;line-height:1.6">保持柱状，保存为报表「订单状态分布（近14天）」并共享给运营组</div>
+          <div style="flex:1"></div>
+          <textarea class="input" rows="3" placeholder="用自然语言追问，例如：再加一列占比…" style="font-size:11.5px;resize:none"></textarea>
+          <button class="btn btn-primary btn-sm" style="width:100%">发送（Alt+Enter）</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="chrome.js"></script>
+<script>
+renderChrome({ active: 'query', title: 'SQL 工作台', search: 'hidden', user: 'dev1', role: 'D' });
+document.getElementById('bar').innerHTML = svgBarV([
+  { label: 'pending', value: 62 }, { label: 'paid', value: 58 }, { label: 'shipped', value: 44 },
+  { label: 'done', value: 63 }, { label: 'cancelled', value: 12, color: '#fb7185' },
+], { w: 760, h: 300 });
+</script>
+</body>
+</html>

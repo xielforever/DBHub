@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>表数据编辑 · DBHub 保真原型</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .cell-input { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.18); border-radius: 7px; padding: 4px 8px; font-size: 12px; color: #fff; width: 100%; font-family: ui-monospace, Menlo, monospace; }
+  .cell-edit { background: rgba(245,158,11,.16); border: 1px solid rgba(245,158,11,.55); border-radius: 7px; padding: 4px 8px; font-size: 12px; width: 100%; color: #fde68a; font-family: ui-monospace, Menlo, monospace; box-shadow: 0 0 0 3px rgba(245,158,11,.12); display:flex; align-items:center; gap:6px; }
+  tr.row-edit { background: rgba(245,158,11,.07); }
+  tr.row-del { background: rgba(244,63,94,.08); color: rgba(253,164,175,.8); }
+  tr.row-del td { text-decoration: line-through; }
+  tr.row-new { background: rgba(102,126,234,.1); }
+  .sql-stmt { background: rgba(3,7,18,.6); border: 1px solid var(--border-soft); border-radius: 11px; padding: 10px 12px; font-family: ui-monospace, Menlo, monospace; font-size: 11px; line-height: 1.8; color: rgba(255,255,255,.8); white-space: pre-wrap; }
+  .check-row { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 10px; margin-bottom: 7px; }
+  .change-bar { display: flex; align-items: center; gap: 14px; width: fit-content; margin: 14px auto 4px; padding: 11px 18px; border-radius: 16px; background: rgba(20,28,48,.92); border: 1px solid rgba(245,158,11,.5); box-shadow: 0 18px 50px rgba(0,0,0,.5), 0 0 0 1px rgba(245,158,11,.15); z-index: 40; backdrop-filter: blur(20px); position: relative; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="padding:18px 24px 24px">
+
+      <div class="muted mono" style="font-size:11.5px;margin-bottom:10px;display:flex;gap:7px;align-items:center">
+        <span>数据资产</span><span>/</span><span>订单核心库（生产）</span><span>/</span><span>postgres</span><span>/</span><span>shop</span><span>/</span><b style="color:#fff">orders</b>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <span style="width:38px;height:38px;border-radius:12px;background:rgba(110,231,183,.12);color:#6ee7b7;display:flex;align-items:center;justify-content:center" data-ic="table" data-size="20"></span>
+        <div><div style="font-size:17px;font-weight:700">orders · 数据预览</div>
+        <div class="muted" style="font-size:11.5px;margin-top:2px">预览默认最多 200 行；编辑需 read_write 角色，单事务提交、失败整体回滚</div></div>
+      </div>
+      <div class="tabs" style="margin-bottom:14px">
+        <div class="tab">字段 <span class="dim">6</span></div>
+        <div class="tab">索引 <span class="dim">3</span></div>
+        <div class="tab">外键 <span class="dim">1</span></div>
+        <div class="tab">DDL</div>
+        <div class="tab active">数据预览</div>
+        <div class="tab">血缘</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 372px;gap:16px;align-items:start">
+        <!-- 数据表格 -->
+        <div class="panel" style="position:relative">
+          <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border-soft);position:relative">
+            <div class="switcher">
+              <span style="display:inline-flex;align-items:center;gap:5px" data-ic="eye">预览</span><span class="on" style="display:inline-flex;align-items:center;gap:5px" data-ic="pencil">编辑</span>
+            </div>
+            <span class="anno" style="top:-9px;left:118px">16</span>
+            <span class="chip chip-emerald" data-ic="edit" data-size="11">read_write 角色可编辑 · read_only 禁用</span>
+            <div style="flex:1"></div>
+            <button class="btn btn-ghost btn-sm" data-ic="plus">新增行</button>
+            <button class="btn btn-ghost btn-sm" style="color:#fda4af;border-color:rgba(244,63,94,.35)" data-ic="trash">删除所选（1）</button>
+            <button class="btn btn-ghost btn-sm" data-ic="download">导出 CSV</button>
+          </div>
+          <table class="grid">
+            <thead><tr>
+              <th style="width:34px"><input type="checkbox" style="accent-color:#667eea"></th>
+              <th style="width:56px">id</th><th style="width:170px">order_no</th><th style="width:100px">customer_id</th>
+              <th style="width:120px">status</th><th style="width:120px">total_amount</th><th>created_at</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td><input type="checkbox" style="accent-color:#667eea"></td>
+                <td class="mono">1</td><td class="mono">NO09140188</td><td class="mono">12</td>
+                <td><span class="chip chip-emerald">done</span></td>
+                <td class="mono">1,280.00</td><td class="mono dim">2026-09-14 09:12</td>
+              </tr>
+              <tr class="row-edit" style="position:relative">
+                <td><input type="checkbox" style="accent-color:#667eea"></td>
+                <td class="mono">2</td><td class="mono">NO09140203</td><td class="mono">7</td>
+                <td><span class="chip chip-amber">paid</span></td>
+                <td><div class="cell-edit" style="position:relative"><span>640.00</span><span style="flex:1"></span><span data-ic="pencil" data-size="12"></span><span class="anno" style="top:-10px;right:-12px">17</span></div>
+                  <span class="dim mono" style="font-size:10px;text-decoration:line-through">622.00</span></td>
+                <td class="mono dim">2026-09-14 10:41</td>
+              </tr>
+              <tr class="row-del">
+                <td><input type="checkbox" checked style="accent-color:#f43f5e"></td>
+                <td class="mono">3</td><td class="mono">NO09140215</td><td class="mono">21</td>
+                <td><span class="chip chip-rose">cancelled</span></td>
+                <td class="mono">89.90</td><td class="mono">2026-09-14 11:05</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" style="accent-color:#667eea"></td>
+                <td class="mono">4</td><td class="mono">NO09150077</td><td class="mono">5</td>
+                <td><span class="chip chip-sky">shipped</span></td>
+                <td class="mono">520.00</td><td class="mono dim">2026-09-15 08:33</td>
+              </tr>
+              <tr>
+                <td><input type="checkbox" style="accent-color:#667eea"></td>
+                <td class="mono">…</td><td class="dim mono">（预览 200 行，分页加载）</td><td></td><td></td><td></td><td></td>
+              </tr>
+              <tr class="row-new">
+                <td><span data-ic="plus" data-size="14" style="color:#a5b4fc"></span></td>
+                <td class="dim mono">自动</td>
+                <td><input class="cell-input" placeholder="NO091600xx"></td>
+                <td><input class="cell-input" placeholder="客户 id"></td>
+                <td><div class="cell-input" style="display:flex;align-items:center;justify-content:space-between;color:rgba(255,255,255,.5)">pending<span class="caret"></span></div></td>
+                <td><input class="cell-input" placeholder="0.00"></td>
+                <td class="dim mono">默认 now()</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- 浮动变更条 -->
+          <div class="change-bar">
+            <span style="width:8px;height:8px;border-radius:50%;background:#f59e0b;box-shadow:0 0 10px #f59e0b"></span>
+            <b style="font-size:12.5px">3 项待提交</b>
+            <span class="dim" style="font-size:11.5px">新增 1 · 修改 1 · 删除 1（含级联 12 行）</span>
+            <span class="divider-v" style="height:18px"></span>
+            <button class="btn btn-ghost btn-sm" data-ic="eye">预览 SQL</button>
+            <button class="btn btn-ghost btn-sm" style="color:#fda4af" data-ic="x">放弃</button>
+            <button class="btn btn-primary btn-sm" data-ic="check">提交变更</button>
+            <span class="anno" style="top:-9px;left:-10px">18</span>
+          </div>
+        </div>
+
+        <!-- 变更抽屉 -->
+        <div class="panel" style="padding:0;overflow:visible;position:sticky;top:0">
+          <div style="padding:13px 16px;border-bottom:1px solid var(--border-soft);display:flex;align-items:center;gap:9px;position:relative">
+            <span style="color:#fcd34d" data-ic="shieldCheck" data-size="16"></span>
+            <b style="font-size:13.5px">变更预览与安全校验</b>
+            <span class="anno" style="top:-9px;right:12px">19</span>
+          </div>
+          <div style="padding:13px 14px">
+            <div class="section-title muted" style="font-size:10.5px;letter-spacing:.1em;margin-bottom:8px">① 新增 · INSERT（参数化）</div>
+            <div class="sql-stmt"><span class="tk-kw">INSERT INTO</span> shop.orders
+  (order_no, customer_id, status,
+   total_amount, created_at)
+<span class="tk-kw">VALUES</span> ($1, $2, <span class="tk-str">'pending'</span>,
+   $3, now());</div>
+
+            <div class="section-title muted" style="font-size:10.5px;letter-spacing:.1em;margin:14px 0 8px">② 修改 · UPDATE（主键定位）</div>
+            <div class="sql-stmt"><span class="tk-kw">UPDATE</span> shop.orders
+<span class="tk-kw">SET</span>    total_amount = $1
+<span class="tk-kw">WHERE</span>  id = $2;</div>
+
+            <div class="section-title muted" style="font-size:10.5px;letter-spacing:.1em;margin:14px 0 8px">③ 删除 · DELETE（外键级联）</div>
+            <div class="sql-stmt" style="border-color:rgba(244,63,94,.35)"><span class="tk-kw">DELETE FROM</span> order_items
+<span class="tk-kw">WHERE</span> order_id = $1;   <span class="tk-com">-- 级联 12 行</span>
+<span class="tk-kw">DELETE FROM</span> shop.orders
+<span class="tk-kw">WHERE</span> id = $3;</div>
+
+            <div style="border-top:1px solid var(--border-soft);margin:15px 0 12px"></div>
+            <div class="check-row" style="background:rgba(16,185,129,.09)">
+              <span style="color:#34d399" data-ic="checkCircle" data-size="15"></span>
+              <span>全部语句均为<b>参数化 SQL</b>，无字符串拼接</span>
+            </div>
+            <div class="check-row" style="background:rgba(16,185,129,.09)">
+              <span style="color:#34d399" data-ic="checkCircle" data-size="15"></span>
+              <span>UPDATE / DELETE 均以<b>主键 id</b> 作为 WHERE 条件</span>
+            </div>
+            <div class="check-row" style="background:rgba(245,158,11,.1)">
+              <span style="color:#fcd34d" data-ic="alertTriangle" data-size="15"></span>
+              <span>DELETE 将<b>级联删除 order_items 12 行</b>（ON DELETE CASCADE），提交时二次确认</span>
+            </div>
+            <div class="check-row" style="background:rgba(245,158,11,.1)">
+              <span style="color:#fcd34d" data-ic="alertTriangle" data-size="15"></span>
+              <span>预计影响 <b>14 行</b>，超过管理员设定阈值（10 行），需填写变更原因</span>
+            </div>
+            <div class="check-row" style="background:rgba(244,63,94,.09);opacity:.75">
+              <span style="color:#fda4af" data-ic="ban" data-size="15"></span>
+              <span>无 WHERE 的全表 UPDATE/DELETE 将被<b>直接阻断</b>（示例：禁用态）</span>
+            </div>
+            <div class="check-row" style="background:rgba(255,255,255,.04)">
+              <span style="color:#7dd3fc" data-ic="info" data-size="15"></span>
+              <span>同一事务提交，任一语句失败整体回滚；提交记录写入操作审计</span>
+            </div>
+          </div>
+          <div style="padding:12px 14px;border-top:1px solid var(--border-soft);display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="x">取消</button>
+            <button class="btn btn-primary btn-sm" style="flex:1;justify-content:center" data-ic="shieldCheck">确认提交</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="chrome.js"></script>
+<script>renderChrome({ active: 'assets', title: '数据资产', search: 'plain', user: '李明', role: 'D' });</script>
+</body>
+</html>

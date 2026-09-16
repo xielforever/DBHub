@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>数据资产 · DBHub 保真原型</title>
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="app">
+  <aside class="rail" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="padding:18px 24px 24px">
+
+      <!-- 概览统计 + 同步动作 -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;position:relative">
+        <div class="stat-mini"><span style="color:#a5b4fc" id="i-db"></span><div><b>6</b><div class="muted">纳管数据源</div></div></div>
+        <div class="stat-mini"><span style="color:#6ee7b7" id="i-tbl"></span><div><b>132</b><div class="muted">表 / 视图</div></div></div>
+        <div class="stat-mini"><span style="color:#fcd34d" id="i-owner"></span><div><b>86%</b><div class="muted">已指定 Owner</div></div></div>
+        <div class="stat-mini"><span style="color:#f9a8d4" id="i-sens"></span><div><b>17</b><div class="muted">敏感 / 机密字段</div></div></div>
+        <div style="flex:1"></div>
+        <span class="muted" style="font-size:11.5px">最近同步 2026-09-16 07:30</span>
+        <span style="position:relative">
+          <button class="btn btn-ghost" id="i-sync"></button>
+          <span class="anno" style="top:-9px;right:-10px">2</span>
+        </span>
+      </div>
+
+      <div style="display:grid;grid-template-columns:264px 1fr;gap:16px;align-items:start">
+
+        <!-- 左：资产树 -->
+        <div class="panel" style="padding:12px;position:sticky;top:0">
+          <div class="section-title" style="padding:2px 6px 10px" id="i-tree"></div>
+          <div class="tree-row" style="color:#fff">
+            <span class="chev open" data-ic="chevronRight" data-size="12" style="visibility:hidden"></span>
+            <span class="ic" style="color:#fcd34d" data-ic="star"></span> 我的收藏
+            <span class="muted" style="margin-left:auto;font-size:11px">5</span>
+          </div>
+          <div class="tree-row"><span class="chev open" data-ic="chevronRight" data-size="12"></span><span class="ic" data-ic="layers"></span> 全部资产</div>
+
+          <div style="margin:2px 0 2px 16px">
+            <div class="tree-row"><span class="chev open" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#a78bfa" data-ic="database"></span>
+              订单核心库 <span class="env-badge env-prod" style="margin-left:auto">生产</span>
+            </div>
+            <div style="margin-left:16px">
+              <div class="tree-row"><span class="chev open" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#7dd3fc" data-ic="folder"></span> postgres</div>
+              <div style="margin-left:16px">
+                <div class="tree-row active"><span class="chev open" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#c4b5fd" data-ic="folder"></span> shop</div>
+                <div style="margin-left:16px">
+                  <div class="tree-row"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span> customers</div>
+                  <div class="tree-row"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span> order_items</div>
+                  <div class="tree-row active"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span> orders</div>
+                  <div class="tree-row"><span style="width:12px"></span><span class="ic" style="color:#6ee7b7" data-ic="table"></span> products</div>
+                </div>
+                <div class="tree-row"><span class="chev" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#c4b5fd" data-ic="folder"></span> public <span class="muted" style="margin-left:auto;font-size:11px">11</span></div>
+              </div>
+            </div>
+            <div class="tree-row"><span class="chev" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#6ee7b7" data-ic="database"></span>
+              开发示例库 <span class="env-badge env-dev" style="margin-left:auto">开发</span>
+            </div>
+            <div class="tree-row" style="opacity:.6"><span class="chev" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#60a5fa" data-ic="database"></span>
+              会员分析库 <span class="chip chip-rose" style="margin-left:auto;padding:0 7px">不可达</span>
+            </div>
+            <div class="tree-row" style="opacity:.6"><span class="chev" data-ic="chevronRight" data-size="12"></span><span class="ic" style="color:#f472b6" data-ic="database"></span> 缓存集群 <span class="chip chip-rose" style="margin-left:auto;padding:0 7px">不可达</span></div>
+          </div>
+        </div>
+
+        <!-- 右：资产列表 -->
+        <div class="panel" style="position:relative">
+          <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border-soft);flex-wrap:wrap">
+            <div class="switcher">
+              <span class="on">全部</span><span>表</span><span>视图</span><span>已收藏</span>
+            </div>
+            <div class="field-tag on" style="color:#fcd34d;border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.12)" id="i-level"></div>
+            <div class="field-tag">敏感</div>
+            <div class="field-tag">无 Owner</div>
+            <div style="flex:1"></div>
+            <span class="muted" style="font-size:11.5px">shop schema · 4 个对象</span>
+            <span class="anno" style="top:-9px;left:120px">3</span>
+          </div>
+          <table class="grid">
+            <thead><tr>
+              <th style="width:26%"></th><th style="width:20%">Owner</th><th>标签</th><th style="width:90px">分级</th>
+              <th style="width:80px">行数</th><th style="width:150px">近 30 天查询</th><th style="width:96px">同步</th>
+            </tr></thead>
+            <tbody>
+              <tr style="background:rgba(102,126,234,.08)">
+                <td><div style="display:flex;align-items:center;gap:9px">
+                  <span style="color:#fcd34d" data-ic="star"></span><span style="color:#6ee7b7" data-ic="table"></span>
+                  <div><b style="color:#fff">orders</b><div class="dim mono" style="font-size:10.5px">postgres / shop</div></div></div></td>
+                <td><div style="display:flex;align-items:center;gap:8px"><span class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#0ea5e9,#2563eb)">王</span>王芳（DBA）</div></td>
+                <td><span class="chip chip-indigo">交易</span> <span class="chip chip-slate">核心</span></td>
+                <td><span class="chip chip-amber" id="i-sensitive"></span></td>
+                <td class="mono">239</td>
+                <td><div class="heat"><span class="heat-bar"><i style="width:100%"></i></span><b style="font-weight:600">1,284</b></div></td>
+                <td class="muted" style="font-size:11.5px">2 小时前</td>
+              </tr>
+              <tr>
+                <td><div style="display:flex;align-items:center;gap:9px">
+                  <span style="width:15px"></span><span style="color:#6ee7b7" data-ic="table"></span>
+                  <div><b style="color:#fff">order_items</b><div class="dim mono" style="font-size:10.5px">postgres / shop</div></div></div></td>
+                <td><div style="display:flex;align-items:center;gap:8px"><span class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#0ea5e9,#2563eb)">王</span>王芳（DBA）</div></td>
+                <td><span class="chip chip-indigo">交易</span></td>
+                <td><span class="chip chip-slate">普通</span></td>
+                <td class="mono">479</td>
+                <td><div class="heat"><span class="heat-bar"><i style="width:68%"></i></span><span>872</span></div></td>
+                <td class="muted" style="font-size:11.5px">2 小时前</td>
+              </tr>
+              <tr>
+                <td><div style="display:flex;align-items:center;gap:9px">
+                  <span style="color:#fcd34d" data-ic="star"></span><span style="color:#6ee7b7" data-ic="table"></span>
+                  <div><b style="color:#fff">customers</b><div class="dim mono" style="font-size:10.5px">postgres / shop</div></div></div></td>
+                <td><div style="display:flex;align-items:center;gap:8px"><span class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#10b981,#0d9488)">李</span>李明（研发）</div></td>
+                <td><span class="chip chip-violet">会员</span></td>
+                <td><span class="chip chip-rose">机密</span></td>
+                <td class="mono">24</td>
+                <td><div class="heat"><span class="heat-bar"><i style="width:41%"></i></span><span>526</span></div></td>
+                <td class="muted" style="font-size:11.5px">2 小时前</td>
+              </tr>
+              <tr>
+                <td><div style="display:flex;align-items:center;gap:9px">
+                  <span style="width:15px"></span><span style="color:#6ee7b7" data-ic="table"></span>
+                  <div><b style="color:#fff">products</b><div class="dim mono" style="font-size:10.5px">postgres / shop</div></div></div></td>
+                <td><div style="display:flex;align-items:center;gap:8px"><span class="avatar" style="width:24px;height:24px;font-size:10px;background:linear-gradient(135deg,#10b981,#0d9488)">李</span>李明（研发）</div></td>
+                <td><span class="chip chip-emerald">商品</span></td>
+                <td><span class="chip chip-slate">普通</span></td>
+                <td class="mono">28</td>
+                <td><div class="heat"><span class="heat-bar"><i style="width:24%"></i></span><span>308</span></div></td>
+                <td class="muted" style="font-size:11.5px">2 小时前</td>
+              </tr>
+              <tr>
+                <td><div style="display:flex;align-items:center;gap:9px">
+                  <span style="width:15px"></span><span style="color:#7dd3fc" data-ic="eye"></span>
+                  <div><b style="color:#fff">v_orders_today</b><div class="dim mono" style="font-size:10.5px">postgres / shop（视图）</div></div></div></td>
+                <td class="dim">未指定</td>
+                <td class="dim">—</td>
+                <td><span class="chip chip-slate">普通</span></td>
+                <td class="mono">—</td>
+                <td><div class="heat"><span class="heat-bar"><i style="width:9%"></i></span><span>96</span></div></td>
+                <td class="muted" style="font-size:11.5px">2 小时前</td>
+              </tr>
+            </tbody>
+          </table>
+          <span class="anno" style="bottom:64px;right:228px">4</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="chrome.js"></script>
+<script>
+renderChrome({ active: 'assets', title: '数据资产', search: 'open', user: '王芳', role: 'A' });
+document.getElementById('i-db').innerHTML = ic('database');
+document.getElementById('i-tbl').innerHTML = ic('table');
+document.getElementById('i-owner').innerHTML = ic('user');
+document.getElementById('i-sens').innerHTML = ic('shieldAlert');
+document.getElementById('i-sync').innerHTML = ic('refresh') + ' 同步字典';
+document.getElementById('i-tree').innerHTML = ic('layers', '', 15) + ' 资产目录';
+document.getElementById('i-level').textContent = '⚠ 仅显示含分级';
+document.getElementById('i-sensitive').innerHTML = ic('shieldAlert', '', 11) + ' 敏感';
+</script>
+</body>
+</html>

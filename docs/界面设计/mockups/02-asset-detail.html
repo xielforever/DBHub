@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>表详情 · DBHub 保真原型</title>
+<link rel="stylesheet" href="shared.css">
+</head>
+<body>
+<div class="app">
+  <aside class="rail" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="padding:18px 24px 24px">
+
+      <!-- 面包屑 -->
+      <div class="muted mono" style="font-size:11.5px;margin-bottom:10px;display:flex;gap:7px;align-items:center">
+        <span>数据资产</span><span>/</span><span>订单核心库（生产）</span><span>/</span><span>postgres</span><span>/</span><b style="color:rgba(255,255,255,.75)">shop</b><span>/</span><b style="color:#fff">orders</b>
+      </div>
+
+      <!-- 标题行 -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <span style="width:38px;height:38px;border-radius:12px;background:rgba(110,231,183,.12);color:#6ee7b7;display:flex;align-items:center;justify-content:center" data-ic="table" data-size="20"></span>
+        <div>
+          <div style="display:flex;align-items:center;gap:9px;font-size:17px;font-weight:700">orders
+            <span class="chip chip-amber" data-ic="shieldAlert" data-size="11">敏感</span>
+            <span class="chip chip-indigo">交易</span>
+            <span class="chip chip-slate">核心表</span>
+          </div>
+          <div class="muted" style="font-size:11.5px;margin-top:2px">订单主表 · 239 行 · 最近同步 2 小时前</div>
+        </div>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost btn-sm" data-ic="star">收藏</button>
+        <button class="btn btn-ghost btn-sm" data-ic="download">导出 DDL</button>
+        <button class="btn btn-primary btn-sm" data-ic="terminal">在工作台打开</button>
+      </div>
+
+      <div class="tabs" style="margin-bottom:14px">
+        <div class="tab active">字段 <span class="dim">6</span></div>
+        <div class="tab">索引 <span class="dim">3</span></div>
+        <div class="tab">外键 <span class="dim">1</span></div>
+        <div class="tab">DDL</div>
+        <div class="tab">数据预览</div>
+        <div class="tab">血缘</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start">
+        <!-- 字段表 -->
+        <div class="panel">
+          <table class="grid">
+            <thead><tr>
+              <th style="width:150px">字段名</th><th style="width:150px">类型</th><th style="width:60px">可空</th>
+              <th style="width:50px">键</th><th style="width:90px">默认值</th><th>库内注释 / 业务说明</th><th style="width:84px">分级</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td class="mono" style="color:#fff">id</td><td class="mono muted">integer</td>
+                <td><span class="chip chip-slate">NOT NULL</span></td>
+                <td><span class="chip chip-amber" data-ic="key" data-size="10">PK</span></td>
+                <td class="dim mono">nextval…</td>
+                <td><div class="muted" style="font-size:11px">主键</div><div style="font-size:12px;margin-top:2px">自增主键</div></td>
+                <td><span class="chip chip-slate">普通</span></td>
+              </tr>
+              <tr>
+                <td class="mono" style="color:#fff">order_no</td><td class="mono muted">varchar(32)</td>
+                <td><span class="chip chip-slate">NOT NULL</span></td>
+                <td><span class="chip chip-sky" data-ic="key" data-size="10">UQ</span></td>
+                <td class="dim">—</td>
+                <td><div class="muted" style="font-size:11px">订单号（库内注释）</div>
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:2px">平台订单编号，规则 NO+日期+4 位流水
+                    <span style="color:#a5b4fc" data-ic="pencil" data-size="12"></span></div></td>
+                <td><span class="chip chip-slate">普通</span></td>
+              </tr>
+              <tr>
+                <td class="mono" style="color:#fff">customer_id</td><td class="mono muted">integer</td>
+                <td class="dim">NULL</td>
+                <td><span class="chip chip-violet" data-ic="branch" data-size="10">FK</span></td>
+                <td class="dim">—</td>
+                <td><div class="muted" style="font-size:11px">下单客户</div>
+                  <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-top:2px">关联 customers.id，历史订单允许为空
+                    <span style="color:#a5b4fc" data-ic="pencil" data-size="12"></span></div></td>
+                <td><span class="chip chip-slate">普通</span></td>
+              </tr>
+              <tr>
+                <td class="mono" style="color:#fff"><span style="position:relative">status<span class="anno" style="top:-10px;right:-14px">5</span></span></td><td class="mono muted">varchar(16)</td>
+                <td><span class="chip chip-slate">NOT NULL</span></td>
+                <td></td>
+                <td class="mono dim">'pending'</td>
+                <td><div class="muted" style="font-size:11px">订单状态</div>
+                  <div style="font-size:12px;margin-top:2px">pending/paid/shipped/done/cancelled</div></td>
+                <td><span class="chip chip-slate">普通</span></td>
+              </tr>
+              <tr>
+                <td class="mono" style="color:#fff">total_amount</td><td class="mono muted">numeric(12,2)</td>
+                <td><span class="chip chip-slate">NOT NULL</span></td>
+                <td></td>
+                <td class="mono dim">0</td>
+                <td><div class="muted" style="font-size:11px">订单总金额（元）</div>
+                  <div style="font-size:12px;margin-top:2px">明细合计，下单时快照，不随商品价变动</div></td>
+                <td><span style="position:relative"><span class="chip chip-amber" data-ic="shieldAlert" data-size="10">敏感</span><span class="anno" style="top:-9px;right:-11px">6</span></span></td>
+              </tr>
+              <tr>
+                <td class="mono" style="color:#fff">created_at</td><td class="mono muted">timestamptz</td>
+                <td><span class="chip chip-slate">NOT NULL</span></td>
+                <td></td>
+                <td class="mono dim">now()</td>
+                <td><div class="muted" style="font-size:11px">下单时间</div><div style="font-size:12px;margin-top:2px">UTC 存储</div></td>
+                <td><span class="chip chip-slate">普通</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- 右：元数据栏 -->
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div class="panel" style="padding:14px 16px;position:relative">
+            <div class="section-title muted" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">负责人 Owner</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span class="avatar" style="width:30px;height:30px;background:linear-gradient(135deg,#0ea5e9,#2563eb)">王</span>
+              <div><div style="font-size:13px;font-weight:600">王芳（DBA）</div><div class="dim" style="font-size:11px">wangfang@dbhub.local</div></div>
+              <div style="flex:1"></div>
+              <span class="btn btn-ghost btn-sm" style="padding:5px 9px" data-ic="chevronDown" data-size="13"></span>
+            </div>
+            <span class="anno" style="top:-10px;right:-10px">7</span>
+          </div>
+
+          <div class="panel" style="padding:14px 16px">
+            <div class="section-title muted" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px">业务说明</div>
+            <p style="font-size:12.5px;line-height:1.7;color:rgba(255,255,255,.78)">近 14 天全渠道交易订单主表，一条记录对应一笔订单；明细见 order_items，客户信息关联 customers。</p>
+            <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+              <span class="chip chip-indigo" data-ic="tag" data-size="10">交易</span>
+              <span class="chip chip-slate">核心</span>
+              <span class="field-tag" style="padding:2px 8px" data-ic="plus" data-size="10">标签</span>
+            </div>
+          </div>
+
+          <div class="panel" style="padding:14px 16px">
+            <div class="section-title muted" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">敏感分级</div>
+            <div style="display:flex;gap:8px">
+              <span class="field-tag">普通</span>
+              <span class="field-tag on" style="color:#fcd34d;border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.14)">● 敏感</span>
+              <span class="field-tag" style="color:#fda4af">● 机密</span>
+            </div>
+            <p class="dim" style="font-size:11px;margin-top:9px;line-height:1.6">分级用于阶段二结果集动态脱敏与导出审批</p>
+          </div>
+
+          <div class="panel" style="padding:14px 16px;position:relative">
+            <div class="section-title muted" style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px">技术统计与热度</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">
+              <div><b style="font-size:16px" class="mono">239</b><div class="dim" style="font-size:10.5px">估算行数</div></div>
+              <div><b style="font-size:16px" class="mono">96 KB</b><div class="dim" style="font-size:10.5px">数据容量</div></div>
+              <div><b style="font-size:16px" class="mono">3</b><div class="dim" style="font-size:10.5px">索引</div></div>
+              <div><b style="font-size:16px" class="mono">1</b><div class="dim" style="font-size:10.5px">外键</div></div>
+            </div>
+            <div style="border-top:1px solid var(--border-soft);margin:12px 0 8px"></div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div><b style="font-size:16px">1,284</b><div class="dim" style="font-size:10.5px">近 30 天查询</div></div>
+              <div style="flex:1" id="spark"></div>
+            </div>
+            <div style="display:flex;align-items:center;gap:7px;margin-top:10px">
+              <div style="display:flex">
+                <span class="avatar" style="width:24px;height:24px;font-size:10px;border:2px solid #141c30;background:linear-gradient(135deg,#10b981,#0d9488)">李</span>
+                <span class="avatar" style="width:24px;height:24px;font-size:10px;margin-left:-7px;border:2px solid #141c30;background:linear-gradient(135deg,#0ea5e9,#2563eb)">王</span>
+                <span class="avatar" style="width:24px;height:24px;font-size:10px;margin-left:-7px;border:2px solid #141c30;background:linear-gradient(135deg,#764ba2,#ec4899)">张</span>
+              </div>
+              <span class="dim" style="font-size:11px">高频查询者</span>
+            </div>
+            <span class="anno" style="bottom:-10px;right:-10px">8</span>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="chrome.js"></script>
+<script>
+renderChrome({ active: 'assets', title: '数据资产', search: 'plain', user: '王芳', role: 'A' });
+document.getElementById('spark').innerHTML = svgSpark([8,12,9,16,22,19,28,24,34,30,42,38,46,52], '#818cf8', 150, 40);
+</script>
+</body>
+</html>

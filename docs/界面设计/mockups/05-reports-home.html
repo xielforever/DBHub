@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>报表中心 · DBHub 保真原型</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .rep-card { background: var(--glass); border: 1px solid var(--border); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 10px; transition: transform .2s; position: relative; }
+  .rep-card:hover { transform: translateY(-2px); border-color: rgba(102,126,234,.5); }
+  .dash-thumb { border-radius: 14px; border: 1px solid var(--border-soft); background: rgba(3,7,18,.5); padding: 12px; }
+  .mini-kpis { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-bottom: 10px; }
+  .mini-kpi { background: rgba(255,255,255,.05); border-radius: 10px; padding: 8px 10px; }
+  .mini-kpi b { font-size: 15px; }
+  .mini-kpi span { display: block; font-size: 9.5px; color: rgba(255,255,255,.4); margin-top: 1px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="padding:18px 24px 24px">
+
+      <div style="display:flex;align-items:center;margin-bottom:14px">
+        <div>
+          <div style="font-size:18px;font-weight:700">报表中心</div>
+          <div class="muted" style="font-size:11.5px;margin-top:3px">查询结果一键沉淀为报表，组合成仪表盘，只读链接安全分享</div>
+        </div>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost btn-sm" data-ic="dashboard">新建仪表盘</button>
+        <button class="btn btn-primary btn-sm" data-ic="plus" style="position:relative">新建报表<span class="anno" style="top:-9px;right:-10px">12</span></button>
+      </div>
+
+      <div class="tabs" style="margin-bottom:16px">
+        <div class="tab">共享给我 <span class="dim">8</span></div>
+        <div class="tab active">我的报表 <span class="dim">6</span></div>
+        <div class="tab">收藏 <span class="dim">3</span></div>
+        <div class="tab">我的仪表盘 <span class="dim">2</span></div>
+        <div style="flex:1"></div>
+        <div class="search-wrap" style="flex:none;position:relative;width:220px;align-self:center;margin-right:0">
+          <span style="position:absolute;left:11px;top:8px;color:rgba(255,255,255,.35)" data-ic="search" data-size="14"></span>
+          <input class="search-input" style="padding-left:32px;font-size:12px" placeholder="搜索报表名称 / SQL">
+        </div>
+      </div>
+
+      <!-- 共享仪表盘 -->
+      <div style="display:flex;align-items:baseline;margin-bottom:10px">
+        <div class="section-title" data-ic="dashboard" style="font-size:14px">共享仪表盘</div>
+        <span class="muted" style="font-size:11px;margin-left:10px">全组可见 · 3 个</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:22px">
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="width:30px;height:30px;border-radius:10px;background:rgba(102,126,234,.18);color:#a5b4fc;display:flex;align-items:center;justify-content:center" data-ic="dashboard" data-size="16"></span>
+            <b style="font-size:13.5px">订单运营看板</b>
+            <span class="chip chip-indigo" style="margin-left:auto" data-ic="users" data-size="10">共享</span>
+          </div>
+          <div class="dash-thumb">
+            <div class="mini-kpis">
+              <div class="mini-kpi"><b style="color:#6ee7b7">25</b><span>今日订单</span></div>
+              <div class="mini-kpi"><b style="color:#a5b4fc">¥18k</b><span>今日 GMV</span></div>
+              <div class="mini-kpi"><b style="color:#fcd34d">51</b><span>待发货</span></div>
+            </div>
+            <div id="d1"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:11px">
+            <span class="avatar" style="width:22px;height:22px;font-size:9px;background:linear-gradient(135deg,#764ba2,#ec4899)">管</span>
+            <span class="muted">admin · 更新于 2 小时前 · 6 张报表</span>
+          </div>
+        </div>
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:9px">
+            <span style="width:30px;height:30px;border-radius:10px;background:rgba(16,185,129,.15);color:#6ee7b7;display:flex;align-items:center;justify-content:center" data-ic="dashboard" data-size="16"></span>
+            <b style="font-size:13.5px">会员分析看板</b>
+            <span class="chip chip-indigo" style="margin-left:auto" data-ic="users" data-size="10">共享</span>
+          </div>
+          <div class="dash-thumb">
+            <div class="mini-kpis">
+              <div class="mini-kpi"><b style="color:#6ee7b7">24</b><span>会员总数</span></div>
+              <div class="mini-kpi"><b style="color:#a5b4fc">67%</b><span>复购率</span></div>
+              <div class="mini-kpi"><b style="color:#f9a8d4">¥736</b><span>客单价</span></div>
+            </div>
+            <div id="d2"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;font-size:11px">
+            <span class="avatar" style="width:22px;height:22px;font-size:9px;background:linear-gradient(135deg,#10b981,#0d9488)">李</span>
+            <span class="muted">李明 · 更新于 昨天 · 4 张报表</span>
+          </div>
+        </div>
+        <div class="rep-card" style="border-style:dashed;align-items:center;justify-content:center;min-height:218px;color:rgba(255,255,255,.45);cursor:pointer">
+          <span style="width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,.05);display:flex;align-items:center;justify-content:center" data-ic="plus" data-size="18"></span>
+          <div style="font-size:13px">新建仪表盘，拖拽报表卡片组合</div>
+          <div class="dim" style="font-size:11px">支持 12 栅格自由布局与自适应缩放</div>
+        </div>
+      </div>
+
+      <!-- 我的报表 -->
+      <div style="display:flex;align-items:baseline;margin-bottom:10px">
+        <div class="section-title" style="font-size:14px">我的报表</div>
+        <span class="muted" style="font-size:11px;margin-left:10px">SQL 与图表配置随报表保存，执行沿用查询权限与行数限制</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+
+        <div class="rep-card" style="position:relative">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="chip chip-violet" data-ic="pieChart" data-size="10">饼图</span>
+            <b style="font-size:13px">订单状态分布（近14天）</b>
+            <span style="margin-left:auto;color:#fcd34d" data-ic="star" data-size="14"></span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;background:rgba(3,7,18,.5);border:1px solid var(--border-soft);border-radius:14px;padding:8px">
+            <div id="r1"></div>
+            <div style="display:flex;flex-direction:column;gap:6px;font-size:11px;margin-left:16px">
+              <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#818cf8;margin-right:6px"></i>done 63</span>
+              <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#a78bfa;margin-right:6px"></i>pending 62</span>
+              <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#34d399;margin-right:6px"></i>paid 58</span>
+              <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#fbbf24;margin-right:6px"></i>shipped 44</span>
+              <span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#fb7185;margin-right:6px"></i>cancelled 12</span>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:10.5px" class="muted">
+            <span class="chip chip-slate" data-ic="database" data-size="10">订单核心库 · shop</span>
+            <span class="chip chip-emerald" data-ic="link" data-size="10">共享</span>
+            <span style="margin-left:auto">10 分钟前</span>
+          </div>
+          <div style="display:flex;gap:6px;border-top:1px solid var(--border-soft);padding-top:9px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="pencil">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="dashboard">放入仪表盘</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center;position:relative" data-ic="link">分享<span class="anno" style="top:-9px;right:-8px">13</span></button>
+          </div>
+        </div>
+
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="chip chip-sky" data-ic="lineChart" data-size="10">折线</span>
+            <b style="font-size:13px">每日 GMV 趋势</b>
+            <span style="margin-left:auto;color:rgba(255,255,255,.25)" data-ic="star" data-size="14"></span>
+          </div>
+          <div style="background:rgba(3,7,18,.5);border:1px solid var(--border-soft);border-radius:14px;padding:10px" id="r2"></div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:10.5px" class="muted">
+            <span class="chip chip-slate" data-ic="database" data-size="10">订单核心库 · shop</span>
+            <span style="margin-left:auto">昨天</span>
+          </div>
+          <div style="display:flex;gap:6px;border-top:1px solid var(--border-soft);padding-top:9px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="pencil">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="dashboard">放入仪表盘</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="link">分享</button>
+          </div>
+        </div>
+
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="chip chip-indigo" data-ic="barChart" data-size="10">横向柱</span>
+            <b style="font-size:13px">商品销量 Top 10</b>
+            <span style="margin-left:auto;color:#fcd34d" data-ic="star" data-size="14"></span>
+          </div>
+          <div style="background:rgba(3,7,18,.5);border:1px solid var(--border-soft);border-radius:14px;padding:12px 14px" id="r3"></div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:10.5px" class="muted">
+            <span class="chip chip-slate" data-ic="database" data-size="10">订单核心库 · shop</span>
+            <span class="chip chip-emerald" data-ic="link" data-size="10">共享</span>
+            <span style="margin-left:auto">3 天前</span>
+          </div>
+          <div style="display:flex;gap:6px;border-top:1px solid var(--border-soft);padding-top:9px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="pencil">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="dashboard">放入仪表盘</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="link">分享</button>
+          </div>
+        </div>
+
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="chip chip-violet" data-ic="pieChart" data-size="10">饼图</span>
+            <b style="font-size:13px">各渠道订单占比</b>
+            <span style="margin-left:auto;color:rgba(255,255,255,.25)" data-ic="star" data-size="14"></span>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:center;background:rgba(3,7,18,.5);border:1px solid var(--border-soft);border-radius:14px;padding:8px" id="r4"></div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:10.5px" class="muted">
+            <span class="chip chip-slate" data-ic="database" data-size="10">会员分析库</span>
+            <span style="margin-left:auto">上周</span>
+          </div>
+          <div style="display:flex;gap:6px;border-top:1px solid var(--border-soft);padding-top:9px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="pencil">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="dashboard">放入仪表盘</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="link">分享</button>
+          </div>
+        </div>
+
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="chip chip-indigo" data-ic="barChart" data-size="10">柱状</span>
+            <b style="font-size:13px">客单价分布</b>
+            <span style="margin-left:auto;color:rgba(255,255,255,.25)" data-ic="star" data-size="14"></span>
+          </div>
+          <div style="background:rgba(3,7,18,.5);border:1px solid var(--border-soft);border-radius:14px;padding:10px" id="r5"></div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:10.5px" class="muted">
+            <span class="chip chip-slate" data-ic="database" data-size="10">订单核心库 · shop</span>
+            <span style="margin-left:auto">2 周前</span>
+          </div>
+          <div style="display:flex;gap:6px;border-top:1px solid var(--border-soft);padding-top:9px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="pencil">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="dashboard">放入仪表盘</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="link">分享</button>
+          </div>
+        </div>
+
+        <div class="rep-card">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="chip chip-slate" data-ic="table" data-size="10">表格</span>
+            <b style="font-size:13px">待发货订单明细</b>
+            <span style="margin-left:auto;color:rgba(255,255,255,.25)" data-ic="star" data-size="14"></span>
+          </div>
+          <div style="background:rgba(3,7,18,.5);border:1px solid var(--border-soft);border-radius:14px;padding:4px">
+            <table class="grid" style="font-size:10.5px">
+              <thead><tr><th>order_no</th><th>客户</th><th style="text-align:right">金额</th><th>下单</th></tr></thead>
+              <tbody>
+                <tr><td class="mono">NO09160018</td><td>张伟</td><td class="mono" style="text-align:right">1,280</td><td class="dim">09-16</td></tr>
+                <tr><td class="mono">NO09160015</td><td>陈静</td><td class="mono" style="text-align:right">860</td><td class="dim">09-16</td></tr>
+                <tr><td class="mono">NO09150091</td><td>刘洋</td><td class="mono" style="text-align:right">2,440</td><td class="dim">09-15</td></tr>
+                <tr><td class="mono">NO09150077</td><td>孙磊</td><td class="mono" style="text-align:right">520</td><td class="dim">09-15</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;font-size:10.5px" class="muted">
+            <span class="chip chip-slate" data-ic="database" data-size="10">订单核心库 · shop</span>
+            <span style="margin-left:auto">2 周前</span>
+          </div>
+          <div style="display:flex;gap:6px;border-top:1px solid var(--border-soft);padding-top:9px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="pencil">编辑</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="dashboard">放入仪表盘</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;justify-content:center" data-ic="link">分享</button>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="chrome.js"></script>
+<script>
+renderChrome({ active: 'reports', title: '报表中心', search: 'plain', user: 'admin', role: 'A' });
+document.getElementById('d1').innerHTML = svgSpark([12,18,15,22,19,26,24,31,28,35,33,40,38,46], '#818cf8', 320, 56);
+document.getElementById('d2').innerHTML = svgSpark([20,22,21,25,24,23,26,28,27,30,32,31,34,36], '#34d399', 320, 56);
+document.getElementById('r1').innerHTML = svgDonut([
+  { label: 'done', value: 63 }, { label: 'pending', value: 62 }, { label: 'paid', value: 58 },
+  { label: 'shipped', value: 44 }, { label: 'cancelled', value: 12 }], { size: 132, unit: '单' });
+document.getElementById('r2').innerHTML = svgLine([{ data: [8200, 9600, 7400, 11200, 10800, 13400, 12600, 15800, 14200, 16900, 15400, 18400, 17600, 18420] }],
+  { w: 380, h: 150, labels: ['9/3','','','9/6','','','9/9','','','9/12','','','9/16',''] });
+document.getElementById('r3').innerHTML = svgHBars([
+  { label: '机械键盘', value: 86 }, { label: '保温杯', value: 72 }, { label: '蓝牙耳机', value: 64 },
+  { label: '台灯', value: 41 }, { label: '背包', value: 33 }], { w: 360 });
+document.getElementById('r4').innerHTML = svgDonut([
+  { label: 'App', value: 142, color: '#818cf8' }, { label: '小程序', value: 68, color: '#a78bfa' },
+  { label: 'Web', value: 45, color: '#34d399' }, { label: '线下', value: 24, color: '#fbbf24' }], { size: 132, unit: '单' });
+document.getElementById('r5').innerHTML = svgBarV([
+  { label: '<100', value: 18 }, { label: '100-300', value: 64 }, { label: '300-500', value: 82 },
+  { label: '500-1k', value: 47 }, { label: '>1k', value: 28 }], { w: 380, h: 150 });
+</script>
+</body>
+</html>

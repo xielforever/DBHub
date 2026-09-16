@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><title>仪表盘 · DBHub 保真原型</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  .dc { background: var(--glass); border: 1px solid var(--border); border-radius: 18px; padding: 14px 16px; backdrop-filter: blur(20px); }
+  .dc h4 { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .delta-up { color: #34d399; font-size: 11px; font-weight: 600; }
+  .delta-dn { color: #fb7185; font-size: 11px; font-weight: 600; }
+  .share-pop { position: absolute; top: 44px; right: 0; width: 350px; border-radius: 18px; padding: 16px; z-index: 60; box-shadow: 0 24px 70px rgba(0,0,0,.55); }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail" id="sidebar"></aside>
+  <div class="main">
+    <header class="topbar" id="topbar"></header>
+    <main class="content" style="padding:18px 24px 24px">
+
+      <div class="muted" style="font-size:11.5px;margin-bottom:10px;display:flex;align-items:center;gap:7px">
+        <span style="color:rgba(255,255,255,.7);cursor:pointer" data-ic="arrowLeft" data-size="13"></span>报表中心 <span>/</span> 共享仪表盘 <span>/</span><b style="color:#fff">订单运营看板</b>
+        <span style="flex:1"></span><span>数据刷新于 2026-09-16 14:28（手动刷新）</span>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div>
+          <div style="display:flex;align-items:center;gap:10px;font-size:18px;font-weight:700">订单运营看板
+            <span class="chip chip-emerald" data-ic="users" data-size="11">全员共享</span>
+          </div>
+          <div class="muted" style="font-size:11.5px;margin-top:3px">admin 创建 · 6 张报表 · 数据源 订单核心库（生产只读账号）</div>
+        </div>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost btn-sm" data-ic="refresh">刷新</button>
+        <button class="btn btn-ghost btn-sm disabled" style="opacity:.45" data-ic="bell">定时订阅（P2）</button>
+        <span style="position:relative">
+          <button class="btn btn-ghost btn-sm" data-ic="move">编辑布局</button>
+          <span class="anno" style="top:-9px;right:-10px">14</span>
+        </span>
+        <div style="position:relative">
+          <button class="btn btn-primary btn-sm" data-ic="link">分享</button>
+          <span class="anno" style="top:-9px;right:-10px">15</span>
+          <div class="panel share-pop">
+            <div style="display:flex;align-items:center;gap:9px;margin-bottom:4px">
+              <span style="width:30px;height:30px;border-radius:10px;background:rgba(102,126,234,.18);color:#a5b4fc;display:flex;align-items:center;justify-content:center" data-ic="link" data-size="15"></span>
+              <b style="font-size:13.5px">分享仪表盘</b>
+            </div>
+            <p style="font-size:11.5px;line-height:1.7;color:rgba(255,255,255,.6);margin:6px 0 12px">生成<b style="color:#fff">免登录只读链接</b>。访问者只能看到固化的 SQL 结果，不能执行任意查询、看不到连接串；分享仪表盘时其报表为快照引用。</p>
+            <label class="dim" style="font-size:11px">有效期</label>
+            <div class="select" style="width:100%;margin:5px 0 11px">30 天（2026-10-16 到期）<span class="caret"></span></div>
+            <label class="dim" style="font-size:11px">只读链接</label>
+            <div style="display:flex;gap:7px;margin-top:5px">
+              <input class="input mono" style="flex:1;font-size:11px" value="https://dbhub.example.com/s/dsh_8f3c2a91e7" readonly>
+              <button class="btn btn-primary btn-sm" data-ic="copy">复制</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:11px;font-size:11px" class="muted">
+              <span data-ic="eye" data-size="13"></span>已访问 0 次
+              <span style="flex:1"></span>
+              <a style="color:#fda4af;cursor:pointer;display:inline-flex;align-items:center;gap:5px" data-ic="ban">吊销链接</a>
+            </div>
+            <div style="margin-top:11px;padding:9px 11px;border-radius:10px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25);font-size:11px;line-height:1.6;color:#fcd34d;display:flex;gap:8px">
+              <span data-ic="alertTriangle" data-size="14"></span><span>链接等同只读凭证，请勿公开发布；吊销后立即失效。报表仅支持白名单参数（P2），v1 不接受任何外部传参。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI -->
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px">
+        <div class="kpi">
+          <div class="l" style="display:flex;align-items:center;gap:6px"><span style="color:#818cf8" data-ic="shoppingCart" data-size="13"></span>今日订单</div>
+          <div class="v">25 <span class="delta-up">▲ 12.0%</span></div>
+          <div id="k1"></div>
+        </div>
+        <div class="kpi">
+          <div class="l" style="display:flex;align-items:center;gap:6px"><span style="color:#a78bfa" data-ic="coins" data-size="13"></span>今日 GMV</div>
+          <div class="v mono">¥18,420 <span class="delta-up">▲ 8.1%</span></div>
+          <div id="k2"></div>
+        </div>
+        <div class="kpi">
+          <div class="l" style="display:flex;align-items:center;gap:6px"><span style="color:#34d399" data-ic="user" data-size="13"></span>客单价</div>
+          <div class="v mono">¥736 <span class="delta-dn">▼ 3.2%</span></div>
+          <div id="k3"></div>
+        </div>
+        <div class="kpi">
+          <div class="l" style="display:flex;align-items:center;gap:6px"><span style="color:#fbbf24" data-ic="package" data-size="13"></span>待发货</div>
+          <div class="v">51 <span class="delta-up">▲ 6</span></div>
+          <div id="k4"></div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:14px">
+        <div class="dc" style="grid-column:span 4">
+          <h4><span style="color:#a5b4fc" data-ic="pieChart" data-size="15"></span>订单状态分布（近14天）
+            <span style="margin-left:auto" class="muted" data-ic="moreH" data-size="15"></span></h4>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div id="c1"></div>
+            <div style="display:flex;flex-direction:column;gap:7px;font-size:11.5px;flex:1">
+              <span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:#818cf8"></i>done<b style="margin-left:auto" class="mono">63</b><span class="dim">26%</span></span>
+              <span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:#a78bfa"></i>pending<b style="margin-left:auto" class="mono">62</b><span class="dim">25%</span></span>
+              <span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:#34d399"></i>paid<b style="margin-left:auto" class="mono">58</b><span class="dim">24%</span></span>
+              <span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:#fbbf24"></i>shipped<b style="margin-left:auto" class="mono">44</b><span class="dim">18%</span></span>
+              <span style="display:flex;align-items:center;gap:7px"><i style="width:8px;height:8px;border-radius:2px;background:#fb7185"></i>cancelled<b style="margin-left:auto" class="mono">12</b><span class="dim">5%</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="dc" style="grid-column:span 8">
+          <h4><span style="color:#7dd3fc" data-ic="lineChart" data-size="15"></span>近 14 天订单量 / GMV 趋势
+            <div style="margin-left:auto;display:flex;gap:12px;font-size:11px;font-weight:400">
+              <span><i style="display:inline-block;width:9px;height:3px;background:#818cf8;margin-right:5px"></i>订单量</span>
+              <span><i style="display:inline-block;width:9px;height:3px;background:#34d399;margin-right:5px"></i>GMV（千元）</span>
+            </div>
+          </h4>
+          <div id="c2"></div>
+        </div>
+        <div class="dc" style="grid-column:span 4">
+          <h4><span style="color:#6ee7b7" data-ic="barChart" data-size="15"></span>商品销量 Top 5</h4>
+          <div id="c3"></div>
+        </div>
+        <div class="dc" style="grid-column:span 4">
+          <h4><span style="color:#fcd34d" data-ic="gauge" data-size="15"></span>支付转化漏斗</h4>
+          <div style="display:flex;flex-direction:column;gap:9px;margin-top:14px">
+            <div><div style="display:flex;font-size:11.5px;margin-bottom:4px"><span>提交订单</span><b class="mono" style="margin-left:auto">239</b></div><div style="height:9px;border-radius:99px;background:rgba(255,255,255,.06)"><i style="display:block;width:100%;height:100%;border-radius:99px;background:#818cf8"></i></div></div>
+            <div><div style="display:flex;font-size:11.5px;margin-bottom:4px"><span>支付成功</span><b class="mono" style="margin-left:auto">165</b></div><div style="height:9px;border-radius:99px;background:rgba(255,255,255,.06)"><i style="display:block;width:69%;height:100%;border-radius:99px;background:#a78bfa"></i></div></div>
+            <div><div style="display:flex;font-size:11.5px;margin-bottom:4px"><span>已发货</span><b class="mono" style="margin-left:auto">107</b></div><div style="height:9px;border-radius:99px;background:rgba(255,255,255,.06)"><i style="display:block;width:45%;height:100%;border-radius:99px;background:#34d399"></i></div></div>
+            <div><div style="display:flex;font-size:11.5px;margin-bottom:4px"><span>完成</span><b class="mono" style="margin-left:auto">63</b></div><div style="height:9px;border-radius:99px;background:rgba(255,255,255,.06)"><i style="display:block;width:26%;height:100%;border-radius:99px;background:#fbbf24"></i></div></div>
+          </div>
+        </div>
+        <div class="dc" style="grid-column:span 4">
+          <h4><span style="color:#f9a8d4" data-ic="table" data-size="15"></span>待发货订单明细</h4>
+          <table class="grid" style="margin-top:6px">
+            <thead><tr><th>order_no</th><th>客户</th><th style="text-align:right">金额</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">NO09160018</td><td>张伟</td><td class="mono" style="text-align:right">1,280</td></tr>
+              <tr><td class="mono">NO09160015</td><td>陈静</td><td class="mono" style="text-align:right">860</td></tr>
+              <tr><td class="mono">NO09150091</td><td>刘洋</td><td class="mono" style="text-align:right">2,440</td></tr>
+              <tr><td class="mono">NO09150077</td><td>孙磊</td><td class="mono" style="text-align:right">520</td></tr>
+              <tr><td class="mono">NO09140203</td><td>周敏</td><td class="mono" style="text-align:right">1,990</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="charts.js"></script>
+<script src="chrome.js"></script>
+<script>
+renderChrome({ active: 'reports', title: '报表中心', search: 'plain', user: 'admin', role: 'A' });
+const labels14 = ['9/3','9/4','9/5','9/6','9/7','9/8','9/9','9/10','9/11','9/12','9/13','9/14','9/15','9/16'];
+document.getElementById('k1').innerHTML = svgSpark([14,18,12,22,19,11,16,23,20,17,24,21,19,25], '#818cf8', 200, 36);
+document.getElementById('k2').innerHTML = svgSpark([8,11,7,14,12,6,10,15,13,11,16,14,15,18], '#a78bfa', 200, 36);
+document.getElementById('k3').innerHTML = svgSpark([780,760,810,720,740,700,690,760,730,710,750,742,730,736], '#34d399', 200, 36);
+document.getElementById('k4').innerHTML = svgSpark([40,44,42,47,45,43,46,48,47,49,50,49,50,51], '#fbbf24', 200, 36);
+document.getElementById('c1').innerHTML = svgDonut([
+  { value: 63 }, { value: 62 }, { value: 58 }, { value: 44 }, { value: 12 }], { size: 150, unit: '单' });
+document.getElementById('c2').innerHTML = svgLine([
+  { data: [14,18,12,22,19,11,16,23,20,17,24,21,19,25], color: '#818cf8' },
+  { data: [8,11,7,14,12,6,10,15,13,11,16,14,15,18], color: '#34d399' },
+], { w: 640, h: 220, labels: labels14 });
+document.getElementById('c3').innerHTML = svgHBars([
+  { label: '机械键盘', value: 86 }, { label: '保温杯', value: 72 }, { label: '蓝牙耳机', value: 64 },
+  { label: '台灯', value: 41 }, { label: '背包', value: 33 }], { w: 320 });
+</script>
+</body>
+</html>
