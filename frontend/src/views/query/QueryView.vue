@@ -308,10 +308,23 @@
                   <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1" @click="openNewKeyDialog"><Plus class="w-3 h-3" /> 新建</button>
                   <span class="text-[11px] text-white/30">{{ redisKeys.length }} / {{ redisKeysTotal }}</span>
                 </div>
+
+                <!-- 批量操作条 -->
+                <div v-if="redisSelectedKeys.size" class="px-3 py-2 flex items-center gap-2 bg-amber-500/10 border-b border-amber-400/20 text-xs">
+                  <span class="text-amber-300">已选 {{ redisSelectedKeys.size }} 个</span>
+                  <div class="flex-1" />
+                  <button class="ghost-button !py-1 !px-2 text-[11px]" @click="exportSelectedKeys">导出</button>
+                  <el-input-number v-model="redisBatchTTL" :min="-1" :max="86400*30" size="small" class="w-24" placeholder="TTL" />
+                  <button class="ghost-button !py-1 !px-2 text-[11px]" :disabled="isReadonly" @click="batchUpdateTTL">批量 TTL</button>
+                  <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/80" :disabled="isReadonly" @click="batchDeleteKeys">批量删除</button>
+                  <button class="ghost-button !py-1 !px-2 text-[11px]" @click="redisSelectedKeys.clear()">清空选择</button>
+                </div>
+
                 <div class="flex-1 overflow-auto">
                   <table class="w-full text-xs">
                     <thead class="text-white/45 sticky top-0 bg-[#141428]/90 backdrop-blur z-10">
                       <tr>
+                        <th class="w-8 px-2 py-2"><input type="checkbox" :checked="isAllRedisSelected" @change="toggleAllRedis" /></th>
                         <th class="text-left px-3 py-2 font-medium">键</th>
                         <th class="text-left px-3 py-2 font-medium w-20">类型</th>
                         <th class="text-left px-3 py-2 font-medium w-20">TTL</th>
@@ -319,7 +332,8 @@
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="k in redisKeys" :key="k.key" class="border-b border-white/5 hover:bg-white/5 group">
+                      <tr v-for="k in redisKeys" :key="k.key" class="border-b border-white/5 hover:bg-white/5 group" :class="{ 'bg-amber-500/5': redisSelectedKeys.has(k.key) }">
+                        <td class="px-2 py-2"><input type="checkbox" :checked="redisSelectedKeys.has(k.key)" @change="toggleRedisKey(k.key)" /></td>
                         <td class="px-3 py-2 font-mono break-all cursor-pointer hover:text-indigo-300" @click="inspectRedisKey(k.key)">{{ k.key }}</td>
                         <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded-full text-[10px]" :class="typeBadge(k.type)">{{ k.type }}</span></td>
                         <td class="px-3 py-2 text-white/50">{{ k.ttl === -1 ? '永久' : k.ttl === -2 ? '已过期' : k.ttl + 's' }}</td>
@@ -333,7 +347,7 @@
                     </tbody>
                   </table>
                 </div>
-                <p class="text-[11px] text-white/35 px-3 py-2 border-t border-white/5">支持通配：* 任意字符，? 单字符；点击键查看内容；类型筛选与 pattern 历史已启用</p>
+                <p class="text-[11px] text-white/35 px-3 py-2 border-t border-white/5">支持通配：* 任意字符，? 单字符；点击键查看内容；类型筛选与 pattern 历史已启用；批量选择支持批量删除/TTL/导出</p>
               </div>
 
               <div v-else-if="redisView === 'value' && redisValue" class="p-4 space-y-3 flex-1 overflow-auto">
@@ -1201,6 +1215,9 @@ const newKeyPlaceholder = computed(() => {
     default: return ''
   }
 })
+const redisSelectedKeys = reactive(new Set<string>())
+const redisBatchTTL = ref<number>(-1)
+const isAllRedisSelected = computed(() => redisKeys.value.length > 0 && redisSelectedKeys.size === redisKeys.value.length)
 
 const abortController = ref<AbortController | null>(null)
 
@@ -1772,6 +1789,56 @@ async function createNewKey() {
   } catch (e: any) {
     ElMessage.error(e?.message || '创建失败')
   }
+}
+function toggleRedisKey(key: string) {
+  if (redisSelectedKeys.has(key)) redisSelectedKeys.delete(key)
+  else redisSelectedKeys.add(key)
+}
+function toggleAllRedis() {
+  if (isAllRedisSelected.value) {
+    redisSelectedKeys.clear()
+  } else {
+    redisKeys.value.forEach(k => redisSelectedKeys.add(k.key))
+  }
+}
+async function batchDeleteKeys() {
+  if (!currentConn.value) return
+  if (isReadonly.value) { ElMessage.warning('只读角色不可删除'); return }
+  if (!redisSelectedKeys.size) return
+  try {
+    await ElMessageBox.confirm(`确认批量删除 ${redisSelectedKeys.size} 个键？此操作不可恢复`, '批量删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  } catch { return }
+  let success = 0
+  for (const k of Array.from(redisSelectedKeys)) {
+    try { await workbenchApi.redisDeleteKey(currentConn.value.id, k); success++ } catch {}
+  }
+  ElMessage.success(`已删除 ${success} 个`)
+  redisSelectedKeys.clear()
+  loadRedisKeys()
+}
+async function batchUpdateTTL() {
+  if (!currentConn.value) return
+  if (!redisSelectedKeys.size) return
+  let success = 0
+  for (const k of Array.from(redisSelectedKeys)) {
+    try { await workbenchApi.redisUpdateTTL(currentConn.value.id, k, redisBatchTTL.value); success++ } catch {}
+  }
+  ElMessage.success(`已更新 ${success} 个键 TTL 为 ${redisBatchTTL.value}`)
+  loadRedisKeys()
+}
+function exportSelectedKeys() {
+  if (!redisSelectedKeys.size) { ElMessage.warning('未选择键'); return }
+  const data = Array.from(redisSelectedKeys).map(k => {
+    const found = redisKeys.value.find(x => x.key === k)
+    return { key: k, type: found?.type || 'unknown', ttl: found?.ttl ?? -1 }
+  })
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `redis_keys_${new Date().toISOString().slice(0,10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function addTab() {
