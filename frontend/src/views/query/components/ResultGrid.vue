@@ -3,7 +3,7 @@
     <!-- 工具条 -->
     <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-white/10 bg-white/[0.02] shrink-0">
       <div class="flex items-center gap-1.5 text-[11px] text-white/45">
-        <span v-if="columns.length" class="px-2 py-0.5 rounded-full bg-white/10 text-white/60">{{ sortedRows.length }} 行 · {{ columns.length }} 列</span>
+        <span v-if="columns.length" class="px-2 py-0.5 rounded-full bg-white/10 text-white/60">{{ filteredSortedRows.length }} / {{ rows.length }} 行 · {{ columns.length }} 列</span>
         <span v-if="truncated" class="px-2 py-0.5 rounded-full bg-amber-400/15 text-amber-300">截断 1000</span>
         <span v-if="hasNoLimit" class="px-2 py-0.5 rounded-full bg-amber-400/15 text-amber-300 flex items-center gap-1">
           <AlertTriangle class="w-3 h-3" /> SELECT 无 LIMIT
@@ -11,6 +11,18 @@
         <span v-if="isExplain" class="px-2 py-0.5 rounded-full bg-indigo-400/15 text-indigo-300 flex items-center gap-1">
           <FileSearch class="w-3 h-3" /> EXPLAIN
         </span>
+      </div>
+      <div class="flex items-center gap-1.5 ml-2">
+        <div class="relative">
+          <Search class="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
+          <input v-model.trim="globalFilter" class="glass-input !py-1 !pl-6 text-[11px] w-32 sm:w-40" placeholder="全局搜索" />
+        </div>
+        <button class="ghost-button !py-1 !px-2 text-[11px]" :class="{ 'bg-indigo-500/20 text-indigo-300': showFilters }" @click="showFilters = !showFilters">
+          <Filter class="w-3 h-3" /> 过滤
+        </button>
+        <button class="ghost-button !py-1 !px-2 text-[11px]" :class="{ 'bg-indigo-500/20 text-indigo-300': showStats }" @click="showStats = !showStats">
+          <BarChart3 class="w-3 h-3" /> 统计
+        </button>
       </div>
       <div class="flex-1" />
       <div class="flex items-center gap-1">
@@ -29,6 +41,24 @@
       </div>
     </div>
 
+    <!-- 列过滤行 -->
+    <div v-if="showFilters && columns.length && !isExplain" class="flex items-center gap-1 px-2 py-1.5 border-b border-white/10 bg-white/[0.03] shrink-0 overflow-x-auto">
+      <div class="w-12 shrink-0 text-[10px] text-white/30 text-right pr-2">#</div>
+      <div v-for="(col, idx) in columns" :key="col" class="shrink-0" :style="{ width: (colWidths[idx] || 160) + 'px' }">
+        <input v-model.trim="columnFilters[idx]" class="glass-input !py-1 text-[11px] w-full" :placeholder="`过滤 ${col}`" />
+      </div>
+    </div>
+
+    <!-- 统计栏 -->
+    <div v-if="showStats && stats.length && !isExplain" class="px-3 py-2 border-b border-white/10 bg-indigo-500/5 flex flex-wrap gap-2 shrink-0">
+      <div v-for="st in stats" :key="st.column" class="px-2.5 py-1 rounded-full bg-white/10 border border-white/10 text-[11px] flex items-center gap-2">
+        <span class="text-white/40">{{ st.column }}</span>
+        <span class="text-indigo-300 font-mono">{{ st.sum !== null ? `Σ ${st.sum}` : '' }}</span>
+        <span class="text-emerald-300/70">avg {{ st.avg }}</span>
+        <span class="text-white/30">{{ st.min }}~{{ st.max }}</span>
+      </div>
+    </div>
+
     <!-- 空态 -->
     <div v-if="!columns.length" class="flex-1 flex flex-col items-center justify-center gap-3 text-sm text-white/35 py-12">
       <div class="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
@@ -39,15 +69,26 @@
       <p class="text-[11px] text-white/25 mt-2 flex items-center gap-2"><Keyboard class="w-3 h-3" /> Ctrl+Enter 运行 · Ctrl+Shift+F 格式化 · ? 快捷键</p>
     </div>
 
-    <!-- PG EXPLAIN 可视化 -->
-    <div v-else-if="isPgExplain" class="flex-1 overflow-auto p-3 space-y-1.5 bg-[#0e0e1a]/50">
-      <div v-for="(row, i) in sortedRows" :key="i" class="font-mono text-xs leading-6 px-3 py-1 rounded-lg hover:bg-white/5 flex items-center gap-2" :style="{ paddingLeft: (indentLevel(row[0] as string) * 16 + 12) + 'px' }">
-        <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="planDot(row[0] as string)" />
-        <span class="text-white/70 truncate">{{ (row[0] as string).trim() }}</span>
-        <span v-if="extractCost(row[0] as string)" class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-amber-400/10 text-amber-300 font-mono">{{ extractCost(row[0] as string) }}</span>
+    <!-- PG EXPLAIN 火焰图 -->
+    <div v-else-if="isPgExplain" class="flex-1 overflow-auto p-3 space-y-2 bg-[#0e0e1a]/50">
+      <div class="flex items-center gap-2 mb-2 text-[11px] text-white/40">
+        <span>执行计划可视化</span>
+        <div class="flex-1 h-px bg-white/10" />
+        <span class="px-2 py-0.5 rounded-full bg-amber-400/10 text-amber-300">成本越高条越长</span>
+      </div>
+      <div v-for="(row, i) in filteredSortedRows" :key="i" class="group">
+        <div class="font-mono text-xs leading-6 px-3 py-1 rounded-lg hover:bg-white/5 flex items-center gap-2" :style="{ paddingLeft: (indentLevel(row[0] as string) * 16 + 12) + 'px' }">
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" :class="planDot(row[0] as string)" />
+          <span class="text-white/70 truncate flex-1">{{ (row[0] as string).trim() }}</span>
+          <span v-if="extractCost(row[0] as string)" class="text-[10px] px-1.5 py-0.5 rounded bg-amber-400/10 text-amber-300 font-mono">{{ extractCost(row[0] as string) }}</span>
+        </div>
+        <!-- 成本条 -->
+        <div v-if="extractCostNumber(row[0] as string) > 0" class="h-1 rounded-full bg-white/5 ml-3 mt-0.5 overflow-hidden" :style="{ marginLeft: (indentLevel(row[0] as string) * 16 + 24) + 'px', width: '200px' }">
+          <div class="h-full bg-gradient-to-r from-amber-400/30 to-rose-400/50" :style="{ width: Math.min(100, (extractCostNumber(row[0] as string) / maxCost) * 100) + '%' }" />
+        </div>
       </div>
       <div class="mt-3 p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-400/20 text-[11px] text-indigo-200/60">
-        💡 Seq Scan 表示全表扫描，若 rows 较大建议添加索引；关注 cost 与实际 Execution Time
+        💡 Seq Scan 红色表示全表扫描，Index Scan 绿色为索引扫描；条形长度代表 cost，越长越耗时，建议为高 cost 节点添加索引
       </div>
     </div>
 
@@ -128,18 +169,18 @@
       </div>
 
       <div class="flex items-center justify-between px-3 py-1.5 border-t border-white/10 bg-white/[0.02] text-[11px] text-white/35 shrink-0">
-        <span>显示 {{ startIndex + 1 }}-{{ Math.min(startIndex + visibleRows.length, sortedRows.length) }} / {{ sortedRows.length }} 行</span>
+        <span>显示 {{ startIndex + 1 }}-{{ Math.min(startIndex + visibleRows.length, filteredSortedRows.length) }} / {{ filteredSortedRows.length }} 行（过滤前 {{ rows.length }}）</span>
         <span v-if="truncated" class="text-amber-300/80">结果超过 1000 行，仅显示前 1000 行，建议添加 LIMIT</span>
-        <span v-else-if="sortedRows.length > 100" class="text-white/25">虚拟滚动已启用 · 滚动流畅</span>
+        <span v-else-if="filteredSortedRows.length > 100" class="text-white/25">虚拟滚动 · 排序 · 过滤已启用</span>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onMounted, onBeforeUnmount, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
-import { AlertTriangle, Braces, ChevronDown, ChevronUp, Copy, Download, FileSearch, Keyboard, Maximize2, Table2 } from 'lucide-vue-next'
+import { AlertTriangle, BarChart3, Braces, ChevronDown, ChevronUp, Copy, Download, FileSearch, Filter, Keyboard, Maximize2, Search, Table2 } from 'lucide-vue-next'
 
 const props = withDefaults(
   defineProps<{
@@ -172,6 +213,10 @@ const selectedRow = ref<number | null>(null)
 const colWidths = ref<number[]>([])
 const sortColumn = ref<number | null>(null)
 const sortDirection = ref<'asc' | 'desc'>('asc')
+const globalFilter = ref('')
+const columnFilters = reactive<Record<number, string>>({})
+const showFilters = ref(false)
+const showStats = ref(false)
 
 const hasNoLimit = computed(() => {
   const s = (props.sql || '').toUpperCase()
@@ -187,11 +232,26 @@ const isMysqlExplain = computed(() => {
 })
 const isExplain = computed(() => isPgExplain.value || isMysqlExplain.value)
 
-const sortedRows = computed(() => {
-  if (sortColumn.value === null || isExplain.value) return props.rows
+const filteredRows = computed(() => {
+  let out = [...props.rows]
+  const gf = globalFilter.value.toLowerCase()
+  if (gf) {
+    out = out.filter((r) => (r as any[]).some((c) => String(c ?? '').toLowerCase().includes(gf)))
+  }
+  Object.entries(columnFilters).forEach(([idxStr, fv]) => {
+    const idx = Number(idxStr)
+    const f = (fv || '').toLowerCase()
+    if (!f) return
+    out = out.filter((r) => String((r as any[])[idx] ?? '').toLowerCase().includes(f))
+  })
+  return out
+})
+
+const filteredSortedRows = computed(() => {
+  if (sortColumn.value === null || isExplain.value) return filteredRows.value
   const idx = sortColumn.value
   const dir = sortDirection.value === 'asc' ? 1 : -1
-  const copy = [...props.rows]
+  const copy = [...filteredRows.value]
   copy.sort((a: any, b: any) => {
     const av = a[idx]
     const bv = b[idx]
@@ -205,6 +265,22 @@ const sortedRows = computed(() => {
   return copy
 })
 
+const stats = computed(() => {
+  if (!filteredSortedRows.value.length) return []
+  const out: { column: string; sum: number | null; avg: string; min: string; max: string }[] = []
+  props.columns.forEach((col, idx) => {
+    const vals = filteredSortedRows.value.map((r) => (r as any[])[idx]).filter((v) => v !== null && v !== undefined && v !== '' && !isNaN(Number(v))).map(Number)
+    if (vals.length >= 2) {
+      const sum = vals.reduce((a, b) => a + b, 0)
+      const avg = sum / vals.length
+      const min = Math.min(...vals)
+      const max = Math.max(...vals)
+      out.push({ column: col, sum: Math.round(sum * 100) / 100, avg: String(Math.round(avg * 100) / 100), min: String(min), max: String(max) })
+    }
+  })
+  return out.slice(0, 5)
+})
+
 function toggleSort(idx: number) {
   if (isExplain.value) return
   if (sortColumn.value === idx) {
@@ -215,16 +291,24 @@ function toggleSort(idx: number) {
   }
 }
 
-const totalHeight = computed(() => sortedRows.value.length * ROW_HEIGHT)
+const totalHeight = computed(() => filteredSortedRows.value.length * ROW_HEIGHT)
 const visibleCount = computed(() => Math.ceil(containerHeight.value / ROW_HEIGHT) + BUFFER * 2)
 const startIndex = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - BUFFER))
 const offsetY = computed(() => startIndex.value * ROW_HEIGHT)
-const visibleRows = computed(() => sortedRows.value.slice(startIndex.value, startIndex.value + visibleCount.value))
+const visibleRows = computed(() => filteredSortedRows.value.slice(startIndex.value, startIndex.value + visibleCount.value))
+
+const maxCost = computed(() => {
+  if (!isPgExplain.value) return 1
+  let max = 0
+  filteredSortedRows.value.forEach((r) => {
+    const c = extractCostNumber(r[0] as string)
+    if (c > max) max = c
+  })
+  return max || 1
+})
 
 function onScroll() {
-  if (scrollContainer.value) {
-    scrollTop.value = scrollContainer.value.scrollTop
-  }
+  if (scrollContainer.value) scrollTop.value = scrollContainer.value.scrollTop
 }
 
 let resizeObserver: ResizeObserver | null = null
@@ -237,9 +321,7 @@ onMounted(() => {
     resizeObserver.observe(scrollContainer.value)
   }
 })
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
-})
+onBeforeUnmount(() => resizeObserver?.disconnect())
 
 watch(() => props.rows, () => {
   if (scrollContainer.value) scrollContainer.value.scrollTop = 0
@@ -248,8 +330,8 @@ watch(() => props.rows, () => {
 })
 
 function isNumericColumn(idx: number) {
-  if (!sortedRows.value.length) return false
-  const sample = sortedRows.value.slice(0, 20)
+  if (!filteredSortedRows.value.length) return false
+  const sample = filteredSortedRows.value.slice(0, 20)
   return sample.every((r) => {
     const v = (r as any)[idx]
     return v === null || v === undefined || v === '' || !isNaN(Number(v))
@@ -266,84 +348,49 @@ function cellClass(cell: unknown, colIdx: number) {
 function formatCell(cell: unknown): string {
   if (cell === null || cell === undefined) return ''
   if (typeof cell === 'object') {
-    try {
-      return JSON.stringify(cell)
-    } catch {
-      return String(cell)
-    }
+    try { return JSON.stringify(cell) } catch { return String(cell) }
   }
   return String(cell)
 }
-
 function cellTitle(cell: unknown): string {
   if (cell === null || cell === undefined) return 'NULL'
   return formatCell(cell)
 }
-
 async function copyCell(cell: unknown) {
   const text = cell === null || cell === undefined ? '' : formatCell(cell)
   try {
     await navigator.clipboard.writeText(text)
     ElMessage.success({ message: '已复制', duration: 1200 })
-  } catch {
-    ElMessage.warning('复制失败')
-  }
+  } catch { ElMessage.warning('复制失败') }
 }
-
 async function copyAsCSV() {
   if (!props.columns.length) return
   const header = props.columns.join(',')
-  const lines = sortedRows.value.map((r) =>
-    (r as any[])
-      .map((c) => {
-        const s = formatCell(c)
-        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-          return `"${s.replace(/"/g, '""')}"`
-        }
-        return s
-      })
-      .join(','),
-  )
+  const lines = filteredSortedRows.value.map((r) => (r as any[]).map((c) => {
+    const s = formatCell(c)
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }).join(','))
   const csv = [header, ...lines].join('\n')
-  try {
-    await navigator.clipboard.writeText(csv)
-    ElMessage.success('CSV 已复制到剪贴板')
-  } catch {
-    ElMessage.warning('复制失败')
-  }
+  try { await navigator.clipboard.writeText(csv); ElMessage.success('CSV 已复制') } catch { ElMessage.warning('复制失败') }
 }
-
 async function copyAsJSON() {
   if (!props.columns.length) return
-  const arr = sortedRows.value.map((r) => {
+  const arr = filteredSortedRows.value.map((r) => {
     const obj: Record<string, unknown> = {}
-    props.columns.forEach((c, i) => {
-      obj[c] = (r as any)[i]
-    })
+    props.columns.forEach((c, i) => { obj[c] = (r as any)[i] })
     return obj
   })
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(arr, null, 2))
-    ElMessage.success('JSON 已复制')
-  } catch {
-    ElMessage.warning('复制失败')
-  }
+  try { await navigator.clipboard.writeText(JSON.stringify(arr, null, 2)); ElMessage.success('JSON 已复制') } catch { ElMessage.warning('复制失败') }
 }
-
 function exportCSV() {
   if (!props.columns.length) return
   const header = props.columns.join(',')
-  const lines = sortedRows.value.map((r) =>
-    (r as any[])
-      .map((c) => {
-        const s = formatCell(c)
-        if (s.includes(',') || s.includes('"') || s.includes('\n')) {
-          return `"${s.replace(/"/g, '""')}"`
-        }
-        return s
-      })
-      .join(','),
-  )
+  const lines = filteredSortedRows.value.map((r) => (r as any[]).map((c) => {
+    const s = formatCell(c)
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return `"${s.replace(/"/g, '""')}"`
+    return s
+  }).join(','))
   const csv = [header, ...lines].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
@@ -353,7 +400,6 @@ function exportCSV() {
   a.click()
   URL.revokeObjectURL(url)
 }
-
 function startResize(e: MouseEvent, idx: number) {
   const startX = e.clientX
   const startW = colWidths.value[idx] || 160
@@ -365,15 +411,11 @@ function startResize(e: MouseEvent, idx: number) {
     copy[idx] = newW
     colWidths.value = copy
   }
-  const onUp = () => {
-    window.removeEventListener('mousemove', onMove)
-    window.removeEventListener('mouseup', onUp)
-  }
+  const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
   window.addEventListener('mousemove', onMove)
   window.addEventListener('mouseup', onUp)
 }
 
-// PG Explain helpers
 function indentLevel(text: string): number {
   const leading = text.match(/^\s*/)?.[0].length || 0
   return Math.floor(leading / 2)
@@ -388,6 +430,10 @@ function planDot(text: string) {
 function extractCost(text: string) {
   const m = text.match(/cost=[\d.]+\.\.([\d.]+)/)
   return m ? `cost ${m[1]}` : ''
+}
+function extractCostNumber(text: string): number {
+  const m = text.match(/cost=[\d.]+\.\.([\d.]+)/)
+  return m ? Number(m[1]) : 0
 }
 function mysqlTypeBadge(t: string) {
   const map: Record<string, string> = {

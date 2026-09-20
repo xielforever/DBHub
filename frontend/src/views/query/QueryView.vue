@@ -394,6 +394,14 @@
           <el-input v-model="snippetForm.name" placeholder="例如：近7天订单统计" maxlength="64" />
         </div>
         <div>
+          <p class="text-xs text-white/50 mb-1">可见性</p>
+          <el-radio-group v-model="snippetForm.visibility" size="small">
+            <el-radio-button value="private">仅自己</el-radio-button>
+            <el-radio-button value="shared">团队共享</el-radio-button>
+          </el-radio-group>
+          <p class="text-[11px] text-white/30 mt-1">团队共享将保存到后端，团队成员可在“团队”Tab 中查看</p>
+        </div>
+        <div>
           <p class="text-xs text-white/50 mb-1">SQL 预览</p>
           <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ snippetForm.sql }}</pre>
         </div>
@@ -407,33 +415,68 @@
     </el-dialog>
 
     <!-- 片段列表 Drawer -->
-    <el-drawer v-model="snippetListOpen" title="SQL 片段" direction="rtl" size="380px" class="glass-drawer">
-      <div class="p-3 space-y-2">
-        <div class="flex gap-2 mb-2">
-          <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="exportSnippets"><Download class="w-3 h-3" /> 导出 JSON</button>
+    <el-drawer v-model="snippetListOpen" title="SQL 片段" direction="rtl" size="400px" class="glass-drawer">
+      <div class="flex flex-col h-full min-h-0">
+        <div class="flex items-center gap-2 px-3 py-2 border-b border-white/10 shrink-0">
+          <el-tabs v-model="snippetTab" class="flex-1" @tab-change="onSnippetTabChange">
+            <el-tab-pane label="本地" name="local" />
+            <el-tab-pane label="团队" name="team" />
+          </el-tabs>
+          <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="exportSnippets"><Download class="w-3 h-3" /> 导出</button>
           <label class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1 cursor-pointer">
             <Upload class="w-3 h-3" /> 导入
             <input type="file" accept=".json" class="hidden" @change="importSnippets" />
           </label>
-          <div class="flex-1" />
-          <span class="text-[11px] text-white/30">{{ snippets.length }} 条</span>
         </div>
-        <div v-if="!snippets.length" class="text-center text-xs text-white/35 py-12 flex flex-col items-center gap-2">
-          <Library class="w-8 h-8 text-white/20" />
-          暂无收藏片段<br/><span class="text-[11px]">在编辑器中编写 SQL 后点击「收藏」</span>
-        </div>
-        <div v-for="s in snippets" :key="s.id" class="group rounded-xl bg-white/5 border border-white/10 p-3 hover:bg-white/10 transition-colors">
-          <div class="flex items-start justify-between gap-2">
-            <p class="text-xs font-medium text-white/80 truncate flex-1">{{ s.name }}</p>
-            <span class="text-[10px] text-white/30">{{ formatTime(s.created_at) }}</span>
+
+        <div v-if="snippetTab === 'local'" class="flex-1 overflow-auto p-3 space-y-2">
+          <div v-if="!snippets.length" class="text-center text-xs text-white/35 py-12 flex flex-col items-center gap-2">
+            <Library class="w-8 h-8 text-white/20" />
+            暂无本地片段<br/><span class="text-[11px]">在编辑器中编写 SQL 后点击「收藏」</span>
           </div>
-          <p class="text-[11px] font-mono text-white/45 truncate mt-1">{{ s.sql.replace(/\s+/g,' ').slice(0,80) }}</p>
-          <div class="flex gap-1 mt-2">
-            <button class="ghost-button !py-1 !px-2 text-[11px]" @click="insertSnippet(s)">插入</button>
-            <button class="ghost-button !py-1 !px-2 text-[11px]" @click="copyText(s.sql)">复制</button>
-            <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="shareSnippet(s)"><Share2 class="w-3 h-3" /> 分享</button>
-            <div class="flex-1" />
-            <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/60" @click="deleteSnippet(s.id)"><Trash2 class="w-3 h-3" /></button>
+          <div v-for="s in snippets" :key="s.id" class="group rounded-xl bg-white/5 border border-white/10 p-3 hover:bg-white/10 transition-colors">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-xs font-medium text-white/80 truncate flex-1">{{ s.name }}</p>
+              <span class="text-[10px] text-white/30">{{ formatTime(s.created_at) }}</span>
+            </div>
+            <p class="text-[11px] font-mono text-white/45 truncate mt-1">{{ s.sql.replace(/\s+/g,' ').slice(0,80) }}</p>
+            <div class="flex gap-1 mt-2">
+              <button class="ghost-button !py-1 !px-2 text-[11px]" @click="insertSnippet(s)">插入</button>
+              <button class="ghost-button !py-1 !px-2 text-[11px]" @click="copyText(s.sql)">复制</button>
+              <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="shareSnippet(s)"><Share2 class="w-3 h-3" /> 分享</button>
+              <div class="flex-1" />
+              <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/60" @click="deleteSnippet(s.id)"><Trash2 class="w-3 h-3" /></button>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="flex-1 overflow-auto p-3 space-y-2" v-loading="teamSnippetsLoading">
+          <div class="flex gap-2 mb-2">
+            <div class="relative flex-1">
+              <Search class="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
+              <input v-model.trim="teamSnippetKeyword" class="glass-input !py-1 !pl-6 text-[11px] w-full" placeholder="搜索团队片段" @keydown.enter="loadTeamSnippets" />
+            </div>
+            <button class="ghost-button !py-1 !px-2 text-[11px]" @click="loadTeamSnippets"><RefreshCw class="w-3 h-3" /></button>
+          </div>
+          <div v-if="!teamSnippets.length && !teamSnippetsLoading" class="text-center text-xs text-white/35 py-12 flex flex-col items-center gap-2">
+            <Library class="w-8 h-8 text-white/20" />
+            暂无团队片段<br/><span class="text-[11px]">收藏时选“团队共享”即可同步</span>
+          </div>
+          <div v-for="s in teamSnippets" :key="s.id" class="group rounded-xl bg-white/5 border border-white/10 p-3 hover:bg-white/10 transition-colors">
+            <div class="flex items-start justify-between gap-2">
+              <p class="text-xs font-medium text-white/80 truncate flex-1 flex items-center gap-1.5">
+                {{ s.name }}
+                <span class="px-1 py-0.5 rounded text-[9px]" :class="s.visibility === 'shared' ? 'bg-violet-500/20 text-violet-300' : 'bg-white/10 text-white/40'">{{ s.visibility === 'shared' ? '共享' : '私有' }}</span>
+              </p>
+              <span class="text-[10px] text-white/30">{{ s.owner_name }}</span>
+            </div>
+            <p class="text-[11px] font-mono text-white/45 truncate mt-1">{{ s.sql_text.replace(/\s+/g,' ').slice(0,80) }}</p>
+            <div class="flex gap-1 mt-2">
+              <button class="ghost-button !py-1 !px-2 text-[11px]" @click="insertTeamSnippet(s)">插入</button>
+              <button class="ghost-button !py-1 !px-2 text-[11px]" @click="copyText(s.sql_text)">复制</button>
+              <div class="flex-1" />
+              <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/60" @click="deleteTeamSnippet(s.id)"><Trash2 class="w-3 h-3" /></button>
+            </div>
           </div>
         </div>
       </div>
@@ -926,7 +969,7 @@ interface Snippet {
 const snippets = ref<Snippet[]>([])
 const snippetDialogOpen = ref(false)
 const snippetListOpen = ref(false)
-const snippetForm = reactive({ name: '', sql: '' })
+const snippetForm = reactive({ name: '', sql: '', visibility: 'private' as 'private' | 'shared' })
 const shortcutsOpen = ref(false)
 
 const shortcuts = [
@@ -948,6 +991,47 @@ function loadSnippets() {
 }
 loadSnippets()
 
+const snippetTab = ref<'local' | 'team'>('local')
+const teamSnippets = ref<any[]>([])
+const teamSnippetsLoading = ref(false)
+const teamSnippetKeyword = ref('')
+
+async function loadTeamSnippets() {
+  teamSnippetsLoading.value = true
+  try {
+    const { snippetApi } = await import('../../api/snippet')
+    const res = await snippetApi.list({ q: teamSnippetKeyword.value || undefined, page: 1, page_size: 50 })
+    teamSnippets.value = res.items
+  } catch {
+    teamSnippets.value = []
+  } finally {
+    teamSnippetsLoading.value = false
+  }
+}
+function onSnippetTabChange(tab: string | number) {
+  if (tab === 'team') loadTeamSnippets()
+}
+function insertTeamSnippet(s: any) {
+  const tab = currentTab.value
+  const monaco = monacoRefs[tab.id]
+  if (monaco) monaco.insertText(s.sql_text)
+  else tab.sql = tab.sql ? `${tab.sql}\n${s.sql_text}` : s.sql_text
+  if (s.database_name) tab.database = s.database_name
+  snippetListOpen.value = false
+  ElMessage.success(`已插入：${s.name}`)
+}
+async function deleteTeamSnippet(id: number) {
+  try {
+    await ElMessageBox.confirm('确认删除该团队片段？', '删除确认', { type: 'warning' })
+  } catch { return }
+  try {
+    const { snippetApi } = await import('../../api/snippet')
+    await snippetApi.remove(id)
+    ElMessage.success('已删除')
+    loadTeamSnippets()
+  } catch {}
+}
+
 function openSnippetDialog() {
   const sql = currentTab.value.sql.trim()
   if (!sql) {
@@ -956,9 +1040,10 @@ function openSnippetDialog() {
   }
   snippetForm.name = `片段 ${new Date().toLocaleDateString()}`
   snippetForm.sql = sql
+  snippetForm.visibility = 'private'
   snippetDialogOpen.value = true
 }
-function saveSnippet() {
+async function saveSnippet() {
   if (!snippetForm.name.trim() || !snippetForm.sql.trim()) {
     ElMessage.warning('名称与 SQL 必填')
     return
@@ -975,7 +1060,25 @@ function saveSnippet() {
   try {
     localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value.slice(0, 100)))
   } catch {}
-  ElMessage.success('已收藏')
+  // 同步到后端
+  try {
+    const { snippetApi } = await import('../../api/snippet')
+    await snippetApi.create({
+      name: snippetForm.name.trim(),
+      sql_text: snippetForm.sql.trim(),
+      database_name: currentTab.value.database || undefined,
+      connection_id: currentConn.value?.id,
+      visibility: snippetForm.visibility,
+    })
+    if (snippetForm.visibility === 'shared') {
+      ElMessage.success('已收藏并共享到团队')
+      loadTeamSnippets()
+    } else {
+      ElMessage.success('已收藏（私有）')
+    }
+  } catch {
+    ElMessage.success('已收藏到本地')
+  }
   snippetDialogOpen.value = false
 }
 function insertSnippet(s: Snippet) {

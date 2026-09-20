@@ -51,6 +51,15 @@ const dashboards = [
 
 const shares = []
 
+let snippetIdSeq = 5
+const snippets = [
+  { id: 1, user_id: 1, name: '近7天订单统计', sql_text: 'SELECT DATE(created_at) as day, COUNT(*) as cnt FROM orders WHERE created_at >= NOW() - INTERVAL 7 DAY GROUP BY 1 ORDER BY 1', database_name: 'orders', connection_id: 1, visibility: 'shared', owner_name: 'admin', created_at: new Date(Date.now()-86400000*2).toISOString(), updated_at: new Date().toISOString() },
+  { id: 2, user_id: 2, name: '高价值用户', sql_text: 'SELECT * FROM users WHERE total_spent > 10000 ORDER BY total_spent DESC LIMIT 50', database_name: 'users', connection_id: 2, visibility: 'shared', owner_name: 'dev1', created_at: new Date(Date.now()-86400000*5).toISOString(), updated_at: new Date().toISOString() },
+  { id: 3, user_id: 1, name: '慢查询TOP', sql_text: 'SELECT query, mean_exec_time FROM pg_stat_statements ORDER BY mean_exec_time DESC LIMIT 20', database_name: 'orders', connection_id: 1, visibility: 'private', owner_name: 'admin', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 4, user_id: 1, name: 'Redis大Key扫描', sql_text: '-- SCAN 0 MATCH * COUNT 100\n-- 结合 MEMORY USAGE key', database_name: '', connection_id: 3, visibility: 'shared', owner_name: 'admin', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 5, user_id: 2, name: '订单状态分布', sql_text: 'SELECT status, COUNT(*) FROM orders GROUP BY status', database_name: 'orders', connection_id: 1, visibility: 'private', owner_name: 'dev1', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+]
+
 // ---------- 工具 ----------
 function json(res, code, data, status = 200) {
   const body = JSON.stringify({ code, message: code === 0 ? 'ok' : 'error', data })
@@ -112,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.6.0', env: 'arena', note: 'Step3: 30条历史+Redis12键+columns增强+pattern/type过滤' })
+    return ok(res, { status: 'ok', version: 'mock-0.7.0', env: 'arena', note: 'Step6: snippets 5条+EXPLAIN+虚拟滚动+列过滤' })
   }
 
   // 认证
@@ -794,6 +803,64 @@ const server = http.createServer(async (req, res) => {
     const idx = proxies.findIndex(x => x.id === id)
     if (idx >= 0) proxies.splice(idx, 1)
     connections.forEach(c => { if (c.proxy_id === id) { c.proxy_id = null; c.proxy_name = '' } })
+    return ok(res, { id })
+  }
+
+  // SQL 片段团队共享 - Step6
+  if (pathname === '/api/v1/snippets' && method === 'GET') {
+    let items = [...snippets]
+    if (query.q) {
+      const kw = query.q.toLowerCase()
+      items = items.filter(s => s.name.toLowerCase().includes(kw) || s.sql_text.toLowerCase().includes(kw))
+    }
+    if (query.visibility) {
+      items = items.filter(s => s.visibility === query.visibility)
+    }
+    if (query.connection_id) {
+      items = items.filter(s => s.connection_id === Number(query.connection_id))
+    }
+    const page = Number(query.page || 1)
+    const pageSize = Number(query.page_size || 20)
+    const start = (page - 1) * pageSize
+    return ok(res, { items: items.slice(start, start + pageSize), total: items.length, page, page_size: pageSize })
+  }
+  if (pathname === '/api/v1/snippets' && method === 'POST') {
+    const body = await readBody(req)
+    if (!body.name || !body.sql_text) return json(res, 40000, null, 400)
+    snippetIdSeq += 1
+    const s = {
+      id: snippetIdSeq,
+      user_id: 1,
+      name: body.name,
+      sql_text: body.sql_text,
+      database_name: body.database_name || '',
+      connection_id: body.connection_id || null,
+      visibility: body.visibility || 'private',
+      owner_name: 'admin',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    snippets.unshift(s)
+    return ok(res, s)
+  }
+  if (pathname.match(/^\/api\/v1\/snippets\/\d+$/) && method === 'GET') {
+    const id = Number(pathname.split('/')[4])
+    const s = snippets.find(x => x.id === id)
+    if (!s) return json(res, 40400, null, 404)
+    return ok(res, s)
+  }
+  if (pathname.match(/^\/api\/v1\/snippets\/\d+$/) && method === 'PUT') {
+    const id = Number(pathname.split('/')[4])
+    const body = await readBody(req)
+    const s = snippets.find(x => x.id === id)
+    if (!s) return json(res, 40400, null, 404)
+    Object.assign(s, { name: body.name || s.name, sql_text: body.sql_text || s.sql_text, database_name: body.database_name ?? s.database_name, visibility: body.visibility || s.visibility, updated_at: new Date().toISOString() })
+    return ok(res, s)
+  }
+  if (pathname.match(/^\/api\/v1\/snippets\/\d+$/) && method === 'DELETE') {
+    const id = Number(pathname.split('/')[4])
+    const idx = snippets.findIndex(x => x.id === id)
+    if (idx >= 0) snippets.splice(idx, 1)
     return ok(res, { id })
   }
 
