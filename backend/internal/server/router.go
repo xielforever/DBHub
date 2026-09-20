@@ -21,13 +21,15 @@ import (
 
 // Deps 路由装配所需的仓储与处理器依赖（接入 PostgreSQL 后非空）。
 type Deps struct {
-	UserRepo *db.UserRepository
-	Conns    *db.ConnectionRepository
-	Tunnels  *db.TunnelRepository
-	History  *db.HistoryRepository
-	Audit    *db.AuditRepository
-	Meta     *db.MetadataRepository
-	Reports  *db.ReportRepository
+	UserRepo   *db.UserRepository
+	Conns      *db.ConnectionRepository
+	Tunnels    *db.TunnelRepository
+	History    *db.HistoryRepository
+	Audit      *db.AuditRepository
+	Meta       *db.MetadataRepository
+	Reports    *db.ReportRepository
+	Dashboards *db.DashboardRepository
+	Shares     *db.ShareRepository
 }
 
 // NewRouter 组装全部路由。
@@ -180,6 +182,37 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 				middleware.Chain(http.HandlerFunc(rH.Delete), requireAuth, canWrite, auditMW))
 			mux.Handle("POST /api/v1/reports/{id}/star",
 				middleware.Chain(http.HandlerFunc(rH.Star), requireAuth))
+		}
+		if deps.Dashboards != nil && deps.Reports != nil {
+			dH := reportapi.NewDashboardHandler(deps.Dashboards, deps.Reports, deps.Conns)
+			mux.Handle("POST /api/v1/dashboards",
+				middleware.Chain(http.HandlerFunc(dH.Create), requireAuth, canWrite, auditMW))
+			mux.Handle("GET /api/v1/dashboards",
+				middleware.Chain(http.HandlerFunc(dH.List), requireAuth))
+			mux.Handle("GET /api/v1/dashboards/{id}",
+				middleware.Chain(http.HandlerFunc(dH.Get), requireAuth))
+			mux.Handle("PUT /api/v1/dashboards/{id}",
+				middleware.Chain(http.HandlerFunc(dH.Update), requireAuth, canWrite, auditMW))
+			mux.Handle("DELETE /api/v1/dashboards/{id}",
+				middleware.Chain(http.HandlerFunc(dH.Delete), requireAuth, canWrite, auditMW))
+			mux.Handle("POST /api/v1/dashboards/{id}/star",
+				middleware.Chain(http.HandlerFunc(dH.Star), requireAuth))
+		}
+		if deps.Shares != nil && deps.Reports != nil && deps.Dashboards != nil {
+			sH := reportapi.NewShareHandler(deps.Shares, deps.Reports, deps.Dashboards, log)
+			mux.Handle("POST /api/v1/shares",
+				middleware.Chain(http.HandlerFunc(sH.Create), requireAuth, canWrite, auditMW))
+			mux.Handle("GET /api/v1/shares",
+				middleware.Chain(http.HandlerFunc(sH.List), requireAuth))
+			mux.Handle("POST /api/v1/shares/{id}/revoke",
+				middleware.Chain(http.HandlerFunc(sH.Revoke), requireAuth, canWrite, auditMW))
+			mux.Handle("DELETE /api/v1/shares/{id}",
+				middleware.Chain(http.HandlerFunc(sH.Delete), requireAuth, canWrite, auditMW))
+
+			// 免登录公开分享（不走鉴权链）
+			pH := reportapi.NewPublicHandler(deps.Shares, deps.Reports, deps.Dashboards, deps.Conns, log)
+			mux.HandleFunc("GET /api/v1/public/s/{token}", pH.Get)
+			// 前端公开页 /s/:token 由前端路由处理，API 为上述
 		}
 	} else {
 		// 无元数据库（内存模式）下的最小认证路由

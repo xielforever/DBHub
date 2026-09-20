@@ -76,13 +76,15 @@ func main() {
 		}
 		users = userRepo
 		deps = &server.Deps{
-			UserRepo: userRepo,
-			Conns:    db.NewConnectionRepository(pgPool, cipher),
-			Tunnels:  db.NewTunnelRepository(pgPool, cipher),
-			History:  db.NewHistoryRepository(pgPool),
-			Audit:    db.NewAuditRepository(pgPool),
-			Meta:     db.NewMetadataRepository(pgPool),
-			Reports:  db.NewReportRepository(pgPool),
+			UserRepo:   userRepo,
+			Conns:      db.NewConnectionRepository(pgPool, cipher),
+			Tunnels:    db.NewTunnelRepository(pgPool, cipher),
+			History:    db.NewHistoryRepository(pgPool),
+			Audit:      db.NewAuditRepository(pgPool),
+			Meta:       db.NewMetadataRepository(pgPool),
+			Reports:    db.NewReportRepository(pgPool),
+			Dashboards: db.NewDashboardRepository(pgPool),
+			Shares:     db.NewShareRepository(pgPool),
 		}
 		log.Info("已接入 PostgreSQL 元数据库")
 	} else {
