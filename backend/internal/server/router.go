@@ -16,6 +16,7 @@ import (
 	"github.com/user/dbhub/internal/metrics"
 	"github.com/user/dbhub/internal/middleware"
 	"github.com/user/dbhub/internal/queryapi"
+	"github.com/user/dbhub/internal/reportapi"
 )
 
 // Deps 路由装配所需的仓储与处理器依赖（接入 PostgreSQL 后非空）。
@@ -26,6 +27,7 @@ type Deps struct {
 	History  *db.HistoryRepository
 	Audit    *db.AuditRepository
 	Meta     *db.MetadataRepository
+	Reports  *db.ReportRepository
 }
 
 // NewRouter 组装全部路由。
@@ -161,6 +163,23 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 				middleware.Chain(http.HandlerFunc(aH.Star), requireAuth))
 			mux.Handle("GET /api/v1/users/brief",
 				middleware.Chain(http.HandlerFunc(aH.BriefUsers), requireAuth))
+		}
+
+		// ---------- 报表中心（M3/M4） ----------
+		if deps.Reports != nil {
+			rH := reportapi.NewHandler(deps.Reports, deps.Conns, log)
+			mux.Handle("POST /api/v1/reports",
+				middleware.Chain(http.HandlerFunc(rH.Create), requireAuth, canWrite, auditMW))
+			mux.Handle("GET /api/v1/reports",
+				middleware.Chain(http.HandlerFunc(rH.List), requireAuth))
+			mux.Handle("GET /api/v1/reports/{id}",
+				middleware.Chain(http.HandlerFunc(rH.Get), requireAuth))
+			mux.Handle("PUT /api/v1/reports/{id}",
+				middleware.Chain(http.HandlerFunc(rH.Update), requireAuth, canWrite, auditMW))
+			mux.Handle("DELETE /api/v1/reports/{id}",
+				middleware.Chain(http.HandlerFunc(rH.Delete), requireAuth, canWrite, auditMW))
+			mux.Handle("POST /api/v1/reports/{id}/star",
+				middleware.Chain(http.HandlerFunc(rH.Star), requireAuth))
 		}
 	} else {
 		// 无元数据库（内存模式）下的最小认证路由

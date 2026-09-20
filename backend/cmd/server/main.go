@@ -82,6 +82,7 @@ func main() {
 			History:  db.NewHistoryRepository(pgPool),
 			Audit:    db.NewAuditRepository(pgPool),
 			Meta:     db.NewMetadataRepository(pgPool),
+			Reports:  db.NewReportRepository(pgPool),
 		}
 		log.Info("已接入 PostgreSQL 元数据库")
 	} else {
