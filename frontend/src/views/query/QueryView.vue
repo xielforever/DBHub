@@ -409,6 +409,15 @@
     <!-- 片段列表 Drawer -->
     <el-drawer v-model="snippetListOpen" title="SQL 片段" direction="rtl" size="380px" class="glass-drawer">
       <div class="p-3 space-y-2">
+        <div class="flex gap-2 mb-2">
+          <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="exportSnippets"><Download class="w-3 h-3" /> 导出 JSON</button>
+          <label class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1 cursor-pointer">
+            <Upload class="w-3 h-3" /> 导入
+            <input type="file" accept=".json" class="hidden" @change="importSnippets" />
+          </label>
+          <div class="flex-1" />
+          <span class="text-[11px] text-white/30">{{ snippets.length }} 条</span>
+        </div>
         <div v-if="!snippets.length" class="text-center text-xs text-white/35 py-12 flex flex-col items-center gap-2">
           <Library class="w-8 h-8 text-white/20" />
           暂无收藏片段<br/><span class="text-[11px]">在编辑器中编写 SQL 后点击「收藏」</span>
@@ -422,6 +431,7 @@
           <div class="flex gap-1 mt-2">
             <button class="ghost-button !py-1 !px-2 text-[11px]" @click="insertSnippet(s)">插入</button>
             <button class="ghost-button !py-1 !px-2 text-[11px]" @click="copyText(s.sql)">复制</button>
+            <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="shareSnippet(s)"><Share2 class="w-3 h-3" /> 分享</button>
             <div class="flex-1" />
             <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/60" @click="deleteSnippet(s.id)"><Trash2 class="w-3 h-3" /></button>
           </div>
@@ -459,6 +469,7 @@ import {
   CheckCircle2,
   Copy,
   Database,
+  Download,
   Eye,
   FileCode2,
   FileSearch,
@@ -472,11 +483,13 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Share2,
   ShieldAlert,
   Sparkles,
   Square,
   Table2,
   Trash2,
+  Upload,
   Wand2,
   Waypoints,
 } from 'lucide-vue-next'
@@ -979,6 +992,46 @@ function deleteSnippet(id: number) {
   try {
     localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value))
   } catch {}
+}
+function exportSnippets() {
+  if (!snippets.value.length) {
+    ElMessage.warning('无片段可导出')
+    return
+  }
+  const blob = new Blob([JSON.stringify(snippets.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `dbhub_snippets_${new Date().toISOString().slice(0,10)}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+function importSnippets(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(reader.result as string)
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((x: any) => x.name && x.sql)
+        snippets.value = [...valid.map((x: any) => ({ ...x, id: x.id || Date.now() + Math.random(), created_at: x.created_at || new Date().toISOString() })), ...snippets.value].slice(0, 100)
+        localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value))
+        ElMessage.success(`已导入 ${valid.length} 条`)
+      }
+    } catch {
+      ElMessage.error('导入失败，JSON 格式错误')
+    }
+  }
+  reader.readAsText(file)
+  input.value = ''
+}
+function shareSnippet(s: Snippet) {
+  const text = `-- ${s.name}\n${s.sql}`
+  navigator.clipboard.writeText(text).then(() => {
+    ElMessage.success('片段已复制，可分享给同事')
+  })
 }
 function copyText(t: string) {
   navigator.clipboard.writeText(t).then(() => ElMessage.success('已复制'))
