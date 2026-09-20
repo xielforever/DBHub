@@ -10,6 +10,7 @@ export interface ConnectionItem {
   id: number
   user_id: number
   ssh_tunnel_id: number | null
+  proxy_id: number | null
   name: string
   type: DbType
   host: string
@@ -22,6 +23,7 @@ export interface ConnectionItem {
   environment: EnvKind
   has_password: boolean
   tunnel_name?: string
+  proxy_name?: string
   created_at: string
   updated_at: string
 }
@@ -36,6 +38,7 @@ export interface ConnectionPayload {
   /** 编辑时留空表示不修改已保存口令 */
   password?: string
   ssh_tunnel_id?: number | null
+  proxy_id?: number | null
   ssl_mode: string
   connection_timeout: number
   color_label?: string

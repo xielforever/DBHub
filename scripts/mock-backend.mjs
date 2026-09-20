@@ -18,9 +18,10 @@ const users = [
 ]
 
 const connections = [
-  { id: 1, user_id: 1, name: '订单核心库', type: 'postgres', host: '10.0.0.11', port: 5432, database: 'orders', username: 'app', ssl_mode: 'require', connection_timeout: 10, environment: 'prod', has_password: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 2, user_id: 1, name: '用户中心', type: 'mysql', host: '10.0.0.12', port: 3306, database: 'users', username: 'app', ssl_mode: '', connection_timeout: 10, environment: 'dev', has_password: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 1, user_id: 1, name: '订单核心库', type: 'postgres', host: '10.0.0.11', port: 5432, database: 'orders', username: 'app', ssl_mode: 'require', connection_timeout: 10, environment: 'prod', has_password: true, proxy_id: 1, proxy_name: '公司 HTTP 代理', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 2, user_id: 1, name: '用户中心', type: 'mysql', host: '10.0.0.12', port: 3306, database: 'users', username: 'app', ssl_mode: '', connection_timeout: 10, environment: 'dev', has_password: true, proxy_id: null, proxy_name: '', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
 ]
+let connectionIdSeq = 2
 
 const reports = [
   { id: 1, name: '月度销售趋势', description: '按月聚合', connection_id: 1, database_name: 'orders', sql_text: "SELECT date_trunc('month', created_at) AS month, SUM(total_amount) AS sum FROM shop.orders GROUP BY 1 ORDER BY 1", chart_type: 'bar', chart_config: { dimension: 'month', metrics: ['sum'], aggregation: 'sum', sort: 'asc', topN: 20 }, visibility: 'shared', owner_user_id: 1, owner_name: 'admin', starred_by: [1], starred: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -139,7 +140,75 @@ const server = http.createServer(async (req, res) => {
 
   // 连接
   if (pathname === '/api/v1/connections' && method === 'GET') {
-    return ok(res, { items: connections, total: connections.length })
+    // 附加 proxy_name
+    const items = connections.map(c => {
+      const proxy = c.proxy_id ? proxies.find(p => p.id === c.proxy_id) : null
+      return { ...c, proxy_name: proxy ? proxy.name : c.proxy_name || '' }
+    })
+    return ok(res, { items, total: items.length })
+  }
+  if (pathname === '/api/v1/connections' && method === 'POST') {
+    const body = await readBody(req)
+    connectionIdSeq += 1
+    const proxy = body.proxy_id ? proxies.find(p => p.id === body.proxy_id) : null
+    const conn = {
+      id: connectionIdSeq,
+      user_id: 1,
+      name: body.name || '未命名连接',
+      type: body.type || 'mysql',
+      host: body.host || '127.0.0.1',
+      port: body.port || 3306,
+      database: body.database || '',
+      username: body.username || '',
+      ssl_mode: body.ssl_mode || 'disable',
+      connection_timeout: body.connection_timeout || 10,
+      environment: body.environment || 'dev',
+      has_password: !!body.password,
+      proxy_id: body.proxy_id || null,
+      proxy_name: proxy ? proxy.name : '',
+      ssh_tunnel_id: null,
+      tunnel_name: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+    connections.push(conn)
+    return ok(res, conn)
+  }
+  if (pathname.match(/^\/api\/v1\/connections\/\d+$/) && method === 'GET') {
+    const id = Number(pathname.split('/')[4])
+    const c = connections.find(x => x.id === id)
+    if (!c) return json(res, 40400, null, 404)
+    const proxy = c.proxy_id ? proxies.find(p => p.id === c.proxy_id) : null
+    return ok(res, { ...c, proxy_name: proxy ? proxy.name : c.proxy_name || '' })
+  }
+  if (pathname.match(/^\/api\/v1\/connections\/\d+$/) && method === 'PUT') {
+    const id = Number(pathname.split('/')[4])
+    const body = await readBody(req)
+    const c = connections.find(x => x.id === id)
+    if (!c) return json(res, 40400, null, 404)
+    const proxy = body.proxy_id ? proxies.find(p => p.id === body.proxy_id) : null
+    Object.assign(c, {
+      name: body.name || c.name,
+      type: body.type || c.type,
+      host: body.host || c.host,
+      port: body.port || c.port,
+      database: body.database ?? c.database,
+      username: body.username ?? c.username,
+      ssl_mode: body.ssl_mode || c.ssl_mode,
+      connection_timeout: body.connection_timeout || c.connection_timeout,
+      environment: body.environment || c.environment,
+      proxy_id: body.proxy_id !== undefined ? body.proxy_id : c.proxy_id,
+      proxy_name: proxy ? proxy.name : (body.proxy_id === null ? '' : c.proxy_name),
+      updated_at: new Date().toISOString(),
+    })
+    if (body.password) c.has_password = true
+    return ok(res, c)
+  }
+  if (pathname.match(/^\/api\/v1\/connections\/\d+$/) && method === 'DELETE') {
+    const id = Number(pathname.split('/')[4])
+    const idx = connections.findIndex(x => x.id === id)
+    if (idx >= 0) connections.splice(idx, 1)
+    return ok(res, { id })
   }
   if (pathname.startsWith('/api/v1/connections/') && pathname.endsWith('/test') && method === 'POST') {
     return ok(res, { ok: true, type: 'postgres', version: 'PostgreSQL 16.4 mock', elapsed_ms: 48 })
