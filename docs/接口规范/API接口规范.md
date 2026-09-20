@@ -192,9 +192,11 @@ curl http://localhost:8080/api/health
 
 ---
 
-## 5. SSH 隧道 (SSH Tunnels)
+## 5. SSH 隧道 (SSH Tunnels) — 已废弃，保留兼容
 
-### 5.1 列表 / 创建 / 修改 / 删除
+> **废弃说明**：M4 前为跳板机场景设计，仅支持 SSH 私钥/口令。M5 起演进为 **代理管理（Proxy）**，支持 `http/https/socks5/db_proxy/custom`，更通用。`sys_ssh_tunnels` 表保留兼容，`sys_proxies` 为新表，`connections.proxy_id` 已占位。前端已新增 `/proxies` 占位页，`/connections` 隧道选择器将在 M5 切换为代理选择器。
+
+### 5.1 列表 / 创建 / 修改 / 删除（兼容）
 - **GET** `/api/v1/ssh-tunnels` → `{ "items": [...], "total": n }`
 - **POST** `/api/v1/ssh-tunnels`（写角色）
 - **PUT** `/api/v1/ssh-tunnels/{id}`（写角色；凭据字段留空不覆盖）
@@ -210,8 +212,21 @@ curl http://localhost:8080/api/health
 ```
 > 列表仅返回 `has_private_key / has_passphrase / has_password` 标志；私钥与口令 AES-256-GCM 加密落库。
 
-### 5.2 测试跳板连通
+### 5.2 测试跳板连通（兼容）
 **POST** `/api/v1/ssh-tunnels/test`，请求体同上（支持保存前验证），成功返回 `{ "ok": true }`。
+
+## 5.1 代理管理 (Proxies，占位 M4，M5 正式实现)
+
+> **占位**：替代 SSH 隧道，统一抽象代理层。读：登录可用；写：`admin/developer`；`readonly` 403。M4 仅保存配置，拨号逻辑 M5 实现。
+
+- **GET** `/api/v1/proxies` → `{ items: [{ id, name, type, host, port, username, has_password, description, status, created_at, updated_at }], total, note: "占位" }`
+  - `type ∈ http|https|socks5|db_proxy|custom`
+- **POST** `/api/v1/proxies` `{ name(必填), type, host(必填), port(必填), username?, password?, description? }` → 代理详情（密码加密，`has_password` 布尔）
+- **PUT** `/api/v1/proxies/{id}` 部分更新
+- **DELETE** `/api/v1/proxies/{id}` → `{ id }`，自动清理 `connections.proxy_id`
+- **POST** `/api/v1/proxies/test` `{ type, host, port, username?, password? }` → `{ ok: true, note: "占位，M5 实现" }`
+
+前端占位页 `/proxies`：类型卡片（HTTP/HTTPS/SOCKS5/DB Proxy）+ 列表 + 新建/编辑 Dialog + 测试占位，暗色玻璃，`Waypoints` 图标。
 
 ---
 

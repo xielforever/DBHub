@@ -79,6 +79,7 @@ func main() {
 			UserRepo:   userRepo,
 			Conns:      db.NewConnectionRepository(pgPool, cipher),
 			Tunnels:    db.NewTunnelRepository(pgPool, cipher),
+			Proxies:    db.NewProxyRepository(pgPool, cipher),
 			History:    db.NewHistoryRepository(pgPool),
 			Audit:      db.NewAuditRepository(pgPool),
 			Meta:       db.NewMetadataRepository(pgPool),

@@ -67,6 +67,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '仪表盘', icon: 'LayoutDashboard' },
       },
       {
+        path: 'proxies',
+        name: 'proxies',
+        component: () => import('../views/proxy/ProxyView.vue'),
+        meta: { title: '代理管理', icon: 'Waypoints' },
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('../views/admin/UsersView.vue'),

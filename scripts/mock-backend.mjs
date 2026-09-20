@@ -35,6 +35,12 @@ const dashboards = [
 
 const shares = []
 
+let proxyIdSeq = 2
+const proxies = [
+  { id: 1, user_id: 1, name: '公司 HTTP 代理', type: 'http', host: 'proxy.example.com', port: 8080, username: 'proxyuser', has_password: true, description: '办公网出网代理', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 2, user_id: 1, name: 'SOCKS5 全局', type: 'socks5', host: '10.0.0.9', port: 1080, username: '', has_password: false, description: '通用代理占位', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+]
+
 // ---------- 工具 ----------
 function json(res, code, data, status = 200) {
   const body = JSON.stringify({ code, message: code === 0 ? 'ok' : 'error', data })
@@ -394,6 +400,34 @@ const server = http.createServer(async (req, res) => {
       const dashMap = { id: dash.id, name: dash.name, description: dash.description, visibility: dash.visibility, layout: dash.layout, owner_name: dash.owner_name, reports: reports.filter(r => dash.layout.some(l => l.report_id === r.id)) }
       return ok(res, { share_id: s.id, subject_type: s.subject_type, subject: dashMap, owner_name: dash.owner_name, expire_at: s.expire_at, access_count: s.access_count, type: 'dashboard', dashboard: dashMap, share: s })
     }
+  }
+
+  // 代理管理占位
+  if (pathname === '/api/v1/proxies' && method === 'GET') {
+    return ok(res, { items: proxies, total: proxies.length, note: '占位，M5 实现真实拨号' })
+  }
+  if (pathname === '/api/v1/proxies' && method === 'POST') {
+    const body = await readBody(req)
+    proxyIdSeq += 1
+    const p = { id: proxyIdSeq, user_id: 1, name: body.name || '未命名代理', type: body.type || 'http', host: body.host || '', port: body.port || 8080, username: body.username || '', has_password: !!body.password, description: body.description || '', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+    proxies.push(p)
+    return ok(res, p)
+  }
+  if (pathname === '/api/v1/proxies/test' && method === 'POST') {
+    return ok(res, { ok: true, note: '占位，M5 将实现 HTTP/SOCKS5/DB Proxy 连通测试' })
+  }
+  if (pathname.match(/^\/api\/v1\/proxies\/\d+$/) && method === 'PUT') {
+    const id = Number(pathname.split('/')[4])
+    const body = await readBody(req)
+    const p = proxies.find(x => x.id === id)
+    if (p) Object.assign(p, { name: body.name || p.name, type: body.type || p.type, host: body.host || p.host, port: body.port || p.port, username: body.username ?? p.username, description: body.description ?? p.description, status: body.status || p.status, updated_at: new Date().toISOString() })
+    return ok(res, p || {})
+  }
+  if (pathname.match(/^\/api\/v1\/proxies\/\d+$/) && method === 'DELETE') {
+    const id = Number(pathname.split('/')[4])
+    const idx = proxies.findIndex(x => x.id === id)
+    if (idx >= 0) proxies.splice(idx, 1)
+    return ok(res, { id })
   }
 
   // 用户与审计等兜底

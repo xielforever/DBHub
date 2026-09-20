@@ -15,6 +15,7 @@ import (
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/metrics"
 	"github.com/user/dbhub/internal/middleware"
+	"github.com/user/dbhub/internal/proxyapi"
 	"github.com/user/dbhub/internal/queryapi"
 	"github.com/user/dbhub/internal/reportapi"
 )
@@ -24,6 +25,7 @@ type Deps struct {
 	UserRepo   *db.UserRepository
 	Conns      *db.ConnectionRepository
 	Tunnels    *db.TunnelRepository
+	Proxies    *db.ProxyRepository
 	History    *db.HistoryRepository
 	Audit      *db.AuditRepository
 	Meta       *db.MetadataRepository
@@ -100,6 +102,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("POST /api/v1/connections/{id}/test",
 			middleware.Chain(http.HandlerFunc(dsH.TestPersisted), requireAuth, auditMW))
 
+		// SSH 隧道（已废弃，保留兼容，M5 迁移至代理）
 		mux.Handle("GET /api/v1/ssh-tunnels",
 			middleware.Chain(http.HandlerFunc(dsH.ListTunnels), requireAuth))
 		mux.Handle("POST /api/v1/ssh-tunnels",
@@ -110,6 +113,21 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			middleware.Chain(http.HandlerFunc(dsH.UpdateTunnel), requireAuth, canWrite, auditMW))
 		mux.Handle("DELETE /api/v1/ssh-tunnels/{id}",
 			middleware.Chain(http.HandlerFunc(dsH.DeleteTunnel), requireAuth, canWrite, auditMW))
+
+		// 代理管理（占位，替代 SSH 隧道，M5 正式实现拨号）
+		if deps.Proxies != nil {
+			proxyH := proxyapi.NewHandler(deps.Proxies, log)
+			mux.Handle("GET /api/v1/proxies",
+				middleware.Chain(http.HandlerFunc(proxyH.List), requireAuth))
+			mux.Handle("POST /api/v1/proxies",
+				middleware.Chain(http.HandlerFunc(proxyH.Create), requireAuth, canWrite, auditMW))
+			mux.Handle("POST /api/v1/proxies/test",
+				middleware.Chain(http.HandlerFunc(proxyH.Test), requireAuth, canWrite, auditMW))
+			mux.Handle("PUT /api/v1/proxies/{id}",
+				middleware.Chain(http.HandlerFunc(proxyH.Update), requireAuth, canWrite, auditMW))
+			mux.Handle("DELETE /api/v1/proxies/{id}",
+				middleware.Chain(http.HandlerFunc(proxyH.Delete), requireAuth, canWrite, auditMW))
+		}
 
 		// ---------- 仪表盘汇总指标 ----------
 		mH := metrics.NewHandler(deps.Conns, deps.History, deps.Audit, deps.UserRepo)

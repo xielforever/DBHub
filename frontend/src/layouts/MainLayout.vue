@@ -183,6 +183,7 @@ import {
   ShieldCheck,
   SquareTerminal,
   UsersRound,
+  Waypoints,
   X,
 } from 'lucide-vue-next'
 import { useUserStore } from '../stores/user'
@@ -214,6 +215,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
       { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
       { name: 'reports', label: '报表中心', to: '/reports', icon: BarChart3 },
       { name: 'dashboards', label: '仪表盘', to: '/dashboards', icon: LayoutDashboard },
+      { name: 'proxies', label: '代理管理', to: '/proxies', icon: Waypoints },
     ],
   },
   {
