@@ -1,12 +1,15 @@
 <template>
-  <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-7rem)]">
+  <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-7rem)]" :class="{ 'fixed inset-0 z-[2000] bg-[#0a0a14] p-4 gap-0': resultFullscreen }">
     <!-- 左侧：连接树（lg 及以上常驻） -->
     <ConnectionTreePanel
+      v-if="!resultFullscreen"
       ref="treeRef"
       class="hidden lg:flex w-60 xl:w-64 shrink-0"
       @select-connection="onSelectConnection"
       @databases-loaded="onDatabasesLoaded"
+      @tables-loaded="onTablesLoaded"
       @preview-table="onPreviewTable"
+      @generate-select="onGenerateSelect"
       @redis-overview="onRedisOverview"
       @redis-keys="onRedisKeys"
     />
@@ -16,15 +19,21 @@
         embedded
         @select-connection="onSelectConnection"
         @databases-loaded="onDatabasesLoaded"
+        @tables-loaded="onTablesLoaded"
         @preview-table="(p) => { onPreviewTable(p); treeDrawerOpen = false }"
+        @generate-select="(p) => { onGenerateSelect(p); treeDrawerOpen = false }"
         @redis-overview="(c) => { onRedisOverview(c); treeDrawerOpen = false }"
         @redis-keys="(c) => { onRedisKeys(c); treeDrawerOpen = false }"
       />
     </el-drawer>
 
-    <section class="flex-1 min-w-0 flex flex-col gap-4">
+    <section class="flex-1 min-w-0 flex flex-col gap-0 overflow-hidden">
       <!-- 编辑器卡片 -->
-      <div class="glass-panel flex flex-col h-[52vh] lg:h-auto lg:flex-1 min-h-[300px] overflow-hidden">
+      <div
+        v-if="!resultFullscreen"
+        class="glass-panel flex flex-col overflow-hidden shrink-0"
+        :style="{ height: editorHeight + '%' }"
+      >
         <el-tabs
           v-model="activeTab"
           class="query-tabs flex-1 flex flex-col min-h-0"
@@ -40,15 +49,20 @@
             <template #label>
               <span class="flex items-center gap-2 px-1">
                 <FileCode2 class="w-3.5 h-3.5" />{{ tab.name }}
+                <span v-if="tab.sql.trim().length" class="w-1.5 h-1.5 rounded-full bg-indigo-400/80 ml-1" />
               </span>
             </template>
 
-            <div class="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b border-white/10">
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3 px-3 sm:px-4 py-2.5 border-b border-white/10 shrink-0">
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5 lg:hidden" @click="treeDrawerOpen = true">
                 <FolderTree class="w-3.5 h-3.5" /> 连接
               </button>
               <button class="liquid-button !px-4 !py-2 text-sm flex items-center gap-2" :disabled="!currentConn || running" @click="runQuery">
                 <Play class="w-4 h-4" />{{ running ? '执行中…' : '运行' }}
+                <span class="hidden sm:inline text-[10px] opacity-60 ml-1">⌘↵</span>
+              </button>
+              <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5" @click="formatCurrent">
+                <Wand2 class="w-3.5 h-3.5" /> 格式化
               </button>
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5" @click="addTab">
                 <Plus class="w-3.5 h-3.5" /> 新查询
@@ -57,6 +71,8 @@
               <span v-if="currentConn" class="flex items-center gap-1.5 text-xs text-white/65">
                 <component :is="currentConn.type === 'redis' ? KeyRound : Database" class="w-3.5 h-3.5" :style="{ color: connColor(currentConn.type) }" />
                 {{ currentConn.name }}
+                <span v-if="currentConn.environment === 'prod'" class="px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px]">PROD</span>
+                <span v-if="currentConn.proxy_name" class="px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[10px] flex items-center gap-1"><Waypoints class="w-3 h-3" />{{ currentConn.proxy_name }}</span>
               </span>
               <div v-if="currentConn && currentConn.type !== 'redis'" class="w-32 sm:w-40 shrink-0">
                 <el-select
@@ -70,34 +86,64 @@
                 </el-select>
               </div>
               <div class="flex-1" />
+              <span class="hidden lg:flex items-center gap-1 text-[10px] text-white/25"><Keyboard class="w-3 h-3" /> ⌘+Enter 运行 · ⇧⌘+F 格式化</span>
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5 xl:hidden" @click="aiDrawerOpen = true">
                 <Sparkles class="w-3.5 h-3.5" /> AI
               </button>
             </div>
 
-            <textarea
-              v-model="tab.sql"
-              spellcheck="false"
-              role="textbox"
-              aria-label="SQL 编辑器"
-              class="flex-1 w-full resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-indigo-100/90 outline-none focus:outline-none"
-              :placeholder="currentConn && currentConn.type === 'redis'
-                ? '-- Redis 数据源不支持 SQL，请在左下方结果区浏览键空间'
-                : '-- 先在左侧选择数据源与表，然后在此编写 SQL，Ctrl/Cmd + Enter 运行'"
-              @keydown.ctrl.enter.prevent="runQuery"
-              @keydown.meta.enter.prevent="runQuery"
-            />
+            <!-- Monaco 编辑器，失败回退 textarea -->
+            <div class="flex-1 min-h-0 relative">
+              <SqlMonaco
+                v-if="monacoReady"
+                :ref="(el: any) => { if (el) monacoRefs[tab.id] = el }"
+                v-model="tab.sql"
+                :tables="allTableNames"
+                :columns="allColumnNames"
+                :placeholder="currentConn && currentConn.type === 'redis'
+                  ? '-- Redis 数据源不支持 SQL，请在左下方结果区浏览键空间'
+                  : '-- 先在左侧选择数据源与表，然后在此编写 SQL，Ctrl/Cmd + Enter 运行'"
+                @run="runQuery"
+                @format="formatCurrent"
+              />
+              <textarea
+                v-else
+                v-model="tab.sql"
+                spellcheck="false"
+                role="textbox"
+                aria-label="SQL 编辑器"
+                class="flex-1 w-full h-full resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-indigo-100/90 outline-none focus:outline-none"
+                :placeholder="currentConn && currentConn.type === 'redis'
+                  ? '-- Redis 数据源不支持 SQL，请在左下方结果区浏览键空间'
+                  : '-- 先在左侧选择数据源与表，然后在此编写 SQL，Ctrl/Cmd + Enter 运行'"
+                @keydown.ctrl.enter.prevent="runQuery"
+                @keydown.meta.enter.prevent="runQuery"
+              />
+            </div>
           </el-tab-pane>
         </el-tabs>
       </div>
 
+      <!-- 分割线 -->
+      <div
+        v-if="!resultFullscreen"
+        class="h-2 shrink-0 flex items-center justify-center cursor-row-resize group/splitter select-none"
+        @mousedown="startSplitterDrag"
+      >
+        <div class="w-12 h-1 rounded-full bg-white/10 group-hover/splitter:bg-indigo-400/50 transition-colors" />
+      </div>
+
       <!-- 结果面板 -->
-      <div class="glass-panel h-72 lg:h-80 shrink-0 flex flex-col overflow-hidden">
+      <div
+        class="glass-panel flex flex-col overflow-hidden min-h-[180px]"
+        :class="resultFullscreen ? 'flex-1' : ''"
+        :style="resultFullscreen ? {} : { height: (100 - editorHeight) + '%' }"
+      >
         <el-tabs v-model="resultTab" class="flex-1 flex flex-col min-h-0" @tab-change="onResultTabChange">
           <!-- 数据网格（SQL 结果 / 表预览） -->
           <el-tab-pane label="结果" name="result" class="flex flex-col min-h-0 flex-1">
             <!-- 表预览分页条 -->
-            <div v-if="viewMode === 'preview'" class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-white/10 text-xs text-white/60">
+            <div v-if="viewMode === 'preview'" class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-white/10 text-xs text-white/60 shrink-0">
               <Table2 class="w-3.5 h-3.5 text-emerald-300" />
               <span class="font-mono">{{ preview.schema || preview.database }}.{{ preview.table }}</span>
               <span class="text-white/35">共 {{ preview.total }} 行</span>
@@ -110,36 +156,19 @@
             <div v-if="writeResult" class="flex-1 flex flex-col items-center justify-center gap-2 text-sm">
               <CheckCircle2 class="w-8 h-8 text-emerald-400" />
               <p class="text-white/80">执行成功，影响 {{ writeResult.affected_rows ?? 0 }} 行 · 耗时 {{ writeResult.duration_ms }} ms</p>
+              <button class="ghost-button !py-1 !px-3 text-xs mt-2" @click="resetGrid">清空结果</button>
             </div>
-            <!-- 空态 -->
-            <div v-else-if="!grid.columns.length" class="flex-1 flex items-center justify-center text-sm text-white/35">
-              选中表可直接浏览数据，或编写 SQL 后点击「运行」
-            </div>
-            <!-- 数据网格（SQL 结果与表预览共用） -->
-            <div v-else class="overflow-auto flex-1 outline-none" tabindex="0" aria-label="查询结果数据网格">
-              <table class="w-full text-sm">
-                <thead class="sticky top-0 bg-white/10 backdrop-blur z-10">
-                  <tr class="text-left text-white/55 text-xs">
-                    <th class="px-3 py-2 font-medium border-b border-white/10 whitespace-nowrap w-10 text-right text-white/30">#</th>
-                    <th
-                      v-for="col in grid.columns"
-                      :key="col"
-                      class="px-4 py-2.5 font-medium border-b border-white/10 whitespace-nowrap"
-                    >{{ col }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, i) in grid.rows" :key="i" class="border-b border-white/5 hover:bg-white/5">
-                    <td class="px-3 py-2.5 text-right text-white/25 text-xs">{{ rowIndex(i) }}</td>
-                    <td v-for="(cell, ci) in row" :key="ci" class="px-4 py-2.5 text-white/75 whitespace-nowrap max-w-[320px] truncate" :title="cellText(cell)">
-                      <span v-if="cell === null || cell === undefined" class="text-white/25 italic">NULL</span>
-                      <template v-else>{{ cellText(cell) }}</template>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <p v-if="grid.truncated" class="px-4 py-2 text-xs text-amber-300/80">结果超过 1000 行，仅显示前 1000 行</p>
-            </div>
+            <!-- 结果网格 -->
+            <ResultGrid
+              v-else
+              :columns="grid.columns"
+              :rows="grid.rows as any"
+              :truncated="grid.truncated"
+              :base-index="viewMode === 'preview' ? (preview.page - 1) * preview.pageSize : 0"
+              :sql="currentTab.sql"
+              :fullscreen="resultFullscreen"
+              @toggle-fullscreen="resultFullscreen = !resultFullscreen"
+            />
           </el-tab-pane>
 
           <!-- 图表（M3） -->
@@ -155,8 +184,12 @@
 
           <!-- 查询历史 -->
           <el-tab-pane label="历史" name="history" class="flex flex-col min-h-0 flex-1">
-            <div class="flex items-center gap-2 px-4 py-2 border-b border-white/10">
-              <el-select v-model="historyFilter" size="small" class="w-32" popper-class="glass-popper" @change="loadHistory">
+            <div class="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-white/10">
+              <div class="relative">
+                <Search class="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
+                <input v-model.trim="historyKeyword" class="glass-input !py-1.5 !pl-7 text-xs w-40 sm:w-52" placeholder="搜索 SQL 关键词" @keydown.enter="loadHistory" />
+              </div>
+              <el-select v-model="historyFilter" size="small" class="w-24" popper-class="glass-popper" @change="loadHistory">
                 <el-option label="全部" value="all" />
                 <el-option label="成功" value="success" />
                 <el-option label="失败" value="failed" />
@@ -169,7 +202,7 @@
             </div>
             <div class="overflow-auto flex-1" v-loading="historyLoading">
               <div
-                v-for="h in history"
+                v-for="h in filteredHistory"
                 :key="h.id"
                 class="group px-4 py-2.5 border-b border-white/5 hover:bg-white/5 cursor-pointer"
                 @click="reuseHistory(h)"
@@ -194,7 +227,7 @@
                 <p class="font-mono text-xs truncate" :class="h.status === 1 ? 'text-indigo-200/80' : 'text-rose-200/80'">{{ h.sql_text }}</p>
                 <p v-if="h.error_message" class="text-[11px] text-rose-300/70 truncate mt-0.5">{{ h.error_message }}</p>
               </div>
-              <p v-if="!history.length && !historyLoading" class="text-center text-xs text-white/35 py-10">暂无查询历史</p>
+              <p v-if="!filteredHistory.length && !historyLoading" class="text-center text-xs text-white/35 py-10">暂无查询历史</p>
             </div>
           </el-tab-pane>
 
@@ -243,7 +276,10 @@
                   TTL {{ redisValue.ttl === -1 ? '永久' : redisValue.ttl + ' s' }}
                 </p>
                 <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">{{ redisValueText }}</pre>
-                <button class="ghost-button !py-1 !px-3 text-xs" @click="redisView = 'keys'">← 返回键列表</button>
+                <div class="flex gap-2">
+                  <button class="ghost-button !py-1 !px-3 text-xs" @click="redisView = 'keys'">← 返回键列表</button>
+                  <button class="ghost-button !py-1 !px-3 text-xs flex items-center gap-1" @click="copyRedisValue"><Copy class="w-3 h-3" /> 复制</button>
+                </div>
               </div>
             </div>
           </el-tab-pane>
@@ -263,6 +299,7 @@
           <span v-if="lastDuration !== null">执行耗时：<span class="text-emerald-300">{{ lastDuration }} ms</span></span>
           <span v-if="grid.columns.length">行数：<span class="text-indigo-200">{{ grid.rows.length }}</span></span>
           <span v-if="currentConn?.type === 'redis'" class="text-rose-300/80">Redis 模式</span>
+          <span v-if="currentConn?.environment === 'prod'" class="text-rose-300/80 flex items-center gap-1"><ShieldAlert class="w-3 h-3" /> 生产环境</span>
           <span class="flex-1" />
           <span v-if="isReadonly" class="text-amber-300/80">只读角色：写操作将被拒绝</span>
           <span class="hidden sm:inline">UTF-8</span>
@@ -270,9 +307,9 @@
       </div>
     </section>
 
-    <AiAssistantPanel v-if="aiVisible" class="hidden xl:flex w-72 shrink-0" @close="aiVisible = false" />
+    <AiAssistantPanel v-if="aiVisible && !resultFullscreen" class="hidden xl:flex w-72 shrink-0" :current-connection="currentConn" :current-sql="currentTab.sql" :tables="allTableNames" @close="aiVisible = false" @insert-sql="onAiInsert" />
     <button
-      v-else
+      v-if="!aiVisible && !resultFullscreen"
       class="hidden xl:flex w-10 shrink-0 glass-panel items-center justify-center text-white/50 hover:text-white transition-colors"
       aria-label="展开 AI 助手"
       @click="aiVisible = true"
@@ -280,32 +317,40 @@
       <PanelRightOpen class="w-5 h-5" />
     </button>
     <el-drawer v-model="aiDrawerOpen" title="AI 助手" direction="rtl" size="85%" class="glass-drawer">
-      <AiAssistantPanel embedded :closable="false" />
+      <AiAssistantPanel embedded :closable="false" :current-connection="currentConn" :current-sql="currentTab.sql" :tables="allTableNames" @insert-sql="onAiInsert" />
     </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   CheckCircle2,
+  Copy,
   Database,
   FileCode2,
   FolderTree,
   KeyRound,
+  Keyboard,
   PanelRightOpen,
   Play,
   Plus,
   RefreshCw,
+  Search,
+  ShieldAlert,
   Sparkles,
   Table2,
   Trash2,
+  Wand2,
+  Waypoints,
 } from 'lucide-vue-next'
 import ConnectionTreePanel from './components/ConnectionTreePanel.vue'
 import AiAssistantPanel from './components/AiAssistantPanel.vue'
 import ResultChartPane from './components/ResultChartPane.vue'
+import SqlMonaco from './components/SqlMonaco.vue'
+import ResultGrid from './components/ResultGrid.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -334,14 +379,45 @@ function newTab(sql = ''): EditorTab {
   tabSeq += 1
   return { id: tabSeq, name: `SQL Editor ${tabSeq}`, database: '', sql }
 }
-const tabs = ref<EditorTab[]>([{ id: 1, name: 'SQL Editor 1', database: '', sql: '' }])
-const activeTab = ref(1)
+
+const STORAGE_TABS = 'dbhub_query_tabs_v2'
+const STORAGE_SPLIT = 'dbhub_query_split'
+
+function loadTabsFromStorage(): { tabs: EditorTab[]; active: number } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_TABS)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed.tabs) && parsed.tabs.length) {
+      const maxId = Math.max(...parsed.tabs.map((t: any) => t.id), 0)
+      tabSeq = Math.max(tabSeq, maxId)
+      return parsed
+    }
+  } catch {}
+  return null
+}
+
+const stored = loadTabsFromStorage()
+const tabs = ref<EditorTab[]>(stored?.tabs ?? [{ id: 1, name: 'SQL Editor 1', database: '', sql: '' }])
+const activeTab = ref(stored?.active ?? 1)
 const currentTab = computed<EditorTab>(
   () => tabs.value.find((t) => t.id === activeTab.value) ?? tabs.value[0]!,
 )
 
+watch(
+  [tabs, activeTab],
+  () => {
+    try {
+      localStorage.setItem(STORAGE_TABS, JSON.stringify({ tabs: tabs.value, active: activeTab.value }))
+    } catch {}
+  },
+  { deep: true },
+)
+
 const currentConn = ref<ConnectionItem | null>(null)
 const databaseOptions = ref<{ name: string }[]>([])
+const allTableNames = ref<string[]>([])
+const allColumnNames = ref<string[]>([])
 const running = ref(false)
 
 const resultTab = ref('result')
@@ -368,6 +444,52 @@ const preview = reactive({
 const aiVisible = ref(true)
 const treeDrawerOpen = ref(false)
 const aiDrawerOpen = ref(false)
+const resultFullscreen = ref(false)
+
+// 分割线
+const editorHeight = ref<number>(55)
+try {
+  const v = Number(localStorage.getItem(STORAGE_SPLIT))
+  if (v >= 20 && v <= 80) editorHeight.value = v
+} catch {}
+
+function startSplitterDrag(e: MouseEvent) {
+  const startY = e.clientY
+  const startH = editorHeight.value
+  const container = (e.currentTarget as HTMLElement).parentElement
+  const containerHeight = container?.clientHeight || window.innerHeight * 0.8
+  const onMove = (ev: MouseEvent) => {
+    const delta = ev.clientY - startY
+    const deltaPct = (delta / containerHeight) * 100
+    let newH = startH + deltaPct
+    newH = Math.max(20, Math.min(80, newH))
+    editorHeight.value = newH
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    try {
+      localStorage.setItem(STORAGE_SPLIT, String(editorHeight.value))
+    } catch {}
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+// Monaco
+const monacoReady = ref(false)
+const monacoRefs = reactive<Record<number, any>>({})
+
+onMounted(() => {
+  // 懒加载检测
+  import('monaco-editor')
+    .then(() => {
+      monacoReady.value = true
+    })
+    .catch(() => {
+      monacoReady.value = false
+    })
+})
 
 function connColor(t: DbType) {
   return { mysql: '#60a5fa', postgres: '#a78bfa', redis: '#f472b6' }[t] ?? '#94a3b8'
@@ -395,18 +517,39 @@ function onSelectConnection(conn: ConnectionItem) {
     return
   }
   resultTab.value = 'result'
-  // 库列表由连接树懒加载后经 databases-loaded 事件回填，避免重复请求
   databaseOptions.value = []
+  allTableNames.value = []
 }
 
 function onDatabasesLoaded({ conn, items }: { conn: ConnectionItem; items: { name: string }[] }) {
-  // 快速切换连接时，仅采纳当前连接的结果，避免串库
   if (currentConn.value?.id !== conn.id) return
   databaseOptions.value = items
   const preferred = items.find((d) => d.name === conn.database) ?? items[0]
   if (preferred && !currentTab.value.database) {
     currentTab.value.database = preferred.name
   }
+}
+
+function onTablesLoaded({ tables }: { tables: TableInfo[] }) {
+  allTableNames.value = tables.map((t) => t.name)
+}
+
+async function formatCurrent() {
+  const tab = currentTab.value
+  if (!tab.sql.trim()) return
+  try {
+    const { format } = await import('sql-formatter')
+    const formatted = format(tab.sql, { language: 'postgresql', tabWidth: 2, keywordCase: 'upper' })
+    tab.sql = formatted
+    ElMessage.success({ message: '已格式化', duration: 1000 })
+  } catch {
+    ElMessage.warning('格式化失败')
+  }
+}
+
+function isDangerousSQL(sql: string) {
+  const up = sql.toUpperCase()
+  return /\b(DELETE|UPDATE|DROP|TRUNCATE|ALTER)\b/.test(up)
 }
 
 async function runQuery() {
@@ -422,6 +565,17 @@ async function runQuery() {
   if (!sql) {
     ElMessage.warning('SQL 内容不能为空')
     return
+  }
+  if (currentConn.value.environment === 'prod' && isDangerousSQL(sql)) {
+    try {
+      await ElMessageBox.confirm(
+        `当前连接为生产环境（${currentConn.value.name}），即将执行写操作：\n${sql.slice(0, 200)}\n\n确认继续？`,
+        '生产环境二次确认',
+        { type: 'warning', confirmButtonText: '确认执行', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
   }
   running.value = true
   resetGrid()
@@ -483,11 +637,19 @@ async function loadPreview() {
       page: preview.page,
       page_size: preview.pageSize,
     })
-    // PG 需要 schema 参数（public 时后端默认即可，非 public 透传）
     grid.columns = res.columns
     grid.rows = res.rows
     preview.total = res.total
     preview.hasMore = res.has_more
+    // 尝试加载列名用于补全
+    try {
+      const cols = await workbenchApi.columns(currentConn.value.id, {
+        database: preview.database,
+        schema: preview.schema || undefined,
+        table: preview.table,
+      })
+      allColumnNames.value = cols.items.map((c) => c.name)
+    } catch {}
   } catch {
     /* 拦截器已提示 */
   }
@@ -502,6 +664,14 @@ function previewPage(delta: number) {
 const history = ref<QueryHistoryItem[]>([])
 const historyLoading = ref(false)
 const historyFilter = ref('all')
+const historyKeyword = ref('')
+
+const filteredHistory = computed(() => {
+  const kw = historyKeyword.value.toLowerCase()
+  if (!kw) return history.value
+  return history.value.filter((h) => h.sql_text.toLowerCase().includes(kw) || (h.database_name || '').toLowerCase().includes(kw))
+})
+
 function onResultTabChange(name: string | number) {
   if (name === 'history') loadHistory()
 }
@@ -512,7 +682,7 @@ async function loadHistory() {
     const res = await workbenchApi.history({
       status: historyFilter.value === 'all' ? '' : historyFilter.value,
       page: 1,
-      page_size: 50,
+      page_size: 100,
     })
     history.value = res.items
   } finally {
@@ -619,6 +789,14 @@ const redisValueText = computed(() => {
     return String(v)
   }
 })
+async function copyRedisValue() {
+  try {
+    await navigator.clipboard.writeText(redisValueText.value)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败')
+  }
+}
 
 // ---------- Tab 管理 ----------
 function addTab() {
@@ -639,16 +817,32 @@ function closeTab(id: number) {
   }
 }
 
-function rowIndex(i: number): number {
-  const base = viewMode.value === 'preview' ? (preview.page - 1) * preview.pageSize : 0
-  return i + 1 + base
+function onGenerateSelect(payload: { conn: ConnectionItem; database: string; schema: string; table: TableInfo }) {
+  const sch = payload.schema ? `${payload.schema}.` : ''
+  const qualified = payload.conn.type === 'postgres' ? `${payload.database}.${sch}${payload.table.name}` : `${payload.database}.${payload.table.name}`
+  const sql = `SELECT * FROM ${qualified} LIMIT 100;`
+  const tab = currentTab.value
+  const monaco = monacoRefs[tab.id]
+  if (monaco) {
+    monaco.insertText(sql)
+  } else {
+    tab.sql = tab.sql ? `${tab.sql}\n${sql}` : sql
+  }
+  currentTab.value.database = payload.database
+  ElMessage.success(`已生成 SELECT：${payload.table.name}`)
 }
 
-function cellText(cell: unknown): string {
-  if (cell === null || cell === undefined) return ''
-  if (typeof cell === 'object') return JSON.stringify(cell)
-  return String(cell)
+function onAiInsert(sql: string) {
+  const tab = currentTab.value
+  const monaco = monacoRefs[tab.id]
+  if (monaco) {
+    monaco.insertText(sql)
+  } else {
+    tab.sql += (tab.sql ? '\n' : '') + sql
+  }
+  ElMessage.success('已插入到编辑器')
 }
+
 function formatTime(s: string): string {
   const d = new Date(s)
   const today = new Date()

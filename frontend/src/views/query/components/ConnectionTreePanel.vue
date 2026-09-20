@@ -1,36 +1,42 @@
 <template>
   <aside class="glass-panel w-full flex flex-col overflow-hidden">
-    <div class="px-4 py-3 border-b border-white/10 flex items-center justify-between">
-      <h2 class="text-sm font-medium flex items-center gap-2">
-        <FolderTree class="w-4 h-4 text-indigo-300" /> 数据源
-      </h2>
-      <button class="text-white/40 hover:text-white" aria-label="刷新连接树" @click="reload(true)">
-        <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
-      </button>
+    <div class="px-3 py-2.5 border-b border-white/10 flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-medium flex items-center gap-2">
+          <FolderTree class="w-4 h-4 text-indigo-300" /> 数据源
+        </h2>
+        <button class="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" aria-label="刷新连接树" @click="reload(true)">
+          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
+        </button>
+      </div>
+      <div class="relative">
+        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
+        <input v-model.trim="keyword" class="glass-input !py-1.5 !pl-8 text-xs w-full" placeholder="搜索连接/库/表" />
+      </div>
     </div>
 
     <div class="flex-1 overflow-y-auto p-2" v-loading="loading">
-      <div v-if="!connections.length && !loading" class="text-center text-xs text-white/40 px-4 py-10">
-        暂无数据源<br />请先在「数据源管理」中创建连接
+      <div v-if="!filteredConnections.length && !loading" class="text-center text-xs text-white/40 px-4 py-10">
+        {{ keyword ? '无匹配结果' : '暂无数据源' }}<br v-if="!keyword" /><span v-if="!keyword" class="text-[11px]">请先在「数据源管理」中创建连接</span>
       </div>
 
-      <div v-for="conn in connections" :key="conn.id" class="mb-0.5">
+      <div v-for="conn in filteredConnections" :key="conn.id" class="mb-0.5">
         <!-- 连接根节点 -->
         <button
-          class="tree-row w-full"
+          class="tree-row w-full group"
           :class="{ 'bg-white/10': activeConnId === conn.id }"
           @click="toggleConnection(conn)"
         >
-          <ChevronRight class="w-3.5 h-3.5 text-white/40 transition-transform" :class="{ 'rotate-90': expandedConns.has(conn.id) }" />
+          <ChevronRight class="w-3.5 h-3.5 text-white/40 transition-transform shrink-0" :class="{ 'rotate-90': expandedConns.has(conn.id) }" />
           <component :is="typeIcon(conn.type)" class="w-4 h-4 shrink-0" :style="{ color: typeColor(conn.type) }" />
-          <span class="truncate text-left">{{ conn.name }}</span>
+          <span class="truncate text-left flex-1">{{ conn.name }}</span>
+          <span v-if="conn.environment === 'prod'" class="px-1 py-0.5 rounded text-[9px] bg-rose-500/20 text-rose-300 shrink-0">PROD</span>
+          <span v-if="conn.proxy_name" class="px-1 py-0.5 rounded text-[9px] bg-violet-500/20 text-violet-300 flex items-center gap-0.5 shrink-0"><Waypoints class="w-2.5 h-2.5" />{{ shortProxy(conn.proxy_name) }}</span>
         </button>
 
         <div v-if="expandedConns.has(conn.id)" class="ml-4 border-l border-white/10 pl-1">
-          <!-- 加载失败 -->
           <p v-if="errors[conn.id]" class="text-[11px] text-rose-300/80 px-2 py-1">{{ errors[conn.id] }}</p>
 
-          <!-- Redis 节点 -->
           <template v-else-if="conn.type === 'redis'">
             <button class="tree-row" @click="emitRedisOverview(conn)">
               <Activity class="w-3.5 h-3.5 text-rose-300" /><span>服务器概览</span>
@@ -40,13 +46,12 @@
             </button>
           </template>
 
-          <!-- 关系型：数据库/模式/表 -->
           <template v-else>
             <div v-if="loadingConns[conn.id]" class="text-[11px] text-white/40 px-2 py-1">加载中…</div>
             <template v-else>
-              <!-- PostgreSQL: database → schema → tables -->
+              <!-- PostgreSQL -->
               <template v-if="conn.type === 'postgres'">
-                <template v-for="db in dbs[conn.id] || []" :key="db.name">
+                <template v-for="db in filteredDbs(conn.id)" :key="db.name">
                   <button class="tree-row" @click="toggleSchemaNode(conn, db.name, null)">
                     <ChevronRight class="w-3 h-3 text-white/35 transition-transform" :class="{ 'rotate-90': schemaOpen(conn, db.name, null) }" />
                     <Database class="w-3.5 h-3.5 text-sky-300" /><span class="truncate">{{ db.name }}</span>
@@ -58,40 +63,52 @@
                         <Folder class="w-3.5 h-3.5 text-violet-300" /><span class="truncate">{{ sch }}</span>
                       </button>
                       <div v-if="tablesOpen(conn, db.name, sch)" class="ml-4 border-l border-white/10 pl-1">
-                        <button
-                          v-for="t in tables[`${conn.id}:${db.name}:${sch}`] || []"
+                        <div
+                          v-for="t in filteredTables(conn.id, db.name, sch)"
                           :key="t.name"
-                          class="tree-row"
-                          :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, sch, t.name) }"
-                          @click="emitTable(conn, db.name, sch, t)"
+                          class="group/table flex items-center"
                         >
-                          <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
-                          <span class="truncate">{{ t.name }}</span>
-                        </button>
+                          <button
+                            class="tree-row flex-1"
+                            :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, sch, t.name) }"
+                            @click="emitTable(conn, db.name, sch, t)"
+                            @contextmenu.prevent="openContextMenu($event, conn, db.name, sch, t)"
+                          >
+                            <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
+                            <span class="truncate">{{ t.name }}</span>
+                          </button>
+                          <button class="opacity-0 group-hover/table:opacity-100 p-1 text-white/30 hover:text-white" @click.stop="openContextMenu($event, conn, db.name, sch, t)">
+                            <MoreHorizontal class="w-3 h-3" />
+                          </button>
+                        </div>
                       </div>
                     </template>
                   </div>
                 </template>
               </template>
 
-              <!-- MySQL: database(schema) → tables -->
+              <!-- MySQL -->
               <template v-else>
-                <template v-for="db in dbs[conn.id] || []" :key="db.name">
+                <template v-for="db in filteredDbs(conn.id)" :key="db.name">
                   <button class="tree-row" @click="toggleTables(conn, db.name, '')">
                     <ChevronRight class="w-3 h-3 text-white/35 transition-transform" :class="{ 'rotate-90': tablesOpen(conn, db.name, '') }" />
                     <Database class="w-3.5 h-3.5 text-sky-300" /><span class="truncate">{{ db.name }}</span>
                   </button>
                   <div v-if="tablesOpen(conn, db.name, '')" class="ml-4 border-l border-white/10 pl-1">
-                    <button
-                      v-for="t in tables[`${conn.id}:${db.name}:`] || []"
-                      :key="t.name"
-                      class="tree-row"
-                      :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, '', t.name) }"
-                      @click="emitTable(conn, db.name, '', t)"
-                    >
-                      <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
-                      <span class="truncate">{{ t.name }}</span>
-                    </button>
+                    <div v-for="t in filteredTables(conn.id, db.name, '')" :key="t.name" class="group/table flex items-center">
+                      <button
+                        class="tree-row flex-1"
+                        :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, '', t.name) }"
+                        @click="emitTable(conn, db.name, '', t)"
+                        @contextmenu.prevent="openContextMenu($event, conn, db.name, '', t)"
+                      >
+                        <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
+                        <span class="truncate">{{ t.name }}</span>
+                      </button>
+                      <button class="opacity-0 group-hover/table:opacity-100 p-1 text-white/30 hover:text-white" @click.stop="openContextMenu($event, conn, db.name, '', t)">
+                        <MoreHorizontal class="w-3 h-3" />
+                      </button>
+                    </div>
                   </div>
                 </template>
               </template>
@@ -100,21 +117,47 @@
         </div>
       </div>
     </div>
+
+    <!-- 右键菜单 -->
+    <div
+      v-if="contextMenu.visible"
+      class="fixed z-[9999] glass-panel !p-1 min-w-[180px] shadow-2xl border border-white/15"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @mouseleave="contextMenu.visible = false"
+    >
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxPreview">
+        <Eye class="w-3.5 h-3.5" /> 预览前 50 行
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxSelect">
+        <Code2 class="w-3.5 h-3.5" /> 生成 SELECT
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxCopyName">
+        <Copy class="w-3.5 h-3.5" /> 复制表名
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxCopyQualified">
+        <Copy class="w-3.5 h-3.5" /> 复制全限定名
+      </button>
+    </div>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, shallowReactive } from 'vue'
+import { computed, reactive, ref, shallowReactive } from 'vue'
 import {
   Activity,
   ChevronRight,
+  Code2,
+  Copy,
   Database,
   Eye,
   Folder,
   FolderTree,
   KeyRound,
+  MoreHorizontal,
   RefreshCw,
+  Search,
   Table2,
+  Waypoints,
 } from 'lucide-vue-next'
 import { connectionApi, type ConnectionItem, type DbType } from '../../../api/datasource'
 import { workbenchApi, type TableInfo } from '../../../api/workbench'
@@ -122,9 +165,11 @@ import { workbenchApi, type TableInfo } from '../../../api/workbench'
 const emit = defineEmits<{
   (e: 'select-connection', conn: ConnectionItem): void
   (e: 'databases-loaded', payload: { conn: ConnectionItem; items: { name: string }[] }): void
+  (e: 'tables-loaded', payload: { conn: ConnectionItem; database: string; schema: string; tables: TableInfo[] }): void
   (e: 'preview-table', payload: { conn: ConnectionItem; database: string; schema: string; table: TableInfo }): void
   (e: 'redis-overview', conn: ConnectionItem): void
   (e: 'redis-keys', conn: ConnectionItem): void
+  (e: 'generate-select', payload: { conn: ConnectionItem; database: string; schema: string; table: TableInfo }): void
 }>()
 
 const connections = ref<ConnectionItem[]>([])
@@ -134,16 +179,24 @@ const errors = reactive<Record<number, string>>({})
 const expandedConns = ref<Set<number>>(new Set())
 const activeConnId = ref<number | null>(null)
 const activeTableKey = ref('')
+const keyword = ref('')
 
-// 懒加载缓存（列表整体替换，使用 shallowReactive 避免深层解包影响类型）
 const dbs = shallowReactive<Record<number, { name: string }[]>>({})
 const schemas = shallowReactive<Record<string, string[]>>({})
 const tables = shallowReactive<Record<string, TableInfo[]>>({})
 const openSchemaNodes = ref<Set<string>>(new Set())
 const openTableNodes = ref<Set<string>>(new Set())
 
-// in-flight 去重：setup 首次加载与父组件 whenLoaded()/手动刷新可能并发，
-// 共用同一个 Promise，确保连接列表全局只发一次请求。
+const contextMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  conn: null as ConnectionItem | null,
+  database: '',
+  schema: '',
+  table: null as TableInfo | null,
+})
+
 let loadingPromise: Promise<void> | null = null
 async function reload(force = false) {
   if (loadingPromise && !force) return loadingPromise
@@ -160,6 +213,38 @@ async function reload(force = false) {
   loadingPromise = null
 }
 reload()
+
+const filteredConnections = computed(() => {
+  const kw = keyword.value.toLowerCase()
+  if (!kw) return connections.value
+  return connections.value.filter((c) => {
+    if (c.name.toLowerCase().includes(kw)) return true
+    const dbList = dbs[c.id] || []
+    if (dbList.some((d) => d.name.toLowerCase().includes(kw))) return true
+    // 检查表
+    const prefix = `${c.id}:`
+    return Object.keys(tables).some((k) => k.startsWith(prefix) && tables[k]?.some((t) => t.name.toLowerCase().includes(kw)))
+  })
+})
+
+function filteredDbs(connId: number) {
+  const kw = keyword.value.toLowerCase()
+  const list = dbs[connId] || []
+  if (!kw) return list
+  return list.filter((d) => d.name.toLowerCase().includes(kw) || tables[`${connId}:${d.name}:`]?.some((t) => t.name.toLowerCase().includes(kw)) || Object.keys(tables).some((k) => k.startsWith(`${connId}:${d.name}:`) && tables[k]?.some((t) => t.name.toLowerCase().includes(kw))))
+}
+
+function filteredTables(connId: number, db: string, sch: string) {
+  const key = `${connId}:${db}:${sch}`
+  const list = tables[key] || []
+  const kw = keyword.value.toLowerCase()
+  if (!kw) return list
+  return list.filter((t) => t.name.toLowerCase().includes(kw))
+}
+
+function shortProxy(name: string) {
+  return name.length > 6 ? name.slice(0, 6) : name
+}
 
 function typeIcon(t: DbType) {
   return t === 'redis' ? KeyRound : Database
@@ -178,7 +263,6 @@ async function toggleConnection(conn: ConnectionItem) {
   expandedConns.value.add(conn.id)
   if (conn.type === 'redis') return
 
-  // 库列表统一在此处加载一次，通过 databases-loaded 事件回传父组件，避免重复请求
   const cached = dbs[conn.id]
   if (cached) {
     emit('databases-loaded', { conn, items: cached })
@@ -235,9 +319,12 @@ async function toggleTables(conn: ConnectionItem, db: string, sch: string) {
         schema: sch || undefined,
       })
       tables[key] = res.items
+      emit('tables-loaded', { conn, database: db, schema: sch, tables: res.items })
     } catch {
       tables[key] = []
     }
+  } else {
+    emit('tables-loaded', { conn, database: db, schema: sch, tables: tables[key] || [] })
   }
 }
 
@@ -257,7 +344,43 @@ function emitRedisKeys(conn: ConnectionItem) {
   emit('redis-keys', conn)
 }
 
-// 供外部（路由 query）预选连接
+function openContextMenu(e: MouseEvent, conn: ConnectionItem, db: string, sch: string, table: TableInfo) {
+  contextMenu.conn = conn
+  contextMenu.database = db
+  contextMenu.schema = sch
+  contextMenu.table = table
+  contextMenu.x = e.clientX
+  contextMenu.y = e.clientY
+  contextMenu.visible = true
+}
+
+function ctxPreview() {
+  if (contextMenu.conn && contextMenu.table) {
+    emitTable(contextMenu.conn, contextMenu.database, contextMenu.schema, contextMenu.table)
+  }
+  contextMenu.visible = false
+}
+function ctxSelect() {
+  if (contextMenu.conn && contextMenu.table) {
+    emit('generate-select', { conn: contextMenu.conn, database: contextMenu.database, schema: contextMenu.schema, table: contextMenu.table })
+  }
+  contextMenu.visible = false
+}
+function ctxCopyName() {
+  if (contextMenu.table) {
+    navigator.clipboard.writeText(contextMenu.table.name)
+  }
+  contextMenu.visible = false
+}
+function ctxCopyQualified() {
+  if (contextMenu.table) {
+    const sch = contextMenu.schema ? `${contextMenu.schema}.` : ''
+    const qualified = `${contextMenu.database}.${sch}${contextMenu.table.name}`
+    navigator.clipboard.writeText(qualified)
+  }
+  contextMenu.visible = false
+}
+
 defineExpose({
   findConnection: (id: number) => connections.value.find((c) => c.id === id),
   connectionsRef: connections,
