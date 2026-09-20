@@ -99,10 +99,12 @@ export interface TreeTable {
 }
 export interface TreeSchema {
   name: string
+  table_count: number
   tables: TreeTable[]
 }
 export interface TreeDB {
   name: string
+  table_count: number
   schemas: TreeSchema[]
 }
 export interface TreeConnection {
@@ -110,6 +112,8 @@ export interface TreeConnection {
   name: string
   type: string
   environment: EnvKind
+  table_count: number
+  is_empty: boolean
   databases: TreeDB[]
 }
 

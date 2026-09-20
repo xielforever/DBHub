@@ -100,18 +100,20 @@
           </div>
         </div>
 
-        <!-- 表清单 -->
+        <!-- 表清单 M2：增加标签与同步时间列 -->
         <div v-loading="listLoading" class="glass-card overflow-hidden">
           <div class="overflow-x-auto">
-            <table class="w-full text-sm min-w-[860px]">
+            <table class="w-full text-sm min-w-[1080px]">
               <thead>
                 <tr class="text-left text-white/40 text-xs border-b border-white/10">
                   <th class="font-medium px-4 py-3">表 / 视图</th>
                   <th class="font-medium px-3 py-3">数据源</th>
                   <th class="font-medium px-3 py-3">Owner</th>
+                  <th class="font-medium px-3 py-3">标签</th>
                   <th class="font-medium px-3 py-3">分级</th>
                   <th class="font-medium px-3 py-3 text-right">行数(估)</th>
                   <th class="font-medium px-3 py-3 text-right">30天查询</th>
+                  <th class="font-medium px-3 py-3">同步时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -148,6 +150,13 @@
                     <span v-else class="text-white/30">未指派</span>
                   </td>
                   <td class="px-3 py-3">
+                    <div class="flex flex-wrap gap-1 max-w-[160px]">
+                      <span v-for="tg in row.tags?.slice(0,3)" :key="tg" class="px-1.5 py-0.5 rounded-full bg-white/8 text-white/55 text-[10px] truncate">#{{ tg }}</span>
+                      <span v-if="(row.tags?.length||0)>3" class="text-[10px] text-white/30">+{{ (row.tags!.length-3) }}</span>
+                      <span v-if="!row.tags?.length" class="text-white/25 text-xs">—</span>
+                    </div>
+                  </td>
+                  <td class="px-3 py-3">
                     <span v-if="row.sensitivity !== 'normal'" class="px-2 py-0.5 rounded-full text-[11px]" :class="sensMeta[row.sensitivity].cls">
                       {{ sensMeta[row.sensitivity].label }}
                     </span>
@@ -160,9 +169,12 @@
                   <td class="px-3 py-3 text-right text-xs tabular-nums" :class="row.query_count_30d ? 'text-indigo-300' : 'text-white/25'">
                     {{ row.query_count_30d }}
                   </td>
+                  <td class="px-3 py-3 text-white/40 text-[11px] whitespace-nowrap">
+                    {{ formatTime(row.snapshot.synced_at) }}
+                  </td>
                 </tr>
                 <tr v-if="!listLoading && !rows.length">
-                  <td colspan="6" class="px-4 py-12 text-center text-white/40 text-sm">
+                  <td colspan="8" class="px-4 py-12 text-center text-white/40 text-sm">
                     没有符合条件的资产
                   </td>
                 </tr>
@@ -192,12 +204,13 @@
       />
     </el-drawer>
 
-    <!-- 表详情抽屉（M1 只读，标注编辑在 M2） -->
+    <!-- 表详情抽屉 M2：标注编辑 + 数据预览 -->
     <el-drawer
       v-model="detailOpen"
       :title="detail?.snapshot.table_name ?? ''"
-      size="640px"
+      size="720px"
       class="glass-dialog asset-detail"
+      @close="previewRows = []"
     >
       <template v-if="detail">
         <div class="flex flex-wrap items-center gap-2 text-xs mb-4">
@@ -209,24 +222,36 @@
           <span class="px-2 py-0.5 rounded-full bg-indigo-400/15 text-indigo-300 tabular-nums">
             30天查询 {{ detail.query_count_30d }}
           </span>
+          <span class="px-2 py-0.5 rounded-full bg-white/5 text-white/40 text-[11px]">
+            同步 {{ formatTime(detail.snapshot.synced_at) }}
+          </span>
         </div>
 
-        <!-- 表级标注 -->
-        <div class="glass-card p-4 mb-4 space-y-2">
+        <!-- 表级标注 M2 可编辑 -->
+        <div class="glass-card p-4 mb-4 space-y-3">
           <div class="flex items-center justify-between">
             <p class="text-xs uppercase tracking-widest text-white/40">业务标注</p>
-            <button
-              class="flex items-center gap-1 text-xs transition-colors"
-              :class="detail.starred ? 'text-amber-300' : 'text-white/40 hover:text-amber-300'"
-              @click="toggleStar"
-            >
-              <Star class="w-3.5 h-3.5" :class="detail.starred ? 'fill-amber-300' : ''" />收藏
-            </button>
+            <div class="flex items-center gap-2">
+              <button
+                v-if="canWrite"
+                class="ghost-button text-[11px] py-1 px-2 flex items-center gap-1"
+                @click="openTableEdit"
+              >
+                <Pencil class="w-3 h-3" />编辑
+              </button>
+              <button
+                class="flex items-center gap-1 text-xs transition-colors"
+                :class="detail.starred ? 'text-amber-300' : 'text-white/40 hover:text-amber-300'"
+                @click="toggleStar"
+              >
+                <Star class="w-3.5 h-3.5" :class="detail.starred ? 'fill-amber-300' : ''" />收藏
+              </button>
+            </div>
           </div>
           <p v-if="detail.table_annotation?.business_desc" class="text-sm text-white/80">
             {{ detail.table_annotation.business_desc }}
           </p>
-          <p v-else class="text-sm text-white/30">暂无业务说明（M2 开放编辑）</p>
+          <p v-else class="text-sm text-white/30">暂无业务说明，点击编辑补充</p>
           <div class="flex flex-wrap items-center gap-1.5">
             <span
               v-if="detail.table_annotation && detail.table_annotation.sensitivity !== 'normal'"
@@ -241,16 +266,17 @@
             <span v-if="detail.table_annotation?.owner_user_id" class="text-[11px] text-white/45">
               Owner：{{ ownerName(detail.table_annotation?.owner_user_id) }}
             </span>
+            <span v-else class="text-[11px] text-white/30">Owner 未指派</span>
           </div>
         </div>
 
-        <el-tabs model-value="columns" class="asset-tabs">
+        <el-tabs v-model="activeTab" class="asset-tabs">
           <el-tab-pane label="字段" name="columns">
             <div class="space-y-1.5">
               <div
                 v-for="col in detail.snapshot.raw_columns"
                 :key="col.name"
-                class="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5"
+                class="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2.5 group"
               >
                 <div class="flex items-center gap-2 flex-wrap">
                   <span class="font-medium text-sm flex items-center gap-1.5">
@@ -266,10 +292,23 @@
                   >
                     {{ sensMeta[colAnno(col.name)!.sensitivity].label }}
                   </span>
+                  <span class="flex-1" />
+                  <button
+                    v-if="canWrite"
+                    class="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6 rounded-lg flex items-center justify-center text-white/40 hover:bg-white/10 hover:text-white"
+                    title="编辑列标注"
+                    @click="openColumnEdit(col.name)"
+                  >
+                    <Pencil class="w-3.5 h-3.5" />
+                  </button>
                 </div>
                 <p v-if="col.comment || colAnno(col.name)?.business_desc" class="text-[11px] text-white/45 mt-1">
                   {{ colAnno(col.name)?.business_desc || col.comment }}
                 </p>
+                <div v-if="colAnno(col.name)?.tags?.length" class="flex gap-1 mt-1 flex-wrap">
+                  <span v-for="tg in colAnno(col.name)!.tags" :key="tg" class="px-1.5 py-0.5 rounded-full bg-white/5 text-white/40 text-[10px]">#{{ tg }}</span>
+                </div>
+                <p v-if="colAnno(col.name)?.owner_user_id" class="text-[10px] text-white/30 mt-1">Owner: {{ ownerName(colAnno(col.name)!.owner_user_id) }}</p>
               </div>
             </div>
           </el-tab-pane>
@@ -299,9 +338,118 @@
           <el-tab-pane label="DDL" name="ddl">
             <pre class="text-[11px] leading-relaxed font-mono text-white/70 bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ detail.snapshot.ddl_text || '—' }}</pre>
           </el-tab-pane>
+          <el-tab-pane label="数据预览" name="preview">
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <p class="text-xs text-white/40">最多 200 行，只读预览（复用工作台预览接口）</p>
+                <button class="ghost-button text-xs py-1 px-2 flex items-center gap-1" :disabled="previewLoading" @click="loadPreview(1)">
+                  <RefreshCw class="w-3 h-3" :class="previewLoading ? 'animate-spin' : ''" />刷新
+                </button>
+              </div>
+              <div v-loading="previewLoading" class="glass-card overflow-hidden">
+                <div class="overflow-x-auto max-h-[420px] overflow-y-auto">
+                  <table class="w-full text-xs min-w-[520px]">
+                    <thead class="sticky top-0 bg-black/40 backdrop-blur">
+                      <tr class="text-left text-white/40">
+                        <th v-for="c in previewColumns" :key="c" class="font-medium px-3 py-2 whitespace-nowrap">{{ c }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, i) in previewRows" :key="i" class="border-b border-white/5 last:border-0">
+                        <td v-for="(cell, j) in row" :key="j" class="px-3 py-1.5 text-white/70 max-w-[200px] truncate">{{ formatCell(cell) }}</td>
+                      </tr>
+                      <tr v-if="!previewLoading && !previewRows.length">
+                        <td :colspan="previewColumns.length || 1" class="px-3 py-8 text-center text-white/30">暂无数据或预览失败</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2 border-t border-white/10 text-[11px] text-white/40">
+                  <span>共 {{ previewTotal }} 行（估）</span>
+                  <div class="flex items-center gap-1">
+                    <button class="ghost-button px-2 py-0.5 text-[11px]" :disabled="previewPage<=1" @click="loadPreview(previewPage-1)">上一页</button>
+                    <span>{{ previewPage }}</span>
+                    <button class="ghost-button px-2 py-0.5 text-[11px]" :disabled="!previewHasMore" @click="loadPreview(previewPage+1)">下一页</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </el-tab-pane>
         </el-tabs>
       </template>
     </el-drawer>
+
+    <!-- 表级标注编辑 M2 -->
+    <el-dialog v-model="tableEditOpen" title="编辑表标注" width="560px" class="glass-dialog" :close-on-click-modal="false">
+      <div class="space-y-4">
+        <div>
+          <p class="text-xs text-white/50 mb-1">Owner</p>
+          <el-select v-model="tableForm.owner_user_id" class="w-full" popper-class="glass-popper" clearable placeholder="选择 Owner">
+            <el-option v-for="u in briefUsers" :key="u.id" :label="`${u.username} (${u.role})`" :value="u.id" />
+          </el-select>
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">业务说明</p>
+          <el-input v-model="tableForm.business_desc" type="textarea" :rows="3" placeholder="表用途、口径、注意事项" maxlength="1000" show-word-limit />
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">标签（最多8个，回车新增）</p>
+          <el-select v-model="tableForm.tags" multiple filterable allow-create default-first-option class="w-full" popper-class="glass-popper" placeholder="输入标签后回车">
+            <el-option v-for="t in tableForm.tags" :key="t" :label="t" :value="t" />
+          </el-select>
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">敏感分级</p>
+          <el-select v-model="tableForm.sensitivity" class="w-full" popper-class="glass-popper">
+            <el-option label="普通" value="normal" />
+            <el-option label="敏感" value="sensitive" />
+            <el-option label="机密" value="confidential" />
+          </el-select>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button class="ghost-button" @click="tableEditOpen=false">取消</button>
+          <button class="liquid-button" :disabled="savingAnno" @click="saveTableAnno">{{ savingAnno ? '保存中…' : '保存' }}</button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 列级标注编辑 M2 -->
+    <el-dialog v-model="columnEditOpen" :title="`编辑列标注 · ${editingColumn || ''}`" width="560px" class="glass-dialog" :close-on-click-modal="false">
+      <div class="space-y-4">
+        <div>
+          <p class="text-xs text-white/50 mb-1">Owner</p>
+          <el-select v-model="columnForm.owner_user_id" class="w-full" popper-class="glass-popper" clearable placeholder="选择 Owner">
+            <el-option v-for="u in briefUsers" :key="u.id" :label="`${u.username} (${u.role})`" :value="u.id" />
+          </el-select>
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">业务说明</p>
+          <el-input v-model="columnForm.business_desc" type="textarea" :rows="2" placeholder="列含义、口径" maxlength="1000" show-word-limit />
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">标签</p>
+          <el-select v-model="columnForm.tags" multiple filterable allow-create default-first-option class="w-full" popper-class="glass-popper" placeholder="输入标签后回车">
+            <el-option v-for="t in columnForm.tags" :key="t" :label="t" :value="t" />
+          </el-select>
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">敏感分级</p>
+          <el-select v-model="columnForm.sensitivity" class="w-full" popper-class="glass-popper">
+            <el-option label="普通" value="normal" />
+            <el-option label="敏感" value="sensitive" />
+            <el-option label="机密" value="confidential" />
+          </el-select>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button class="ghost-button" @click="columnEditOpen=false">取消</button>
+          <button class="liquid-button" :disabled="savingAnno" @click="saveColumnAnno">{{ savingAnno ? '保存中…' : '保存' }}</button>
+        </div>
+      </template>
+    </el-dialog>
 
     <!-- 同步结果 -->
     <el-dialog v-model="syncResultOpen" title="字典同步结果" width="640px" class="glass-dialog">
@@ -325,7 +473,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
@@ -333,6 +481,7 @@ import {
   Eye,
   FolderTree,
   KeyRound,
+  Pencil,
   RefreshCw,
   Search,
   Star,
@@ -344,6 +493,7 @@ import {
 } from 'lucide-vue-next'
 import {
   assetApi,
+  type BriefUser,
   type EnvKind,
   type MetaSnapshot,
   type OverviewCounts,
@@ -354,6 +504,7 @@ import {
   type TreeConnection,
   type MetaKey,
 } from '../../api/asset'
+import { workbenchApi } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
 import TreeView from './components/TreeView.vue'
 
@@ -408,7 +559,6 @@ function onTreeSelect(s: Selection) {
   Object.assign(selection, s)
   reload(1)
 }
-/** 目录树直接点表名：先收敛列表过滤，再打开详情抽屉 */
 async function onTreeOpenTable(loc: { connection_id: number; database: string; schema: string; table: string }) {
   Object.assign(selection, { connection_id: loc.connection_id, database: loc.database, schema: loc.schema })
   openDetail({
@@ -467,14 +617,28 @@ function toggleStarred() {
 function formatNum(n: number): string {
   return n >= 10000 ? `${(n / 10000).toFixed(1)}w` : String(n)
 }
+function formatTime(s: string): string {
+  if (!s) return '—'
+  try {
+    const d = new Date(s)
+    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
+  } catch { return s.slice(0,16) }
+}
 function keyKindLabel(kind: MetaKey['kind']): string {
   return { primary_key: '主键', foreign_key: '外键', unique: '唯一键' }[kind]
+}
+function formatCell(v: unknown): string {
+  if (v === null || v === undefined) return 'NULL'
+  if (typeof v === 'object') return JSON.stringify(v)
+  return String(v)
 }
 
 // ---------- 详情 ----------
 const detailOpen = ref(false)
 const detail = ref<TableDetail | null>(null)
+const activeTab = ref('columns')
 const usersMap = ref<Record<number, string>>({})
+const briefUsers = ref<BriefUser[]>([])
 
 async function openDetail(s: MetaSnapshot) {
   try {
@@ -485,6 +649,9 @@ async function openDetail(s: MetaSnapshot) {
       table: s.table_name,
     })
     detailOpen.value = true
+    activeTab.value = 'columns'
+    previewRows.value = []
+    previewColumns.value = []
   } catch {
     /* 拦截器提示 */
   }
@@ -504,7 +671,6 @@ async function toggleStar() {
       !detail.value.starred,
     )
     detail.value.starred = res.starred
-    // 同步更新列表行，避免抽屉关闭后仍显示旧收藏状态
     const idx = rows.value.findIndex(
       (r) =>
         r.snapshot.connection_id === s.connection_id &&
@@ -521,6 +687,165 @@ async function toggleStar() {
     /* 拦截器提示 */
   }
 }
+
+// ---------- M2 标注编辑 ----------
+const tableEditOpen = ref(false)
+const columnEditOpen = ref(false)
+const editingColumn = ref<string>('')
+const savingAnno = ref(false)
+const tableForm = reactive<{
+  owner_user_id: number | null
+  business_desc: string
+  tags: string[]
+  sensitivity: Sensitivity
+}>({
+  owner_user_id: null,
+  business_desc: '',
+  tags: [],
+  sensitivity: 'normal',
+})
+const columnForm = reactive<{
+  owner_user_id: number | null
+  business_desc: string
+  tags: string[]
+  sensitivity: Sensitivity
+}>({
+  owner_user_id: null,
+  business_desc: '',
+  tags: [],
+  sensitivity: 'normal',
+})
+
+function openTableEdit() {
+  if (!detail.value) return
+  const a = detail.value.table_annotation
+  tableForm.owner_user_id = a?.owner_user_id ?? null
+  tableForm.business_desc = a?.business_desc ?? ''
+  tableForm.tags = [...(a?.tags ?? [])]
+  tableForm.sensitivity = (a?.sensitivity as Sensitivity) ?? 'normal'
+  tableEditOpen.value = true
+}
+function openColumnEdit(colName: string) {
+  if (!detail.value) return
+  editingColumn.value = colName
+  const a = colAnno(colName)
+  columnForm.owner_user_id = a?.owner_user_id ?? null
+  columnForm.business_desc = a?.business_desc ?? ''
+  columnForm.tags = [...(a?.tags ?? [])]
+  columnForm.sensitivity = (a?.sensitivity as Sensitivity) ?? 'normal'
+  columnEditOpen.value = true
+}
+async function saveTableAnno() {
+  if (!detail.value) return
+  const s = detail.value.snapshot
+  if (tableForm.tags.length > 8) {
+    ElMessage.warning('标签最多 8 个')
+    return
+  }
+  savingAnno.value = true
+  try {
+    await assetApi.putAnnotation({
+      connection_id: s.connection_id,
+      database: s.database_name,
+      schema: s.schema_name,
+      table: s.table_name,
+      owner_user_id: tableForm.owner_user_id,
+      business_desc: tableForm.business_desc,
+      tags: tableForm.tags,
+      sensitivity: tableForm.sensitivity,
+    })
+    ElMessage.success('已保存')
+    tableEditOpen.value = false
+    // 刷新详情与列表
+    const fresh = await assetApi.table({
+      connection_id: s.connection_id,
+      database: s.database_name,
+      schema: s.schema_name,
+      table: s.table_name,
+    })
+    detail.value = fresh
+    await reload()
+    await loadOverview()
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    savingAnno.value = false
+  }
+}
+async function saveColumnAnno() {
+  if (!detail.value || !editingColumn.value) return
+  const s = detail.value.snapshot
+  if (columnForm.tags.length > 8) {
+    ElMessage.warning('标签最多 8 个')
+    return
+  }
+  savingAnno.value = true
+  try {
+    await assetApi.putAnnotation({
+      connection_id: s.connection_id,
+      database: s.database_name,
+      schema: s.schema_name,
+      table: s.table_name,
+      column: editingColumn.value,
+      owner_user_id: columnForm.owner_user_id,
+      business_desc: columnForm.business_desc,
+      tags: columnForm.tags,
+      sensitivity: columnForm.sensitivity,
+    })
+    ElMessage.success('列标注已保存')
+    columnEditOpen.value = false
+    const fresh = await assetApi.table({
+      connection_id: s.connection_id,
+      database: s.database_name,
+      schema: s.schema_name,
+      table: s.table_name,
+    })
+    detail.value = fresh
+    await loadOverview()
+  } catch {
+    /* 拦截器提示 */
+  } finally {
+    savingAnno.value = false
+  }
+}
+
+// ---------- M2 数据预览 ----------
+const previewLoading = ref(false)
+const previewColumns = ref<string[]>([])
+const previewRows = ref<unknown[][]>([])
+const previewTotal = ref(0)
+const previewPage = ref(1)
+const previewHasMore = ref(false)
+
+async function loadPreview(p?: number) {
+  if (!detail.value) return
+  if (p) previewPage.value = p
+  previewLoading.value = true
+  try {
+    const s = detail.value.snapshot
+    const res = await workbenchApi.preview(s.connection_id, {
+      database: s.database_name,
+      schema: s.schema_name,
+      table: s.table_name,
+      page: previewPage.value,
+      page_size: 20,
+    })
+    previewColumns.value = res.columns
+    previewRows.value = res.rows
+    previewTotal.value = res.total
+    previewHasMore.value = res.has_more
+  } catch {
+    previewRows.value = []
+    previewColumns.value = []
+  } finally {
+    previewLoading.value = false
+  }
+}
+watch(activeTab, (tab) => {
+  if (tab === 'preview' && previewRows.value.length === 0) {
+    loadPreview(1)
+  }
+})
 
 // ---------- 同步 ----------
 const syncing = ref(false)
@@ -549,6 +874,7 @@ async function loadOverview() {
 async function loadUsers() {
   try {
     const res = await assetApi.briefUsers()
+    briefUsers.value = res.items
     usersMap.value = Object.fromEntries(res.items.map((u) => [u.id, u.username]))
   } catch {
     /* 非关键 */
