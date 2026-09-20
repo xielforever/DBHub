@@ -167,6 +167,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  Activity,
   BarChart3,
   Boxes,
   ChevronDown,
@@ -203,7 +204,7 @@ interface MenuItem {
 const menuGroups: { title: string; items: MenuItem[] }[] = [
   {
     title: '概览',
-    items: [{ name: 'dashboard', label: '仪表盘', to: '/dashboard', icon: LayoutDashboard }],
+    items: [{ name: 'dashboard', label: '运营总览', to: '/dashboard', icon: Activity }],
   },
   {
     title: '数据',

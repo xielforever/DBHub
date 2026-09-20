@@ -22,6 +22,7 @@
 
         <!-- 仪表盘分享 -->
         <div v-if="data.subject_type === 'dashboard'" class="grid grid-cols-12 gap-4">
+          <div class="hidden col-span-1 col-span-2 col-span-3 col-span-4 col-span-5 col-span-6 col-span-7 col-span-8 col-span-9 col-span-10 col-span-11 col-span-12 md:col-span-1 md:col-span-2 md:col-span-3 md:col-span-4 md:col-span-5 md:col-span-6 md:col-span-7 md:col-span-8 md:col-span-9 md:col-span-10 md:col-span-11 md:col-span-12"></div>
           <div v-for="cell in layout" :key="cell.report_id" :class="`col-span-12 md:col-span-${Math.min(12, cell.w || 6)}`" class="glass-card p-3">
             <p class="text-sm font-medium mb-2">{{ reportName(cell.report_id) }}</p>
             <ChartCard
