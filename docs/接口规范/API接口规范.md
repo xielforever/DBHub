@@ -422,19 +422,24 @@ curl http://localhost:8080/api/health
   "items": [
     {
       "id": 1, "name": "订单核心库", "type": "postgres", "environment": "prod",
+      "table_count": 26, "is_empty": false,
       "databases": [
-        { "name": "orders", "schemas": [
-          { "name": "public", "tables": [
+        { "name": "postgres", "table_count": 26, "schemas": [
+          { "name": "shop", "table_count": 4, "tables": [
             { "name": "orders", "type": "table" },
             { "name": "v_monthly_sales", "type": "view" }
           ]}
         ]}
       ]
+    },
+    {
+      "id": 2, "name": "未同步示例", "type": "postgres", "environment": "dev",
+      "table_count": 0, "is_empty": true, "databases": []
     }
   ]
 }
 ```
-> MySQL 以库名为唯一 schema 名；PostgreSQL 过滤 `pg_catalog / information_schema / pg_toast*`。
+> MySQL 以库名为唯一 schema 名；PostgreSQL 过滤 `pg_catalog / information_schema / pg_toast*`。`table_count` 为聚合统计，`is_empty` 为 `table_count==0` 时前端展示“未同步/不可达”徽标与弱化样式（M2）。
 
 ### 10.4 资产列表（分页 + 过滤）
 
