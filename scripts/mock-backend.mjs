@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.10.0', env: 'arena', note: 'Step10: EXPLAIN可视化+Redis树+批量+全量编辑' })
+    return ok(res, { status: 'ok', version: 'mock-0.11.0', env: 'arena', note: 'Step11: 事务模式+列统计直方图+EXPLAIN可视化+Redis树' })
   }
 
   // 认证
@@ -402,12 +402,54 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { ok: true })
   }
 
+  // 事务模拟
+  if (!globalThis.__transactions) globalThis.__transactions = {}
+  if (pathname === '/api/v1/query/transaction/begin' && method === 'POST') {
+    const body = await readBody(req)
+    const cid = Number(body.connection_id)
+    const txId = `tx_${cid}_${Date.now()}`
+    globalThis.__transactions[cid] = { transaction_id: txId, status: 'active', started_at: new Date().toISOString(), queries: 0, database: body.database || '' }
+    return ok(res, { transaction_id: txId, status: 'active', connection_id: cid, started_at: globalThis.__transactions[cid].started_at })
+  }
+  if (pathname === '/api/v1/query/transaction/commit' && method === 'POST') {
+    const body = await readBody(req)
+    const cid = Number(body.connection_id)
+    const tx = globalThis.__transactions[cid]
+    if (tx) {
+      tx.status = 'committed'
+      delete globalThis.__transactions[cid]
+    }
+    return ok(res, { transaction_id: body.transaction_id, status: 'committed', committed: true })
+  }
+  if (pathname === '/api/v1/query/transaction/rollback' && method === 'POST') {
+    const body = await readBody(req)
+    const cid = Number(body.connection_id)
+    const tx = globalThis.__transactions[cid]
+    if (tx) {
+      tx.status = 'rolled_back'
+      delete globalThis.__transactions[cid]
+    }
+    return ok(res, { transaction_id: body.transaction_id, status: 'rolled_back', rolled_back: true })
+  }
+  if (pathname === '/api/v1/query/transaction/status' && method === 'GET') {
+    const cid = Number(query.connection_id)
+    const tx = globalThis.__transactions[cid]
+    if (tx) {
+      return ok(res, { active: true, transaction_id: tx.transaction_id, started_at: tx.started_at, queries: tx.queries, status: tx.status })
+    }
+    return ok(res, { active: false })
+  }
+
   // 查询执行 - 支持 EXPLAIN
   if (pathname === '/api/v1/query/execute' && method === 'POST') {
     const body = await readBody(req)
     const rawSql = body.sql || ''
     const sql = rawSql.toLowerCase()
-    const conn = connections.find(c => c.id === Number(body.connection_id))
+    const cid = Number(body.connection_id)
+    if (globalThis.__transactions && globalThis.__transactions[cid]) {
+      globalThis.__transactions[cid].queries = (globalThis.__transactions[cid].queries || 0) + 1
+    }
+    const conn = connections.find(c => c.id === cid)
     const connType = conn?.type || 'postgres'
     if (sql.trim().startsWith('explain')) {
       if (connType === 'mysql') {

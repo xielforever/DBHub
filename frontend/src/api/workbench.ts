@@ -187,6 +187,18 @@ export const workbenchApi = {
   redisZSetRemove(connectionId: number, key: string, member: string) {
     return request.delete<unknown, { key: string }>(`/redis/zset/member`, { data: { connection_id: connectionId, key, member }, params: { connection_id: connectionId, key, member } } as any)
   },
+  beginTransaction(connectionId: number, database?: string) {
+    return request.post<unknown, { transaction_id: string; status: string; connection_id: number }>('/query/transaction/begin', { connection_id: connectionId, database: database || '' })
+  },
+  commitTransaction(connectionId: number, transactionId: string) {
+    return request.post<unknown, { transaction_id: string; status: string; committed: boolean }>('/query/transaction/commit', { connection_id: connectionId, transaction_id: transactionId })
+  },
+  rollbackTransaction(connectionId: number, transactionId: string) {
+    return request.post<unknown, { transaction_id: string; status: string; rolled_back: boolean }>('/query/transaction/rollback', { connection_id: connectionId, transaction_id: transactionId })
+  },
+  transactionStatus(connectionId: number) {
+    return request.get<unknown, { active: boolean; transaction_id?: string; started_at?: string; queries?: number }>('/query/transaction/status', { params: { connection_id: connectionId } })
+  },
 }
 
 export type { DbType }

@@ -75,6 +75,20 @@
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5" @click="addTab">
                 <Plus class="w-3.5 h-3.5" /> 新查询
               </button>
+              <el-dropdown v-if="currentConn && currentConn.type !== 'redis'" trigger="click" popper-class="glass-popper">
+                <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1" :class="transactionActive ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' : ''">
+                  <span class="w-1.5 h-1.5 rounded-full" :class="transactionActive ? 'bg-amber-400 animate-pulse' : 'bg-white/20'"></span>
+                  {{ transactionActive ? '事务中' : '事务' }}
+                </button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item v-if="!transactionActive" @click="beginTransaction">BEGIN 开启事务</el-dropdown-item>
+                    <el-dropdown-item v-if="transactionActive" @click="commitTransaction">COMMIT 提交</el-dropdown-item>
+                    <el-dropdown-item v-if="transactionActive" @click="rollbackTransaction">ROLLBACK 回滚</el-dropdown-item>
+                    <el-dropdown-item divided @click="loadTransactionStatus">刷新状态</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <el-dropdown trigger="click" popper-class="glass-popper" @command="onEditorOptionCommand">
                 <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1"><Settings2 class="w-3.5 h-3.5" /> 选项</button>
                 <template #dropdown>
@@ -171,6 +185,15 @@
         :class="resultFullscreen ? 'flex-1' : ''"
         :style="resultFullscreen ? {} : { height: (100 - editorHeight) + '%' }"
       >
+        <div v-if="transactionActive" class="px-4 py-2 flex items-center gap-3 bg-amber-500/10 border-b border-amber-400/20 text-xs shrink-0">
+          <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+          <span class="text-amber-300">事务进行中</span>
+          <span class="font-mono text-white/50">{{ transactionId }}</span>
+          <span class="text-white/40">{{ transactionStartedAt ? '始于 ' + formatTime(transactionStartedAt) : '' }} · {{ transactionQueries }} 条已执行</span>
+          <div class="flex-1" />
+          <button class="ghost-button !py-1 !px-2 text-[11px] text-emerald-300" @click="commitTransaction">COMMIT</button>
+          <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300" @click="rollbackTransaction">ROLLBACK</button>
+        </div>
         <el-tabs v-model="resultTab" class="flex-1 flex flex-col min-h-0" @tab-change="onResultTabChange">
           <el-tab-pane label="结果" name="result" class="flex flex-col min-h-0 flex-1">
             <div v-if="viewMode === 'preview'" class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-white/10 text-xs text-white/60 shrink-0">
@@ -213,6 +236,10 @@
               :connection-id="currentConn?.id ?? 0"
               :database="currentTab.database"
             />
+          </el-tab-pane>
+
+          <el-tab-pane label="统计" name="stats" class="flex flex-col min-h-0 flex-1">
+            <ColumnStatsPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -722,6 +749,7 @@ import SqlMonaco from './components/SqlMonaco.vue'
 import ResultGrid from './components/ResultGrid.vue'
 import ExplainPlan from './components/ExplainPlan.vue'
 import RedisKeyTree from './components/RedisKeyTree.vue'
+import ColumnStatsPane from './components/ColumnStatsPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -936,6 +964,7 @@ function onSelectConnection(conn: ConnectionItem) {
   resultTab.value = 'result'
   databaseOptions.value = []
   allTableNames.value = []
+  loadTransactionStatus()
 }
 
 function onDatabasesLoaded({ conn, items }: { conn: ConnectionItem; items: { name: string }[] }) {
@@ -1045,6 +1074,7 @@ async function runQuery() {
       log(err instanceof Error ? err.message : '执行失败', 'error')
       resultTab.value = 'message'
     }
+    if (transactionActive.value) transactionQueries.value++
   } finally {
     running.value = false
     abortController.value = null
@@ -1234,6 +1264,10 @@ const redisBatchTTL = ref<number>(-1)
 const isAllRedisSelected = computed(() => redisKeys.value.length > 0 && redisSelectedKeys.size === redisKeys.value.length)
 const redisViewMode = ref<'list' | 'tree'>('list')
 const redisTreeExpanded = reactive(new Set<string>())
+const transactionActive = ref(false)
+const transactionId = ref('')
+const transactionStartedAt = ref('')
+const transactionQueries = ref(0)
 const isExplainResult = computed(() => {
   const cols = grid.columns.map(c => c.toLowerCase())
   return cols.includes('query plan') || cols.includes('select_type') || (grid.columns.length === 1 && (grid.columns[0] || '').toLowerCase().includes('plan'))
@@ -1866,6 +1900,55 @@ function onRedisTreeToggle(node: any) {
 }
 function onRedisTreeSelect(key: string) {
   inspectRedisKey(key)
+}
+async function beginTransaction() {
+  if (!currentConn.value) { ElMessage.warning('请先选择数据源'); return }
+  if (currentConn.value.type === 'redis') { ElMessage.info('Redis 不支持事务'); return }
+  if (isReadonly.value) { ElMessage.warning('只读角色不可开启事务'); return }
+  try {
+    const res = await workbenchApi.beginTransaction(currentConn.value.id, currentTab.value.database) as any
+    transactionActive.value = true
+    transactionId.value = res.transaction_id || `tx_${Date.now()}`
+    transactionStartedAt.value = new Date().toISOString()
+    transactionQueries.value = 0
+    ElMessage.success(`事务已开启：${transactionId.value}`)
+    log(`BEGIN ${transactionId.value}`, 'success')
+  } catch (e: any) { ElMessage.error(e?.message || '开启事务失败') }
+}
+async function commitTransaction() {
+  if (!currentConn.value || !transactionActive.value) return
+  try {
+    await workbenchApi.commitTransaction(currentConn.value.id, transactionId.value)
+    ElMessage.success('事务已提交')
+    log(`COMMIT ${transactionId.value}`, 'success')
+    transactionActive.value = false
+    transactionId.value = ''
+    transactionStartedAt.value = ''
+    transactionQueries.value = 0
+  } catch (e: any) { ElMessage.error(e?.message || '提交失败') }
+}
+async function rollbackTransaction() {
+  if (!currentConn.value || !transactionActive.value) return
+  try {
+    await workbenchApi.rollbackTransaction(currentConn.value.id, transactionId.value)
+    ElMessage.success('事务已回滚')
+    log(`ROLLBACK ${transactionId.value}`, 'info')
+    transactionActive.value = false
+    transactionId.value = ''
+    transactionStartedAt.value = ''
+    transactionQueries.value = 0
+  } catch (e: any) { ElMessage.error(e?.message || '回滚失败') }
+}
+async function loadTransactionStatus() {
+  if (!currentConn.value) return
+  try {
+    const res = await workbenchApi.transactionStatus(currentConn.value.id) as any
+    transactionActive.value = !!res.active
+    if (res.transaction_id) transactionId.value = res.transaction_id
+    if (res.started_at) transactionStartedAt.value = res.started_at
+    if (res.queries !== undefined) transactionQueries.value = res.queries
+    if (!res.active) { transactionId.value = ''; transactionStartedAt.value = ''; transactionQueries.value = 0 }
+  } catch {}
 }
 
 function addTab() {
