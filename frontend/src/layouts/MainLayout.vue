@@ -212,6 +212,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
       { name: 'connections', label: '数据源管理', to: '/connections', icon: Database },
       { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
       { name: 'reports', label: '报表中心', to: '/reports', icon: BarChart3 },
+      { name: 'dashboards', label: '仪表盘', to: '/dashboards', icon: LayoutDashboard },
     ],
   },
   {

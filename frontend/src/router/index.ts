@@ -20,6 +20,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '登录', public: true },
   },
   {
+    path: '/s/:token',
+    name: 'public-share',
+    component: () => import('../views/public/PublicShareView.vue'),
+    meta: { title: '分享', public: true },
+  },
+  {
     path: '/',
     component: () => import('../layouts/MainLayout.vue'),
     redirect: '/dashboard',
@@ -55,6 +61,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '报表中心', icon: 'BarChart3' },
       },
       {
+        path: 'dashboards',
+        name: 'dashboards',
+        component: () => import('../views/report/DashboardView.vue'),
+        meta: { title: '仪表盘', icon: 'LayoutDashboard' },
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('../views/admin/UsersView.vue'),
@@ -84,7 +96,7 @@ const router = createRouter({
 
 router.beforeEach((to) => {
   const userStore = useUserStore()
-  if (to.name !== 'login' && !userStore.isLoggedIn) {
+  if (!to.meta.public && to.name !== 'login' && !userStore.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
   if (to.name === 'login' && userStore.isLoggedIn) {

@@ -59,6 +59,9 @@
 
         <div class="flex items-center gap-1.5 pt-2 border-t border-white/10">
           <button class="ghost-button flex-1 text-xs py-1.5" @click="openReport(rep)">查看</button>
+          <button class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-sky-500/15 hover:text-sky-300" title="分享" @click="openShare(rep)">
+            <Share2 class="w-4 h-4" />
+          </button>
           <button class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-amber-500/15 hover:text-amber-300" title="收藏" @click="toggleStar(rep)">
             <Star class="w-4 h-4" :class="rep.starred ? 'fill-amber-300 text-amber-300' : ''" />
           </button>
@@ -89,10 +92,12 @@
     <el-dialog v-model="detailOpen" :title="current?.name || '报表详情'" width="760px" class="glass-dialog">
       <template v-if="current">
         <div class="space-y-4">
-          <div class="flex flex-wrap gap-2 text-xs">
+          <div class="flex flex-wrap gap-2 text-xs items-center">
             <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">数据源 #{{ current.connection_id }}</span>
             <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ current.database_name || '默认库' }}</span>
             <span class="px-2 py-0.5 rounded-full" :class="current.visibility==='shared' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/8 text-white/50'">{{ current.visibility==='shared' ? '共享' : '私有' }}</span>
+            <span class="flex-1" />
+            <button class="ghost-button text-xs py-1 px-2 flex items-center gap-1" @click="openShare(current)"><Share2 class="w-3.5 h-3.5" />分享</button>
           </div>
           <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ current.sql_text }}</pre>
 
@@ -124,15 +129,47 @@
         </div>
       </template>
     </el-dialog>
+
+    <!-- 分享 -->
+    <el-dialog v-model="shareOpen" title="分享报表" width="520px" class="glass-dialog">
+      <div class="space-y-4">
+        <div class="flex gap-2">
+          <el-select v-model="shareForm.expireDays" class="w-40" popper-class="glass-popper">
+            <el-option label="1天" :value="1" />
+            <el-option label="7天" :value="7" />
+            <el-option label="30天" :value="30" />
+            <el-option label="永久" :value="undefined" />
+          </el-select>
+          <button class="liquid-button text-xs flex items-center gap-1" :disabled="sharing" @click="createShare"><Share2 class="w-3.5 h-3.5" />生成链接</button>
+        </div>
+        <div v-if="lastShareToken" class="space-y-2">
+          <p class="text-xs text-white/50">分享链接（仅明文显示一次，请复制保存）：</p>
+          <div class="flex gap-2">
+            <el-input :model-value="shareLink" readonly />
+            <button class="ghost-button text-xs" @click="copyLink">复制</button>
+          </div>
+        </div>
+        <div v-loading="shareLoading" class="space-y-2">
+          <p class="text-xs text-white/40">已生成链接</p>
+          <div v-for="s in shareList" :key="s.id" class="flex items-center gap-2 text-xs bg-white/5 rounded-lg p-2">
+            <span class="font-mono truncate flex-1">{{ s.id }} · 访问 {{ s.access_count }} 次</span>
+            <span v-if="s.revoked" class="text-rose-300">已吊销</span>
+            <span v-else-if="s.expire_at && new Date(s.expire_at) < new Date()" class="text-amber-300">已过期</span>
+            <button v-if="!s.revoked" class="ghost-button text-[11px] py-0.5 px-2" @click="revokeShare(s.id)">吊销</button>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { BarChart3, Pencil, RefreshCw, Search, Star, Trash2 } from 'lucide-vue-next'
+import { BarChart3, Pencil, RefreshCw, Search, Share2, Star, Trash2 } from 'lucide-vue-next'
 import ChartCard from '../../components/business/chart/ChartCard.vue'
 import { reportApi, type ReportItem } from '../../api/report'
+import { shareApi, type ShareItem } from '../../api/share'
 import { workbenchApi } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
 
@@ -263,6 +300,50 @@ async function remove(rep: ReportItem) {
   await reportApi.remove(rep.id)
   ElMessage.success('已删除')
   reload()
+}
+
+// 分享
+const shareOpen = ref(false)
+const shareForm = reactive<{ expireDays?: number }>({ expireDays: 7 })
+const shareList = ref<ShareItem[]>([])
+const shareLoading = ref(false)
+const sharing = ref(false)
+const lastShareToken = ref('')
+const shareSubjectId = ref<number | null>(null)
+const shareLink = computed(() => lastShareToken.value ? `${window.location.origin}/s/${lastShareToken.value}` : '')
+
+function openShare(rep: ReportItem) {
+  shareSubjectId.value = rep.id
+  lastShareToken.value = ''
+  shareOpen.value = true
+  loadShares()
+}
+async function loadShares() {
+  if (!shareSubjectId.value) return
+  shareLoading.value = true
+  try {
+    const res = await shareApi.list('report', shareSubjectId.value)
+    shareList.value = res.items
+  } finally { shareLoading.value = false }
+}
+async function createShare() {
+  if (!shareSubjectId.value) return
+  sharing.value = true
+  try {
+    const res = await shareApi.create({ subject_type: 'report', subject_id: shareSubjectId.value, expire_days: shareForm.expireDays })
+    lastShareToken.value = res.token
+    ElMessage.success('分享链接已生成')
+    loadShares()
+  } finally { sharing.value = false }
+}
+function copyLink() {
+  navigator.clipboard.writeText(shareLink.value)
+  ElMessage.success('已复制')
+}
+async function revokeShare(id: number) {
+  await shareApi.revoke(id)
+  ElMessage.success('已吊销')
+  loadShares()
 }
 
 onMounted(() => reload(1))
