@@ -254,19 +254,23 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 // ---------------- 资产树 ----------------
 
 type treeConnection struct {
-	ID          int64        `json:"id"`
-	Name        string       `json:"name"`
-	Type        string       `json:"type"`
-	Environment string       `json:"environment"`
-	Databases   []treeDB     `json:"databases"`
+	ID          int64    `json:"id"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Environment string   `json:"environment"`
+	TableCount  int      `json:"table_count"`
+	IsEmpty     bool     `json:"is_empty"`
+	Databases   []treeDB `json:"databases"`
 }
 type treeDB struct {
-	Name    string      `json:"name"`
-	Schemas []treeSchema `json:"schemas"`
+	Name       string       `json:"name"`
+	TableCount int          `json:"table_count"`
+	Schemas    []treeSchema `json:"schemas"`
 }
 type treeSchema struct {
-	Name   string      `json:"name"`
-	Tables []treeTable `json:"tables"`
+	Name       string      `json:"name"`
+	TableCount int         `json:"table_count"`
+	Tables     []treeTable `json:"tables"`
 }
 type treeTable struct {
 	Name string `json:"name"`
@@ -324,6 +328,12 @@ func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
 		}
 		d.Schemas[si].Tables = append(d.Schemas[si].Tables,
 			treeTable{Name: s.TableName, Type: s.TableType})
+		d.Schemas[si].TableCount++
+		d.TableCount++
+		root.TableCount++
+	}
+	for _, c := range byConn {
+		c.IsEmpty = c.TableCount == 0
 	}
 	out := make([]treeConnection, 0, len(order))
 	for _, id := range order {
