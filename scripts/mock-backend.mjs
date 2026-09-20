@@ -17,11 +17,26 @@ const users = [
   { id: 3, username: 'readonly', role: 'readonly' },
 ]
 
-const connections = [
-  { id: 1, user_id: 1, name: '订单核心库', type: 'postgres', host: '10.0.0.11', port: 5432, database: 'orders', username: 'app', ssl_mode: 'require', connection_timeout: 10, environment: 'prod', has_password: true, proxy_id: 1, proxy_name: '公司 HTTP 代理', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 2, user_id: 1, name: '用户中心', type: 'mysql', host: '10.0.0.12', port: 3306, database: 'users', username: 'app', ssl_mode: '', connection_timeout: 10, environment: 'dev', has_password: true, proxy_id: null, proxy_name: '', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+let proxyIdSeq = 2
+const proxies = [
+  { id: 1, user_id: 1, name: '公司 HTTP 代理', type: 'http', host: 'proxy.example.com', port: 8080, username: 'proxyuser', has_password: true, description: '办公网出网代理', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 2, user_id: 1, name: 'SOCKS5 全局', type: 'socks5', host: '10.0.0.9', port: 1080, username: '', has_password: false, description: '通用代理占位', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  { id: 3, user_id: 1, name: 'PgBouncer 网关', type: 'db_proxy', host: '10.0.0.20', port: 6432, username: 'pbbouncer', has_password: true, description: 'PG 连接池代理', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
 ]
-let connectionIdSeq = 2
+
+let tunnelIdSeq = 1
+const tunnels = [
+  { id: 1, user_id: 1, name: '生产跳板机(废弃)', host: '10.0.0.9', port: 22, username: 'ops', auth_type: 'private_key', has_private_key: true, has_passphrase: false, has_password: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+]
+
+const connections = [
+  { id: 1, user_id: 1, name: '订单核心库', type: 'postgres', host: '10.0.0.11', port: 5432, database: 'orders', username: 'app_rw', ssl_mode: 'require', connection_timeout: 10, environment: 'prod', color_label: 'red', has_password: true, proxy_id: 1, proxy_name: '公司 HTTP 代理', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date(Date.now()-86400000*2).toISOString(), updated_at: new Date().toISOString() },
+  { id: 2, user_id: 1, name: '用户中心', type: 'mysql', host: '10.0.0.12', port: 3306, database: 'users', username: 'app_ro', ssl_mode: 'disable', connection_timeout: 10, environment: 'dev', color_label: 'blue', has_password: true, proxy_id: null, proxy_name: '', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date(Date.now()-86400000*5).toISOString(), updated_at: new Date(Date.now()-86400000*1).toISOString() },
+  { id: 3, user_id: 2, name: 'Redis 缓存集群', type: 'redis', host: '10.0.0.30', port: 6379, database: '0', username: '', ssl_mode: 'disable', connection_timeout: 5, environment: 'prod', color_label: 'green', has_password: false, proxy_id: 2, proxy_name: 'SOCKS5 全局', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date(Date.now()-86400000*10).toISOString(), updated_at: new Date(Date.now()-86400000*3).toISOString() },
+  { id: 4, user_id: 1, name: '订单归档库', type: 'postgres', host: '10.0.0.13', port: 5432, database: 'orders_archive', username: 'archiver', ssl_mode: 'require', connection_timeout: 15, environment: 'test', color_label: '', has_password: true, proxy_id: 3, proxy_name: 'PgBouncer 网关', ssh_tunnel_id: null, tunnel_name: '', created_at: new Date(Date.now()-86400000*7).toISOString(), updated_at: new Date(Date.now()-86400000*2).toISOString() },
+  { id: 5, user_id: 2, name: '测试 MySQL', type: 'mysql', host: '10.0.0.14', port: 3306, database: 'test_db', username: 'tester', ssl_mode: 'disable', connection_timeout: 10, environment: 'test', color_label: '', has_password: false, proxy_id: null, proxy_name: '', ssh_tunnel_id: 1, tunnel_name: '生产跳板机(废弃)', created_at: new Date(Date.now()-86400000*1).toISOString(), updated_at: new Date().toISOString() },
+]
+let connectionIdSeq = 5
 
 const reports = [
   { id: 1, name: '月度销售趋势', description: '按月聚合', connection_id: 1, database_name: 'orders', sql_text: "SELECT date_trunc('month', created_at) AS month, SUM(total_amount) AS sum FROM shop.orders GROUP BY 1 ORDER BY 1", chart_type: 'bar', chart_config: { dimension: 'month', metrics: ['sum'], aggregation: 'sum', sort: 'asc', topN: 20 }, visibility: 'shared', owner_user_id: 1, owner_name: 'admin', starred_by: [1], starred: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -36,12 +51,6 @@ const dashboards = [
 
 const shares = []
 
-let proxyIdSeq = 2
-const proxies = [
-  { id: 1, user_id: 1, name: '公司 HTTP 代理', type: 'http', host: 'proxy.example.com', port: 8080, username: 'proxyuser', has_password: true, description: '办公网出网代理', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-  { id: 2, user_id: 1, name: 'SOCKS5 全局', type: 'socks5', host: '10.0.0.9', port: 1080, username: '', has_password: false, description: '通用代理占位', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
-]
-
 // ---------- 工具 ----------
 function json(res, code, data, status = 200) {
   const body = JSON.stringify({ code, message: code === 0 ? 'ok' : 'error', data })
@@ -54,7 +63,6 @@ function json(res, code, data, status = 200) {
   res.end(body)
 }
 function ok(res, data) { json(res, 0, data, 200) }
-function fail(res, httpStatus, code, msg) { json(res, code, null, httpStatus); res.writeHead(httpStatus); /* override */ json(res, code, { message: msg }, httpStatus) }
 
 async function readBody(req) {
   const chunks = []
@@ -69,6 +77,22 @@ function parseQuery(url) {
   const q = {}
   for (const [k, v] of u.searchParams.entries()) q[k] = v
   return { pathname: u.pathname, query: q }
+}
+
+function filterConnections(items, query) {
+  let out = [...items]
+  if (query.type && query.type !== 'all' && query.type !== '') {
+    out = out.filter(c => c.type === query.type)
+  }
+  if (query.keyword && query.keyword.trim()) {
+    const kw = query.keyword.toLowerCase()
+    out = out.filter(c => c.name.toLowerCase().includes(kw) || c.host.toLowerCase().includes(kw) || (c.database && c.database.toLowerCase().includes(kw)))
+  }
+  if (query.q && query.q.trim()) {
+    const kw = query.q.toLowerCase()
+    out = out.filter(c => c.name.toLowerCase().includes(kw) || c.host.toLowerCase().includes(kw))
+  }
+  return out
 }
 
 // ---------- 路由 ----------
@@ -88,7 +112,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.4.0', env: 'arena' })
+    return ok(res, { status: 'ok', version: 'mock-0.5.0', env: 'arena', note: '数据源mock已完善：5连接/3代理/1隧道(废弃)' })
   }
 
   // 认证
@@ -116,6 +140,9 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/v1/auth/me' && method === 'GET') {
     return ok(res, users[0])
   }
+  if (pathname === '/api/v1/auth/change-password' && method === 'POST') {
+    return ok(res, { ok: true })
+  }
 
   // 指标总览
   if (pathname === '/api/v1/metrics/overview' && method === 'GET') {
@@ -128,7 +155,7 @@ const server = http.createServer(async (req, res) => {
     })
     return ok(res, {
       kpi: { connections: connections.length, today_queries: 58, today_active_users: 3, audit_events: 193 },
-      connection_types: { mysql: 1, postgres: 1, redis: 0 },
+      connection_types: { mysql: connections.filter(c=>c.type==='mysql').length, postgres: connections.filter(c=>c.type==='postgres').length, redis: connections.filter(c=>c.type==='redis').length },
       trend,
       rank: connections.map(c => ({ connection_id: c.id, name: c.name, count: 100 + Math.floor(Math.random() * 200) })),
       recent: [
@@ -138,36 +165,42 @@ const server = http.createServer(async (req, res) => {
     })
   }
 
-  // 连接
+  // ---------- 数据源 ----------
   if (pathname === '/api/v1/connections' && method === 'GET') {
-    // 附加 proxy_name
-    const items = connections.map(c => {
+    let items = filterConnections(connections, query)
+    items = items.map(c => {
       const proxy = c.proxy_id ? proxies.find(p => p.id === c.proxy_id) : null
-      return { ...c, proxy_name: proxy ? proxy.name : c.proxy_name || '' }
+      const tun = c.ssh_tunnel_id ? tunnels.find(t => t.id === c.ssh_tunnel_id) : null
+      return { ...c, proxy_name: proxy ? proxy.name : c.proxy_name || '', tunnel_name: tun ? tun.name : c.tunnel_name || '' }
     })
     return ok(res, { items, total: items.length })
   }
   if (pathname === '/api/v1/connections' && method === 'POST') {
     const body = await readBody(req)
+    if (!body.name || !body.host) {
+      return json(res, 40000, { message: 'name/host 必填' }, 400)
+    }
     connectionIdSeq += 1
     const proxy = body.proxy_id ? proxies.find(p => p.id === body.proxy_id) : null
+    const tun = body.ssh_tunnel_id ? tunnels.find(t => t.id === body.ssh_tunnel_id) : null
     const conn = {
       id: connectionIdSeq,
       user_id: 1,
-      name: body.name || '未命名连接',
+      name: body.name,
       type: body.type || 'mysql',
-      host: body.host || '127.0.0.1',
-      port: body.port || 3306,
+      host: body.host,
+      port: body.port || (body.type === 'postgres' ? 5432 : body.type === 'redis' ? 6379 : 3306),
       database: body.database || '',
       username: body.username || '',
       ssl_mode: body.ssl_mode || 'disable',
       connection_timeout: body.connection_timeout || 10,
       environment: body.environment || 'dev',
+      color_label: body.color_label || '',
       has_password: !!body.password,
       proxy_id: body.proxy_id || null,
       proxy_name: proxy ? proxy.name : '',
-      ssh_tunnel_id: null,
-      tunnel_name: '',
+      ssh_tunnel_id: body.ssh_tunnel_id || null,
+      tunnel_name: tun ? tun.name : '',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
@@ -179,26 +212,31 @@ const server = http.createServer(async (req, res) => {
     const c = connections.find(x => x.id === id)
     if (!c) return json(res, 40400, null, 404)
     const proxy = c.proxy_id ? proxies.find(p => p.id === c.proxy_id) : null
-    return ok(res, { ...c, proxy_name: proxy ? proxy.name : c.proxy_name || '' })
+    const tun = c.ssh_tunnel_id ? tunnels.find(t => t.id === c.ssh_tunnel_id) : null
+    return ok(res, { ...c, proxy_name: proxy ? proxy.name : c.proxy_name || '', tunnel_name: tun ? tun.name : c.tunnel_name || '' })
   }
   if (pathname.match(/^\/api\/v1\/connections\/\d+$/) && method === 'PUT') {
     const id = Number(pathname.split('/')[4])
     const body = await readBody(req)
     const c = connections.find(x => x.id === id)
     if (!c) return json(res, 40400, null, 404)
-    const proxy = body.proxy_id ? proxies.find(p => p.id === body.proxy_id) : null
+    const proxy = body.proxy_id ? proxies.find(p => p.id === body.proxy_id) : (body.proxy_id === null ? null : (c.proxy_id ? proxies.find(p=>p.id===c.proxy_id) : null))
+    const tun = body.ssh_tunnel_id ? tunnels.find(t => t.id === body.ssh_tunnel_id) : null
     Object.assign(c, {
-      name: body.name || c.name,
+      name: body.name !== undefined ? body.name : c.name,
       type: body.type || c.type,
       host: body.host || c.host,
       port: body.port || c.port,
-      database: body.database ?? c.database,
-      username: body.username ?? c.username,
+      database: body.database !== undefined ? body.database : c.database,
+      username: body.username !== undefined ? body.username : c.username,
       ssl_mode: body.ssl_mode || c.ssl_mode,
       connection_timeout: body.connection_timeout || c.connection_timeout,
       environment: body.environment || c.environment,
+      color_label: body.color_label !== undefined ? body.color_label : c.color_label,
       proxy_id: body.proxy_id !== undefined ? body.proxy_id : c.proxy_id,
-      proxy_name: proxy ? proxy.name : (body.proxy_id === null ? '' : c.proxy_name),
+      proxy_name: body.proxy_id === null ? '' : (proxy ? proxy.name : c.proxy_name),
+      ssh_tunnel_id: body.ssh_tunnel_id !== undefined ? body.ssh_tunnel_id : c.ssh_tunnel_id,
+      tunnel_name: body.ssh_tunnel_id === null ? '' : (tun ? tun.name : c.tunnel_name),
       updated_at: new Date().toISOString(),
     })
     if (body.password) c.has_password = true
@@ -210,27 +248,70 @@ const server = http.createServer(async (req, res) => {
     if (idx >= 0) connections.splice(idx, 1)
     return ok(res, { id })
   }
-  if (pathname.startsWith('/api/v1/connections/') && pathname.endsWith('/test') && method === 'POST') {
-    return ok(res, { ok: true, type: 'postgres', version: 'PostgreSQL 16.4 mock', elapsed_ms: 48 })
-  }
   if (pathname === '/api/v1/connections/test' && method === 'POST') {
-    return ok(res, { ok: true, type: 'postgres', version: 'PostgreSQL 16.4 mock', elapsed_ms: 48 })
+    const body = await readBody(req)
+    const t = body.type || 'postgres'
+    const versions = { postgres: 'PostgreSQL 16.4 mock', mysql: 'MySQL 8.0.36 mock', redis: 'Redis 7.2 mock' }
+    return ok(res, { ok: true, type: t, version: versions[t] || 'mock', elapsed_ms: 20 + Math.floor(Math.random()*60) })
+  }
+  if (pathname.match(/^\/api\/v1\/connections\/\d+\/test$/) && method === 'POST') {
+    const id = Number(pathname.split('/')[4])
+    const c = connections.find(x => x.id === id)
+    const t = c ? c.type : 'postgres'
+    const versions = { postgres: 'PostgreSQL 16.4 mock', mysql: 'MySQL 8.0.36 mock', redis: 'Redis 7.2 mock' }
+    // 模拟 prod 环境二次确认：若 prod 且无代理，返回慢
+    const elapsed = c && c.environment === 'prod' ? 120 + Math.floor(Math.random()*80) : 20 + Math.floor(Math.random()*60)
+    return ok(res, { ok: true, type: t, version: versions[t] || 'mock', elapsed_ms: elapsed, via_proxy: c && c.proxy_id ? proxies.find(p=>p.id===c.proxy_id)?.name : null })
   }
 
-  // 资产
+  // SSH 隧道兼容（废弃）
+  if (pathname === '/api/v1/ssh-tunnels' && method === 'GET') {
+    return ok(res, { items: tunnels, total: tunnels.length, deprecated: true, note: '已废弃，请使用 /api/v1/proxies' })
+  }
+  if (pathname === '/api/v1/ssh-tunnels' && method === 'POST') {
+    const body = await readBody(req)
+    tunnelIdSeq += 1
+    const t = { id: tunnelIdSeq, user_id: 1, name: body.name || '未命名隧道', host: body.host || '', port: body.port || 22, username: body.username || '', auth_type: body.auth_type || 'private_key', has_private_key: !!body.private_key, has_passphrase: !!body.passphrase, has_password: !!body.password, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+    tunnels.push(t)
+    return ok(res, t)
+  }
+  if (pathname === '/api/v1/ssh-tunnels/test' && method === 'POST') {
+    return ok(res, { ok: true, deprecated: true })
+  }
+  if (pathname.match(/^\/api\/v1\/ssh-tunnels\/\d+$/) && method === 'PUT') {
+    const id = Number(pathname.split('/')[4])
+    const body = await readBody(req)
+    const t = tunnels.find(x => x.id === id)
+    if (t) Object.assign(t, { name: body.name || t.name, host: body.host || t.host, port: body.port || t.port, username: body.username || t.username, auth_type: body.auth_type || t.auth_type, updated_at: new Date().toISOString() })
+    return ok(res, t || {})
+  }
+  if (pathname.match(/^\/api\/v1\/ssh-tunnels\/\d+$/) && method === 'DELETE') {
+    const id = Number(pathname.split('/')[4])
+    const idx = tunnels.findIndex(x => x.id === id)
+    if (idx >= 0) tunnels.splice(idx, 1)
+    // 清理 connections 引用
+    connections.forEach(c => { if (c.ssh_tunnel_id === id) { c.ssh_tunnel_id = null; c.tunnel_name = '' } })
+    return ok(res, { id })
+  }
+
+  // ---------- 资产 ----------
   if (pathname === '/api/v1/assets/overview' && method === 'GET') {
-    return ok(res, { connection_total: 2, table_total: 128, view_total: 14, owned_tables: 73, sensitive_fields: 19 })
+    return ok(res, { connection_total: connections.length, table_total: 128, view_total: 14, owned_tables: 73, sensitive_fields: 19 })
   }
   if (pathname === '/api/v1/assets/tree' && method === 'GET') {
-    return ok(res, {
-      items: [
-        { id: 1, name: '订单核心库', type: 'postgres', environment: 'prod', table_count: 26, is_empty: false, databases: [{ name: 'orders', table_count: 26, schemas: [{ name: 'public', table_count: 4, tables: [{ name: 'orders', type: 'table' }, { name: 'v_monthly_sales', type: 'view' }] }] }] },
-        { id: 2, name: '用户中心', type: 'mysql', environment: 'dev', table_count: 12, is_empty: false, databases: [{ name: 'users', table_count: 12, schemas: [{ name: 'users', table_count: 12, tables: [{ name: 'users', type: 'table' }] }] }] },
-      ]
-    })
+    let items = [
+      { id: 1, name: '订单核心库', type: 'postgres', environment: 'prod', table_count: 26, is_empty: false, databases: [{ name: 'orders', table_count: 26, schemas: [{ name: 'public', table_count: 4, tables: [{ name: 'orders', type: 'table' }, { name: 'v_monthly_sales', type: 'view' }] }] }] },
+      { id: 2, name: '用户中心', type: 'mysql', environment: 'dev', table_count: 12, is_empty: false, databases: [{ name: 'users', table_count: 12, schemas: [{ name: 'users', table_count: 12, tables: [{ name: 'users', type: 'table' }] }] }] },
+      { id: 3, name: 'Redis 缓存集群', type: 'redis', environment: 'prod', table_count: 0, is_empty: true, databases: [] },
+    ]
+    if (query.connection_id) {
+      const cid = Number(query.connection_id)
+      items = items.filter(i => i.id === cid)
+    }
+    return ok(res, { items })
   }
   if (pathname === '/api/v1/assets/tables' && method === 'GET') {
-    const items = [
+    const all = [
       {
         snapshot: { id: 1, connection_id: 1, database_name: 'orders', schema_name: 'public', table_name: 'orders', table_type: 'table', table_comment: '订单主表', estimated_rows: 120330, data_bytes: 98765432, raw_columns: [{ name: 'id', ordinal: 1, data_type: 'bigint', is_primary: true, is_nullable: false, default: '', comment: '' }], raw_indexes: [], raw_keys: [], ddl_text: 'CREATE TABLE orders ...', synced_at: new Date().toISOString() },
         connection_name: '订单核心库',
@@ -243,8 +324,32 @@ const server = http.createServer(async (req, res) => {
         query_count_30d: 304,
         sensitive_columns: 2,
       },
+      {
+        snapshot: { id: 2, connection_id: 2, database_name: 'users', schema_name: 'users', table_name: 'users', table_type: 'table', table_comment: '用户表', estimated_rows: 54320, data_bytes: 1234567, raw_columns: [{ name: 'id', ordinal: 1, data_type: 'bigint', is_primary: true, is_nullable: false, default: '', comment: '' }], raw_indexes: [], raw_keys: [], ddl_text: 'CREATE TABLE users ...', synced_at: new Date().toISOString() },
+        connection_name: '用户中心',
+        owner_user_id: 2,
+        owner_name: 'dev1',
+        business_desc: '用户主表',
+        tags: ['用户'],
+        sensitivity: 'sensitive',
+        starred: false,
+        query_count_30d: 120,
+        sensitive_columns: 1,
+      },
     ]
-    return ok(res, { items, total: items.length, page: Number(query.page || 1), page_size: Number(query.page_size || 20) })
+    let items = [...all]
+    if (query.connection_id) items = items.filter(r => r.snapshot.connection_id === Number(query.connection_id))
+    if (query.q) {
+      const kw = query.q.toLowerCase()
+      items = items.filter(r => r.snapshot.table_name.toLowerCase().includes(kw) || (r.snapshot.table_comment && r.snapshot.table_comment.toLowerCase().includes(kw)))
+    }
+    if (query.type) items = items.filter(r => r.snapshot.table_type === query.type)
+    if (query.no_owner === '1') items = items.filter(r => !r.owner_user_id)
+    if (query.starred === '1') items = items.filter(r => r.starred)
+    const page = Number(query.page || 1)
+    const pageSize = Number(query.page_size || 20)
+    const start = (page-1)*pageSize
+    return ok(res, { items: items.slice(start, start+pageSize), total: items.length, page, page_size: pageSize })
   }
   if (pathname === '/api/v1/assets/table' && method === 'GET') {
     return ok(res, {
@@ -260,7 +365,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/v1/assets/search' && method === 'GET') {
     const q = query.q || ''
     return ok(res, {
-      connections: q ? connections.slice(0, 1) : [],
+      connections: q ? filterConnections(connections, { keyword: q }).slice(0,3) : [],
       tables: q ? [{ connection_id: 1, connection_name: '订单核心库', environment: 'prod', database: 'orders', schema: 'public', name: 'orders', type: 'table', comment: '订单主表' }] : [],
       columns: q ? [{ connection_id: 1, connection_name: '订单核心库', database: 'orders', schema: 'public', table: 'orders', column: 'order_no', data_type: 'varchar(32)', comment: '订单号' }] : [],
       reports: q ? reports.slice(0, 2).map(r => ({ id: r.id, name: r.name, chart_type: r.chart_type })) : [],
@@ -271,7 +376,15 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { items: users.map(u => ({ id: u.id, username: u.username, role: u.role })) })
   }
   if (pathname === '/api/v1/assets/sync' && method === 'POST') {
-    return ok(res, { connections: [{ connection_id: 1, connection_name: '订单核心库', type: 'postgres', skipped: false, databases: ['orders'], tables: 24, views: 2, skipped_databases: [], errors: [], by_database: [{ database: 'orders', schemas: 3, tables: 24, views: 2 }] }], tables: 24, views: 2 })
+    const body = await readBody(req)
+    const targetConns = body.connection_id ? connections.filter(c=>c.id===body.connection_id) : connections.filter(c=>c.type!=='redis')
+    return ok(res, {
+      connections: targetConns.map(c => ({
+        connection_id: c.id, connection_name: c.name, type: c.type, skipped: false,
+        databases: [c.database || 'default'], tables: 24, views: 2, skipped_databases: c.type==='postgres' ? ['template0'] : [], errors: [], by_database: [{ database: c.database || 'default', schemas: 3, tables: 24, views: 2 }]
+      })),
+      tables: targetConns.length * 24, views: targetConns.length * 2
+    })
   }
   if (pathname === '/api/v1/assets/star' && method === 'POST') {
     return ok(res, { starred: true })
@@ -287,14 +400,44 @@ const server = http.createServer(async (req, res) => {
     if (sql.includes('count')) {
       return ok(res, { kind: 'query', columns: ['cnt'], rows: [[128]], truncated: false, duration_ms: 12 })
     }
-    // 默认返回示例
     return ok(res, { kind: 'query', columns: ['month', 'sum'], rows: [['2026-01', 12000], ['2026-02', 15000], ['2026-03', 18000], ['2026-04', 21000]], truncated: false, duration_ms: 22 })
   }
+  if (pathname === '/api/v1/metadata/databases' && method === 'GET') {
+    const cid = Number(query.connection_id)
+    const conn = connections.find(c=>c.id===cid)
+    if (!conn) return ok(res, { items: [] })
+    const dbs = conn.type === 'postgres' ? ['orders', 'orders_archive'] : conn.type === 'mysql' ? ['users', 'test_db'] : []
+    return ok(res, { items: dbs.map(name=>({ name })) })
+  }
+  if (pathname === '/api/v1/metadata/schemas' && method === 'GET') {
+    return ok(res, { items: [{ name: 'public' }, { name: 'shop' }] })
+  }
+  if (pathname === '/api/v1/metadata/tables' && method === 'GET') {
+    return ok(res, { items: [{ name: 'orders', type: 'table', comment: '订单主表' }, { name: 'v_monthly_sales', type: 'view', comment: '月度视图' }] })
+  }
+  if (pathname === '/api/v1/metadata/columns' && method === 'GET') {
+    return ok(res, { items: [{ name: 'id', data_type: 'bigint', is_primary: true, is_nullable: false }, { name: 'total_amount', data_type: 'numeric', is_primary: false, is_nullable: true }] })
+  }
   if (pathname === '/api/v1/data/preview' && method === 'GET') {
-    return ok(res, { columns: ['id', 'total_amount'], rows: [[1, 100], [2, 200]], total: 2, page: 1, page_size: 20, has_more: false })
+    return ok(res, { columns: ['id', 'total_amount'], rows: [[1, 100], [2, 200], [3, 300]], total: 120, page: Number(query.page||1), page_size: Number(query.page_size||20), has_more: true })
+  }
+  if (pathname === '/api/v1/redis/overview' && method === 'GET') {
+    return ok(res, { version: '7.2 mock', mode: 'standalone', uptime_days: 12, connected_clients: 5, used_memory_human: '12.3M', total_keys: 1234 })
+  }
+  if (pathname === '/api/v1/redis/keys' && method === 'GET') {
+    return ok(res, { items: [{ key: 'user:1', type: 'string', ttl: 3600 }, { key: 'order:100', type: 'hash', ttl: -1 }], cursor: 0 })
+  }
+  if (pathname === '/api/v1/redis/value' && method === 'GET') {
+    return ok(res, { key: query.key || 'user:1', type: 'string', value: 'mock value' })
   }
   if (pathname === '/api/v1/query/history' && method === 'GET') {
-    return ok(res, { items: [], total: 0, page: 1, page_size: 20 })
+    return ok(res, { items: [{ id: 1, connection_id: 1, connection_name: '订单核心库', database_name: 'orders', sql_text: 'SELECT * FROM orders LIMIT 100', status: 1, execution_time_ms: 72, created_at: new Date().toISOString() }], total: 1, page: 1, page_size: 20 })
+  }
+  if (pathname.startsWith('/api/v1/query/history/') && method === 'DELETE') {
+    return ok(res, { id: Number(pathname.split('/').pop()) })
+  }
+  if (pathname === '/api/v1/query/history' && method === 'DELETE') {
+    return ok(res, { ok: true })
   }
 
   // 报表
@@ -308,6 +451,7 @@ const server = http.createServer(async (req, res) => {
       const q = query.q.toLowerCase()
       items = items.filter(r => r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q))
     }
+    if (query.connection_id) items = items.filter(r => r.connection_id === Number(query.connection_id))
     const page = Number(query.page || 1)
     const pageSize = Number(query.page_size || 20)
     const start = (page - 1) * pageSize
@@ -371,6 +515,10 @@ const server = http.createServer(async (req, res) => {
     if (scope === 'mine') items = items.filter(d => d.owner_user_id === 1)
     if (scope === 'shared') items = items.filter(d => d.visibility === 'shared')
     if (scope === 'starred') items = items.filter(d => d.starred)
+    if (query.q) {
+      const kw = query.q.toLowerCase()
+      items = items.filter(d => d.name.toLowerCase().includes(kw))
+    }
     const page = Number(query.page || 1)
     const pageSize = Number(query.page_size || 20)
     const start = (page - 1) * pageSize
@@ -456,7 +604,6 @@ const server = http.createServer(async (req, res) => {
   // 公开分享
   if (pathname.startsWith('/api/v1/public/s/') && method === 'GET') {
     const token = pathname.split('/').pop() || ''
-    // 简单匹配：取最后创建的分享
     const s = shares.find(x => x.token_plain === token) || shares[shares.length - 1]
     if (!s) return json(res, 40400, null, 404)
     if (s.revoked) return json(res, 40400, null, 404)
@@ -473,12 +620,18 @@ const server = http.createServer(async (req, res) => {
 
   // 代理管理占位
   if (pathname === '/api/v1/proxies' && method === 'GET') {
-    return ok(res, { items: proxies, total: proxies.length, note: '占位，M5 实现真实拨号' })
+    let items = [...proxies]
+    if (query.q) {
+      const kw = query.q.toLowerCase()
+      items = items.filter(p => p.name.toLowerCase().includes(kw) || p.host.toLowerCase().includes(kw))
+    }
+    return ok(res, { items, total: items.length, note: '占位，M5 实现真实拨号' })
   }
   if (pathname === '/api/v1/proxies' && method === 'POST') {
     const body = await readBody(req)
+    if (!body.name || !body.host) return json(res, 40000, null, 400)
     proxyIdSeq += 1
-    const p = { id: proxyIdSeq, user_id: 1, name: body.name || '未命名代理', type: body.type || 'http', host: body.host || '', port: body.port || 8080, username: body.username || '', has_password: !!body.password, description: body.description || '', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+    const p = { id: proxyIdSeq, user_id: 1, name: body.name, type: body.type || 'http', host: body.host, port: body.port || 8080, username: body.username || '', has_password: !!body.password, description: body.description || '', status: 'active', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
     proxies.push(p)
     return ok(res, p)
   }
@@ -489,17 +642,29 @@ const server = http.createServer(async (req, res) => {
     const id = Number(pathname.split('/')[4])
     const body = await readBody(req)
     const p = proxies.find(x => x.id === id)
-    if (p) Object.assign(p, { name: body.name || p.name, type: body.type || p.type, host: body.host || p.host, port: body.port || p.port, username: body.username ?? p.username, description: body.description ?? p.description, status: body.status || p.status, updated_at: new Date().toISOString() })
-    return ok(res, p || {})
+    if (!p) return json(res, 40400, null, 404)
+    Object.assign(p, { name: body.name || p.name, type: body.type || p.type, host: body.host || p.host, port: body.port || p.port, username: body.username ?? p.username, description: body.description ?? p.description, status: body.status || p.status, updated_at: new Date().toISOString() })
+    if (body.password) p.has_password = true
+    return ok(res, p)
   }
   if (pathname.match(/^\/api\/v1\/proxies\/\d+$/) && method === 'DELETE') {
     const id = Number(pathname.split('/')[4])
     const idx = proxies.findIndex(x => x.id === id)
     if (idx >= 0) proxies.splice(idx, 1)
+    connections.forEach(c => { if (c.proxy_id === id) { c.proxy_id = null; c.proxy_name = '' } })
     return ok(res, { id })
   }
 
-  // 用户与审计等兜底
+  // 其他兜底
+  if (pathname === '/api/v1/roles' && method === 'GET') {
+    return ok(res, { items: [{ code: 'admin', name: '管理员' }, { code: 'developer', name: '开发者' }, { code: 'readonly', name: '只读' }] })
+  }
+  if (pathname === '/api/v1/users' && method === 'GET') {
+    return ok(res, { items: users, total: users.length, page: 1, page_size: 20 })
+  }
+  if (pathname === '/api/v1/audit-logs' && method === 'GET') {
+    return ok(res, { items: [], total: 0, page: 1, page_size: 20 })
+  }
   if (pathname.startsWith('/api/v1/')) {
     return ok(res, { items: [], total: 0 })
   }
@@ -508,5 +673,5 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[mock-backend] listening on 0.0.0.0:${PORT}`)
+  console.log(`[mock-backend] listening on 0.0.0.0:${PORT} - datasource mock v0.5.0: ${connections.length} conns, ${proxies.length} proxies, ${tunnels.length} tunnels(deprecated)`)
 })
