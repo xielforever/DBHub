@@ -78,12 +78,14 @@ export interface RedisValue {
 }
 
 export const workbenchApi = {
-  execute(connectionId: number, sql: string, database?: string) {
+  execute(connectionId: number, sql: string, database?: string, signal?: AbortSignal) {
     return request.post<unknown, ExecResult>('/query/execute', {
       connection_id: connectionId,
       sql,
       database: database || '',
-    })
+    }, {
+      signal,
+    } as any)
   },
   databases(connectionId: number) {
     return request.get<unknown, { items: { name: string }[] }>('/metadata/databases', {

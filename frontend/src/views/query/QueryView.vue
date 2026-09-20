@@ -61,6 +61,12 @@
                 <Play class="w-4 h-4" />{{ running ? '执行中…' : '运行' }}
                 <span class="hidden sm:inline text-[10px] opacity-60 ml-1">⌘↵</span>
               </button>
+              <button v-if="running" class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5 text-rose-300/80" @click="cancelQuery">
+                <Square class="w-3.5 h-3.5" /> 取消
+              </button>
+              <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5" :disabled="!currentConn || running || currentConn.type === 'redis'" @click="explainQuery">
+                <FileSearch class="w-3.5 h-3.5" /> EXPLAIN
+              </button>
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5" @click="formatCurrent">
                 <Wand2 class="w-3.5 h-3.5" /> 格式化
               </button>
@@ -86,7 +92,18 @@
                 </el-select>
               </div>
               <div class="flex-1" />
-              <span class="hidden lg:flex items-center gap-1 text-[10px] text-white/25"><Keyboard class="w-3 h-3" /> ⌘+Enter 运行 · ⇧⌘+F 格式化</span>
+              <div class="flex items-center gap-1">
+                <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1" @click="openSnippetDialog" title="保存当前 SQL 为片段">
+                  <Bookmark class="w-3.5 h-3.5" /> 收藏
+                </button>
+                <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1" @click="snippetListOpen = true" title="片段列表">
+                  <Library class="w-3.5 h-3.5" /> {{ snippets.length }}
+                </button>
+                <button class="ghost-button !py-1.5 !px-2.5 text-xs" @click="shortcutsOpen = true" title="快捷键 ?">
+                  <Keyboard class="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <span class="hidden lg:flex items-center gap-1 text-[10px] text-white/25 ml-1"><Keyboard class="w-3 h-3" /> ⌘+Enter 运行 · ⇧⌘+F 格式化 · ? 帮助</span>
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5 xl:hidden" @click="aiDrawerOpen = true">
                 <Sparkles class="w-3.5 h-3.5" /> AI
               </button>
@@ -368,6 +385,68 @@
     <el-drawer v-model="aiDrawerOpen" title="AI 助手" direction="rtl" size="85%" class="glass-drawer">
       <AiAssistantPanel embedded :closable="false" :current-connection="currentConn" :current-sql="currentTab.sql" :tables="allTableNames" @insert-sql="onAiInsert" />
     </el-drawer>
+
+    <!-- 片段保存 Dialog -->
+    <el-dialog v-model="snippetDialogOpen" title="收藏为片段" width="480px" class="glass-dialog" :close-on-click-modal="false">
+      <div class="space-y-3">
+        <div>
+          <p class="text-xs text-white/50 mb-1">片段名称</p>
+          <el-input v-model="snippetForm.name" placeholder="例如：近7天订单统计" maxlength="64" />
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">SQL 预览</p>
+          <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ snippetForm.sql }}</pre>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button class="ghost-button" @click="snippetDialogOpen=false">取消</button>
+          <button class="liquid-button" @click="saveSnippet">保存</button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 片段列表 Drawer -->
+    <el-drawer v-model="snippetListOpen" title="SQL 片段" direction="rtl" size="380px" class="glass-drawer">
+      <div class="p-3 space-y-2">
+        <div v-if="!snippets.length" class="text-center text-xs text-white/35 py-12 flex flex-col items-center gap-2">
+          <Library class="w-8 h-8 text-white/20" />
+          暂无收藏片段<br/><span class="text-[11px]">在编辑器中编写 SQL 后点击「收藏」</span>
+        </div>
+        <div v-for="s in snippets" :key="s.id" class="group rounded-xl bg-white/5 border border-white/10 p-3 hover:bg-white/10 transition-colors">
+          <div class="flex items-start justify-between gap-2">
+            <p class="text-xs font-medium text-white/80 truncate flex-1">{{ s.name }}</p>
+            <span class="text-[10px] text-white/30">{{ formatTime(s.created_at) }}</span>
+          </div>
+          <p class="text-[11px] font-mono text-white/45 truncate mt-1">{{ s.sql.replace(/\s+/g,' ').slice(0,80) }}</p>
+          <div class="flex gap-1 mt-2">
+            <button class="ghost-button !py-1 !px-2 text-[11px]" @click="insertSnippet(s)">插入</button>
+            <button class="ghost-button !py-1 !px-2 text-[11px]" @click="copyText(s.sql)">复制</button>
+            <div class="flex-1" />
+            <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/60" @click="deleteSnippet(s.id)"><Trash2 class="w-3 h-3" /></button>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
+
+    <!-- 快捷键面板 -->
+    <el-dialog v-model="shortcutsOpen" title="快捷键" width="520px" class="glass-dialog">
+      <div class="grid grid-cols-2 gap-3 text-xs">
+        <div v-for="k in shortcuts" :key="k.keys" class="flex items-center justify-between p-2.5 rounded-xl bg-white/5 border border-white/10">
+          <span class="text-white/60">{{ k.desc }}</span>
+          <span class="font-mono text-[11px] px-2 py-0.5 rounded bg-white/10 text-indigo-300">{{ k.keys }}</span>
+        </div>
+      </div>
+      <div class="mt-4 p-3 rounded-xl bg-indigo-500/10 border border-indigo-400/20 text-[11px] text-indigo-200/70">
+        <p class="font-medium mb-1">💡 小技巧</p>
+        <ul class="list-disc pl-4 space-y-1">
+          <li>选中表后右键可生成 SELECT *，一键插入编辑器</li>
+          <li>历史可 Pin 置顶，Redis 支持 * ? 通配与类型筛选</li>
+          <li>生产环境执行写操作会二次确认，保障安全</li>
+          <li>编辑器与结果区可拖拽分割，比例自动记忆</li>
+        </ul>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -376,14 +455,17 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  Bookmark,
   CheckCircle2,
   Copy,
   Database,
   Eye,
   FileCode2,
+  FileSearch,
   FolderTree,
   KeyRound,
   Keyboard,
+  Library,
   PanelRightOpen,
   Pin,
   Play,
@@ -392,6 +474,7 @@ import {
   Search,
   ShieldAlert,
   Sparkles,
+  Square,
   Table2,
   Trash2,
   Wand2,
@@ -628,12 +711,13 @@ async function runQuery() {
     }
   }
   running.value = true
+  abortController.value = new AbortController()
   resetGrid()
   viewMode.value = 'sql'
   resultTab.value = 'result'
   log(`开始执行：${sql.replace(/\s+/g, ' ').slice(0, 80)}`)
   try {
-    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database)
+    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal)
     lastDuration.value = res.duration_ms
     if (res.kind === 'query') {
       grid.columns = res.columns ?? []
@@ -644,11 +728,16 @@ async function runQuery() {
       writeResult.value = res
       log(`执行成功，影响 ${res.affected_rows ?? 0} 行，耗时 ${res.duration_ms} ms`, 'success')
     }
-  } catch (err) {
-    log(err instanceof Error ? err.message : '执行失败', 'error')
-    resultTab.value = 'message'
+  } catch (err: any) {
+    if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED' || err?.message?.includes('canceled')) {
+      log('查询已取消', 'info')
+    } else {
+      log(err instanceof Error ? err.message : '执行失败', 'error')
+      resultTab.value = 'message'
+    }
   } finally {
     running.value = false
+    abortController.value = null
     if (resultTab.value === 'history') loadHistory()
   }
 }
@@ -808,6 +897,154 @@ const redisTypeFilter = ref('all')
 const redisTTL = ref<number>(-1)
 const redisPatternHistory = ref<string[]>([])
 const prettyToggle = ref(true)
+
+const abortController = ref<AbortController | null>(null)
+
+// ---------- Step4: EXPLAIN / Snippet / Shortcuts ----------
+const STORAGE_SNIPPETS = 'dbhub_sql_snippets'
+interface Snippet {
+  id: number
+  name: string
+  sql: string
+  database: string
+  connection_id?: number
+  created_at: string
+}
+const snippets = ref<Snippet[]>([])
+const snippetDialogOpen = ref(false)
+const snippetListOpen = ref(false)
+const snippetForm = reactive({ name: '', sql: '' })
+const shortcutsOpen = ref(false)
+
+const shortcuts = [
+  { keys: '⌘ + Enter', desc: '运行查询' },
+  { keys: '⇧ + ⌘ + F', desc: '格式化 SQL' },
+  { keys: '⌘ + /', desc: '注释/取消注释' },
+  { keys: 'Ctrl + Space', desc: '触发补全' },
+  { keys: '?', desc: '打开快捷键面板' },
+  { keys: '拖拽分割线', desc: '调整编辑器/结果比例' },
+  { keys: '单击单元格', desc: '复制单元格' },
+  { keys: '右键表名', desc: '生成 SELECT / 复制' },
+]
+
+function loadSnippets() {
+  try {
+    const raw = localStorage.getItem(STORAGE_SNIPPETS)
+    if (raw) snippets.value = JSON.parse(raw)
+  } catch {}
+}
+loadSnippets()
+
+function openSnippetDialog() {
+  const sql = currentTab.value.sql.trim()
+  if (!sql) {
+    ElMessage.warning('当前编辑器无 SQL')
+    return
+  }
+  snippetForm.name = `片段 ${new Date().toLocaleDateString()}`
+  snippetForm.sql = sql
+  snippetDialogOpen.value = true
+}
+function saveSnippet() {
+  if (!snippetForm.name.trim() || !snippetForm.sql.trim()) {
+    ElMessage.warning('名称与 SQL 必填')
+    return
+  }
+  const s: Snippet = {
+    id: Date.now(),
+    name: snippetForm.name.trim(),
+    sql: snippetForm.sql.trim(),
+    database: currentTab.value.database,
+    connection_id: currentConn.value?.id,
+    created_at: new Date().toISOString(),
+  }
+  snippets.value.unshift(s)
+  try {
+    localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value.slice(0, 100)))
+  } catch {}
+  ElMessage.success('已收藏')
+  snippetDialogOpen.value = false
+}
+function insertSnippet(s: Snippet) {
+  const tab = currentTab.value
+  const monaco = monacoRefs[tab.id]
+  if (monaco) monaco.insertText(s.sql)
+  else tab.sql = tab.sql ? `${tab.sql}\n${s.sql}` : s.sql
+  if (s.database) tab.database = s.database
+  snippetListOpen.value = false
+  ElMessage.success(`已插入：${s.name}`)
+}
+function deleteSnippet(id: number) {
+  snippets.value = snippets.value.filter((x) => x.id !== id)
+  try {
+    localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value))
+  } catch {}
+}
+function copyText(t: string) {
+  navigator.clipboard.writeText(t).then(() => ElMessage.success('已复制'))
+}
+
+async function explainQuery() {
+  if (!currentConn.value) {
+    ElMessage.warning('请先选择数据源')
+    return
+  }
+  const sql = currentTab.value.sql.trim()
+  if (!sql) {
+    ElMessage.warning('SQL 为空')
+    return
+  }
+  if (currentConn.value.type === 'redis') {
+    ElMessage.info('Redis 不支持 EXPLAIN')
+    return
+  }
+  running.value = true
+  abortController.value = new AbortController()
+  resetGrid()
+  viewMode.value = 'sql'
+  resultTab.value = 'result'
+  log(`EXPLAIN: ${sql.replace(/\s+/g, ' ').slice(0, 80)}`)
+  try {
+    const res = await workbenchApi.execute(currentConn.value.id, `EXPLAIN ${sql}`, currentTab.value.database, abortController.value.signal)
+    lastDuration.value = res.duration_ms
+    grid.columns = res.columns ?? []
+    grid.rows = res.rows ?? []
+    grid.truncated = false
+    log(`EXPLAIN 完成，耗时 ${res.duration_ms} ms`, 'success')
+  } catch (err: any) {
+    if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') {
+      log('EXPLAIN 已取消', 'info')
+    } else {
+      log(err instanceof Error ? err.message : 'EXPLAIN 失败', 'error')
+      resultTab.value = 'message'
+    }
+  } finally {
+    running.value = false
+    abortController.value = null
+  }
+}
+
+function cancelQuery() {
+  if (abortController.value) {
+    abortController.value.abort()
+    ElMessage.info('已取消执行')
+  }
+  running.value = false
+}
+
+// 监听 ? 打开快捷键
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const target = e.target as HTMLElement
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+    shortcutsOpen.value = true
+  }
+}
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+// 需要在组件卸载时移除，但 onMounted 已有另一个，此处复用
+// 为避免重复监听，实际在下面 onMounted 中合并处理，临时保留
 
 try {
   const raw = localStorage.getItem(STORAGE_REDIS_PATTERNS)

@@ -393,10 +393,20 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { ok: true })
   }
 
-  // 查询执行
+  // 查询执行 - 支持 EXPLAIN
   if (pathname === '/api/v1/query/execute' && method === 'POST') {
     const body = await readBody(req)
-    const sql = (body.sql || '').toLowerCase()
+    const rawSql = body.sql || ''
+    const sql = rawSql.toLowerCase()
+    if (sql.trim().startsWith('explain')) {
+      // 返回模拟执行计划
+      const isPg = (body.database || '').toLowerCase().includes('orders') || true
+      if (isPg) {
+        return ok(res, { kind: 'query', columns: ['QUERY PLAN'], rows: [['Seq Scan on orders  (cost=0.00..120.30 rows=100 width=64)'], ['  Filter: (amount > 1000)'], ['Planning Time: 0.12 ms'], ['Execution Time: 2.34 ms']], truncated: false, duration_ms: 18 })
+      } else {
+        return ok(res, { kind: 'query', columns: ['id', 'select_type', 'table', 'type', 'possible_keys', 'key', 'rows'], rows: [[1, 'SIMPLE', 'orders', 'ALL', null, null, 120000]], truncated: false, duration_ms: 15 })
+      }
+    }
     if (sql.includes('count')) {
       return ok(res, { kind: 'query', columns: ['cnt'], rows: [[128]], truncated: false, duration_ms: 12 })
     }
