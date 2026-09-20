@@ -1,0 +1,16 @@
+{
+  "name": "dbhub-dev-pglite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "开发/沙箱环境用 PGlite PostgreSQL 线协议服务与演示数据（生产环境请使用 docker-compose 真实 PostgreSQL）",
+  "scripts": {
+    "start": "node server.mjs",
+    "seed:connections": "node seed-connections.mjs",
+    "seed:shop:rebuild": "node seed-demo-shop.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "pglite-server": "^0.1.5"
+  }
+}

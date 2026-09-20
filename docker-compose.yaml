@@ -1,18 +1,40 @@
 services:
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: dev.Dockerfile
-      args:
-        IMAGE_VERSION: ${FRONTEND_IMAGE_VERSION}
-    volumes:
-      - ./frontend:/app
-    ports:
-      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+  postgres:
+    image: ${POSTGRES_IMAGE_VERSION}
+    restart: unless-stopped
     environment:
-      - VITE_PORT=${FRONTEND_PORT}
-    stdin_open: true
-    tty: true
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # 数据库迁移由后端启动时统一执行（internal/db 内嵌迁移 + schema_migrations 记录），
+      # 不再挂载到 /docker-entrypoint-initdb.d，避免双执行导致对象已存在错误
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - dbhub-net
+
+  redis:
+    image: ${REDIS_IMAGE_VERSION}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - dbhub-net
 
   backend:
     build:
@@ -27,5 +49,53 @@ services:
     environment:
       - APP_ENV=${APP_ENV}
       - PORT=${BACKEND_PORT}
+      - LOG_LEVEL=${LOG_LEVEL}
+      - APP_SECRET_KEY=${APP_SECRET_KEY}
+      - APP_ADMIN_USERNAME=${APP_ADMIN_USERNAME}
+      - APP_ADMIN_PASSWORD=${APP_ADMIN_PASSWORD}
+      - JWT_ACCESS_TTL_MINUTES=${JWT_ACCESS_TTL_MINUTES}
+      - JWT_REFRESH_TTL_HOURS=${JWT_REFRESH_TTL_HOURS}
+      # Go 模块下载源（容器网络内按需配置，直连失败时使用国内代理）
+      - GOPROXY=https://goproxy.cn,direct
+      # 容器内通过服务名访问基础设施
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - dbhub-net
     stdin_open: true
     tty: true
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: dev.Dockerfile
+      args:
+        IMAGE_VERSION: ${FRONTEND_IMAGE_VERSION}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "${FRONTEND_PORT}:${FRONTEND_PORT}"
+    environment:
+      - VITE_PORT=${FRONTEND_PORT}
+      # Vite dev server 在容器网络内的 API 代理目标
+      - VITE_API_PROXY_TARGET=http://backend:8080
+    depends_on:
+      - backend
+    networks:
+      - dbhub-net
+    stdin_open: true
+    tty: true
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  dbhub-net:
+    driver: bridge

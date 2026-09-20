@@ -1,0 +1,44 @@
+# ---------- 通用 ----------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# ---------- 环境变量与密钥（仅允许提交 .env 开发样例）----------
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ---------- Go / 后端 ----------
+backend/tmp/
+backend/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+# Go 后端依赖采用 vendor 模式以支持离线/容器构建，需纳入版本库
+!backend/vendor/
+
+# ---------- Node / 前端 ----------
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+.npm
+.eslintcache
+
+# ---------- 日志 ----------
+*.log
+logs/
+
+# ---------- Docker 数据卷（本地持久化）----------
+.docker-volumes/
