@@ -46,6 +46,7 @@ export interface QueryHistoryItem {
   status: number
   affected_rows?: number
   execution_time_ms?: number
+  row_count?: number
   error_message?: string
   created_at: string
   connection_name?: string
@@ -69,6 +70,7 @@ export interface RedisKey {
 }
 
 export interface RedisValue {
+  key?: string
   type: string
   ttl: number
   size: number
@@ -111,7 +113,7 @@ export const workbenchApi = {
       params: { connection_id: connectionId, ...params },
     })
   },
-  history(params: { connection_id?: number; status?: string; page: number; page_size: number }) {
+  history(params: { connection_id?: number; status?: string; keyword?: string; q?: string; page: number; page_size: number }) {
     return request.get<unknown, {
       items: QueryHistoryItem[]
       total: number
@@ -130,14 +132,27 @@ export const workbenchApi = {
       params: { connection_id: connectionId },
     })
   },
-  redisKeys(connectionId: number, pattern = '*', limit = 200) {
-    return request.get<unknown, { items: RedisKey[]; returned: number }>('/redis/keys', {
-      params: { connection_id: connectionId, pattern, limit },
+  redisKeys(connectionId: number, pattern = '*', limit = 200, type = 'all') {
+    return request.get<unknown, { items: RedisKey[]; returned: number; total: number }>('/redis/keys', {
+      params: { connection_id: connectionId, pattern, limit, type },
     })
   },
   redisValue(connectionId: number, key: string) {
     return request.get<unknown, RedisValue>('/redis/value', {
       params: { connection_id: connectionId, key },
+    })
+  },
+  redisDeleteKey(connectionId: number, key: string) {
+    return request.delete<unknown, { key: string; deleted: boolean }>('/redis/key', {
+      data: { connection_id: connectionId, key },
+      params: { connection_id: connectionId, key },
+    } as any)
+  },
+  redisUpdateTTL(connectionId: number, key: string, ttl: number) {
+    return request.put<unknown, { key: string; ttl: number }>('/redis/key/ttl', {
+      connection_id: connectionId,
+      key,
+      ttl,
     })
   },
 }

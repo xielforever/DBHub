@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-7rem)]" :class="{ 'fixed inset-0 z-[2000] bg-[#0a0a14] p-4 gap-0': resultFullscreen }">
-    <!-- 左侧：连接树（lg 及以上常驻） -->
+    <!-- 左侧：连接树 -->
     <ConnectionTreePanel
       v-if="!resultFullscreen"
       ref="treeRef"
@@ -28,7 +28,7 @@
     </el-drawer>
 
     <section class="flex-1 min-w-0 flex flex-col gap-0 overflow-hidden">
-      <!-- 编辑器卡片 -->
+      <!-- 编辑器 -->
       <div
         v-if="!resultFullscreen"
         class="glass-panel flex flex-col overflow-hidden shrink-0"
@@ -92,7 +92,6 @@
               </button>
             </div>
 
-            <!-- Monaco 编辑器，失败回退 textarea -->
             <div class="flex-1 min-h-0 relative">
               <SqlMonaco
                 v-if="monacoReady"
@@ -140,9 +139,7 @@
         :style="resultFullscreen ? {} : { height: (100 - editorHeight) + '%' }"
       >
         <el-tabs v-model="resultTab" class="flex-1 flex flex-col min-h-0" @tab-change="onResultTabChange">
-          <!-- 数据网格（SQL 结果 / 表预览） -->
           <el-tab-pane label="结果" name="result" class="flex flex-col min-h-0 flex-1">
-            <!-- 表预览分页条 -->
             <div v-if="viewMode === 'preview'" class="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-white/10 text-xs text-white/60 shrink-0">
               <Table2 class="w-3.5 h-3.5 text-emerald-300" />
               <span class="font-mono">{{ preview.schema || preview.database }}.{{ preview.table }}</span>
@@ -152,13 +149,11 @@
               <span>第 {{ preview.page }} 页</span>
               <button class="ghost-button !py-1 !px-2.5" :disabled="!preview.hasMore" @click="previewPage(1)">下一页</button>
             </div>
-            <!-- 写操作结果 -->
             <div v-if="writeResult" class="flex-1 flex flex-col items-center justify-center gap-2 text-sm">
               <CheckCircle2 class="w-8 h-8 text-emerald-400" />
               <p class="text-white/80">执行成功，影响 {{ writeResult.affected_rows ?? 0 }} 行 · 耗时 {{ writeResult.duration_ms }} ms</p>
               <button class="ghost-button !py-1 !px-3 text-xs mt-2" @click="resetGrid">清空结果</button>
             </div>
-            <!-- 结果网格 -->
             <ResultGrid
               v-else
               :columns="grid.columns"
@@ -171,7 +166,6 @@
             />
           </el-tab-pane>
 
-          <!-- 图表（M3） -->
           <el-tab-pane label="图表" name="chart" class="flex flex-col min-h-0 flex-1">
             <ResultChartPane
               :columns="grid.columns"
@@ -182,19 +176,23 @@
             />
           </el-tab-pane>
 
-          <!-- 查询历史 -->
+          <!-- 历史增强 -->
           <el-tab-pane label="历史" name="history" class="flex flex-col min-h-0 flex-1">
-            <div class="flex flex-wrap items-center gap-2 px-4 py-2 border-b border-white/10">
+            <div class="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-white/10 bg-white/[0.02]">
               <div class="relative">
                 <Search class="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
-                <input v-model.trim="historyKeyword" class="glass-input !py-1.5 !pl-7 text-xs w-40 sm:w-52" placeholder="搜索 SQL 关键词" @keydown.enter="loadHistory" />
+                <input v-model.trim="historyKeyword" class="glass-input !py-1.5 !pl-7 text-xs w-40 sm:w-52" placeholder="搜索 SQL/库/连接" @keydown.enter="loadHistory" />
               </div>
+              <el-select v-model="historyConnFilter" size="small" class="w-32" clearable placeholder="连接" popper-class="glass-popper" @change="loadHistory">
+                <el-option v-for="c in allConnections" :key="c.id" :label="c.name" :value="c.id" />
+              </el-select>
               <el-select v-model="historyFilter" size="small" class="w-24" popper-class="glass-popper" @change="loadHistory">
                 <el-option label="全部" value="all" />
                 <el-option label="成功" value="success" />
                 <el-option label="失败" value="failed" />
               </el-select>
               <div class="flex-1" />
+              <span class="text-[11px] text-white/30 hidden sm:inline">{{ historyTotal }} 条</span>
               <button class="ghost-button !py-1 !px-2.5 text-xs flex items-center gap-1" @click="loadHistory">
                 <RefreshCw class="w-3 h-3" /> 刷新
               </button>
@@ -202,11 +200,13 @@
             </div>
             <div class="overflow-auto flex-1" v-loading="historyLoading">
               <div
-                v-for="h in filteredHistory"
+                v-for="h in sortedHistory"
                 :key="h.id"
-                class="group px-4 py-2.5 border-b border-white/5 hover:bg-white/5 cursor-pointer"
+                class="group px-4 py-2.5 border-b border-white/5 hover:bg-white/5 cursor-pointer relative"
+                :class="{ 'bg-amber-500/5 border-amber-400/10': isPinned(h.id) }"
                 @click="reuseHistory(h)"
               >
+                <div class="absolute left-0 top-0 bottom-0 w-0.5" :class="isPinned(h.id) ? 'bg-amber-400/60' : 'bg-transparent'" />
                 <div class="flex items-center gap-2 text-xs mb-1">
                   <span :class="h.status === 1 ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'" class="px-1.5 py-0.5 rounded-full">
                     {{ h.status === 1 ? '成功' : '失败' }}
@@ -214,77 +214,126 @@
                   <span class="text-white/45">{{ h.connection_name || `#${h.connection_id}` }}</span>
                   <span v-if="h.database_name" class="text-white/35">{{ h.database_name }}</span>
                   <span class="text-white/30">{{ h.execution_time_ms ?? 0 }} ms</span>
+                  <span v-if="h.row_count" class="text-indigo-300/60">{{ h.row_count }} 行</span>
+                  <span v-if="h.affected_rows" class="text-amber-300/60">影响 {{ h.affected_rows }}</span>
                   <span class="flex-1" />
                   <span class="text-white/30">{{ formatTime(h.created_at) }}</span>
                   <button
-                    class="opacity-0 group-hover:opacity-100 text-white/40 hover:text-rose-300 transition-opacity"
+                    class="p-1 rounded hover:bg-white/10"
+                    :class="isPinned(h.id) ? 'text-amber-300 opacity-100' : 'text-white/30 opacity-0 group-hover:opacity-100'"
+                    @click.stop="togglePin(h.id)"
+                  >
+                    <Pin class="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    class="opacity-0 group-hover:opacity-100 text-white/40 hover:text-rose-300 transition-opacity p-1"
                     aria-label="删除该历史"
                     @click.stop="removeHistory(h.id)"
                   >
                     <Trash2 class="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <p class="font-mono text-xs truncate" :class="h.status === 1 ? 'text-indigo-200/80' : 'text-rose-200/80'">{{ h.sql_text }}</p>
+                <p class="font-mono text-xs truncate pr-12" :class="h.status === 1 ? 'text-indigo-200/80' : 'text-rose-200/80'">{{ h.sql_text }}</p>
                 <p v-if="h.error_message" class="text-[11px] text-rose-300/70 truncate mt-0.5">{{ h.error_message }}</p>
               </div>
-              <p v-if="!filteredHistory.length && !historyLoading" class="text-center text-xs text-white/35 py-10">暂无查询历史</p>
+              <p v-if="!sortedHistory.length && !historyLoading" class="text-center text-xs text-white/35 py-10">暂无查询历史</p>
             </div>
           </el-tab-pane>
 
-          <!-- Redis 浏览 -->
+          <!-- Redis 增强 -->
           <el-tab-pane :label="viewMode === 'redis' ? 'Redis' : 'Redis'" name="redis" class="flex flex-col min-h-0 flex-1">
             <div v-if="viewMode !== 'redis'" class="flex-1 flex items-center justify-center text-sm text-white/35">
               在左侧选择 Redis 数据源的「服务器概览」或「键空间浏览」
             </div>
-            <div v-else class="overflow-auto flex-1" v-loading="redisLoading">
-              <!-- 概览 -->
+            <div v-else class="overflow-auto flex-1 flex flex-col min-h-0" v-loading="redisLoading">
               <div v-if="redisView === 'overview' && redisOverview" class="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div v-for="card in redisStatCards" :key="card.label" class="rounded-xl bg-white/5 border border-white/10 p-3">
                   <p class="text-[11px] text-white/45">{{ card.label }}</p>
-                  <p class="text-lg font-semibold mt-1">{{ card.value }}</p>
+                  <p class="text-lg font-semibold mt-1 truncate">{{ card.value }}</p>
                 </div>
               </div>
-              <!-- 键列表 -->
-              <div v-else-if="redisView === 'keys'" class="p-3">
-                <div class="flex items-center gap-2 mb-2">
-                  <input v-model.trim="redisPattern" class="glass-input !py-1.5 text-xs flex-1" placeholder="键匹配模式，如 user:*" @keydown.enter="loadRedisKeys" />
+
+              <div v-else-if="redisView === 'keys'" class="flex flex-col min-h-0 flex-1">
+                <div class="p-3 border-b border-white/10 flex flex-wrap gap-2 items-center bg-white/[0.02]">
+                  <div class="relative flex-1 min-w-[180px]">
+                    <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
+                    <input v-model.trim="redisPattern" class="glass-input !py-1.5 !pl-8 text-xs w-full" placeholder="键匹配，如 user:*  支持 * ?" @keydown.enter="loadRedisKeys" list="redis-pattern-history" />
+                    <datalist id="redis-pattern-history">
+                      <option v-for="p in redisPatternHistory" :key="p" :value="p" />
+                    </datalist>
+                  </div>
+                  <el-select v-model="redisTypeFilter" size="small" class="w-24" popper-class="glass-popper" @change="loadRedisKeys">
+                    <el-option label="全部类型" value="all" />
+                    <el-option label="string" value="string" />
+                    <el-option label="hash" value="hash" />
+                    <el-option label="list" value="list" />
+                    <el-option label="set" value="set" />
+                    <el-option label="zset" value="zset" />
+                  </el-select>
                   <button class="ghost-button !py-1.5 !px-3 text-xs" @click="loadRedisKeys">扫描</button>
+                  <span class="text-[11px] text-white/30">{{ redisKeys.length }} / {{ redisKeysTotal }}</span>
                 </div>
-                <table class="w-full text-xs">
-                  <thead class="text-white/45 sticky top-0 bg-white/10">
-                    <tr>
-                      <th class="text-left px-3 py-2 font-medium">键</th>
-                      <th class="text-left px-3 py-2 font-medium w-20">类型</th>
-                      <th class="text-left px-3 py-2 font-medium w-20">TTL(s)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-for="k in redisKeys" :key="k.key" class="border-b border-white/5 hover:bg-white/5 cursor-pointer" @click="inspectRedisKey(k.key)">
-                      <td class="px-3 py-2 font-mono break-all">{{ k.key }}</td>
-                      <td class="px-3 py-2 text-violet-300">{{ k.type }}</td>
-                      <td class="px-3 py-2 text-white/50">{{ k.ttl === -1 ? '永久' : k.ttl === -2 ? '已过期' : k.ttl }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <p class="text-[11px] text-white/35 px-3 py-2">SCAN 最多返回前 500 个键；点击键查看内容预览</p>
+                <div class="flex-1 overflow-auto">
+                  <table class="w-full text-xs">
+                    <thead class="text-white/45 sticky top-0 bg-[#141428]/90 backdrop-blur z-10">
+                      <tr>
+                        <th class="text-left px-3 py-2 font-medium">键</th>
+                        <th class="text-left px-3 py-2 font-medium w-20">类型</th>
+                        <th class="text-left px-3 py-2 font-medium w-20">TTL</th>
+                        <th class="text-right px-3 py-2 font-medium w-16">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="k in redisKeys" :key="k.key" class="border-b border-white/5 hover:bg-white/5 group">
+                        <td class="px-3 py-2 font-mono break-all cursor-pointer hover:text-indigo-300" @click="inspectRedisKey(k.key)">{{ k.key }}</td>
+                        <td class="px-3 py-2"><span class="px-1.5 py-0.5 rounded-full text-[10px]" :class="typeBadge(k.type)">{{ k.type }}</span></td>
+                        <td class="px-3 py-2 text-white/50">{{ k.ttl === -1 ? '永久' : k.ttl === -2 ? '已过期' : k.ttl + 's' }}</td>
+                        <td class="px-3 py-2 text-right">
+                          <div class="flex justify-end gap-1 opacity-0 group-hover:opacity-100">
+                            <button class="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white" @click="inspectRedisKey(k.key)"><Eye class="w-3 h-3" /></button>
+                            <button class="p-1 rounded hover:bg-white/10 text-white/40 hover:text-rose-300" :disabled="isReadonly" @click="deleteRedisKey(k.key)"><Trash2 class="w-3 h-3" /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="text-[11px] text-white/35 px-3 py-2 border-t border-white/5">支持通配：* 任意字符，? 单字符；点击键查看内容；类型筛选与 pattern 历史已启用</p>
               </div>
-              <!-- 键值 -->
-              <div v-else-if="redisView === 'value' && redisValue" class="p-4 space-y-2">
-                <p class="text-xs text-white/55">
-                  类型 <span class="text-violet-300">{{ redisValue.type }}</span> ·
-                  元素数/长度 {{ redisValue.size }} ·
-                  TTL {{ redisValue.ttl === -1 ? '永久' : redisValue.ttl + ' s' }}
-                </p>
-                <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 overflow-auto max-h-48 whitespace-pre-wrap break-all">{{ redisValueText }}</pre>
-                <div class="flex gap-2">
-                  <button class="ghost-button !py-1 !px-3 text-xs" @click="redisView = 'keys'">← 返回键列表</button>
-                  <button class="ghost-button !py-1 !px-3 text-xs flex items-center gap-1" @click="copyRedisValue"><Copy class="w-3 h-3" /> 复制</button>
+
+              <div v-else-if="redisView === 'value' && redisValue" class="p-4 space-y-3 flex-1 overflow-auto">
+                <div class="flex flex-wrap items-center gap-2 text-xs">
+                  <span class="font-mono text-white/80">{{ redisValue.key }}</span>
+                  <span class="px-1.5 py-0.5 rounded-full text-[10px]" :class="typeBadge(redisValue.type)">{{ redisValue.type }}</span>
+                  <span class="text-white/45">大小 {{ redisValue.size }}</span>
+                  <span class="text-white/45">TTL {{ redisValue.ttl === -1 ? '永久' : redisValue.ttl + ' s' }}</span>
+                  <div class="flex-1" />
+                  <button class="ghost-button !py-1 !px-2 text-[11px]" @click="redisView = 'keys'">← 返回</button>
+                </div>
+
+                <div class="flex flex-wrap gap-2 items-center">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] text-white/40">TTL</span>
+                    <el-input-number v-model="redisTTL" :min="-1" :max="86400*30" size="small" class="w-28" controls-position="right" />
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" :disabled="isReadonly" @click="updateTTL">更新</button>
+                    <span class="text-[10px] text-white/25">-1 永久</span>
+                  </div>
+                  <div class="flex-1" />
+                  <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="copyRedisValue"><Copy class="w-3 h-3" /> 复制</button>
+                  <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/80 flex items-center gap-1" :disabled="isReadonly" @click="deleteCurrentRedisKey"><Trash2 class="w-3 h-3" /> 删除</button>
+                </div>
+
+                <div class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
+                    <span class="text-[11px] text-white/40">值预览 · {{ prettyIsJSON ? 'JSON' : redisValue.type }}</span>
+                    <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="prettyToggle = !prettyToggle">{{ prettyToggle ? '原始' : '美化' }}</button>
+                  </div>
+                  <pre class="text-xs font-mono p-3 overflow-auto max-h-[40vh] whitespace-pre-wrap break-all">{{ displayedRedisValue }}</pre>
                 </div>
               </div>
             </div>
           </el-tab-pane>
 
-          <!-- 消息 -->
           <el-tab-pane label="消息" name="message" class="flex flex-col min-h-0 flex-1">
             <div class="p-4 text-sm font-mono space-y-1 overflow-auto flex-1">
               <p v-if="!messages.length" class="text-white/35">编辑器就绪，等待执行…</p>
@@ -330,11 +379,13 @@ import {
   CheckCircle2,
   Copy,
   Database,
+  Eye,
   FileCode2,
   FolderTree,
   KeyRound,
   Keyboard,
   PanelRightOpen,
+  Pin,
   Play,
   Plus,
   RefreshCw,
@@ -382,6 +433,8 @@ function newTab(sql = ''): EditorTab {
 
 const STORAGE_TABS = 'dbhub_query_tabs_v2'
 const STORAGE_SPLIT = 'dbhub_query_split'
+const STORAGE_PINNED = 'dbhub_history_pinned'
+const STORAGE_REDIS_PATTERNS = 'dbhub_redis_patterns'
 
 function loadTabsFromStorage(): { tabs: EditorTab[]; active: number } | null {
   try {
@@ -446,7 +499,6 @@ const treeDrawerOpen = ref(false)
 const aiDrawerOpen = ref(false)
 const resultFullscreen = ref(false)
 
-// 分割线
 const editorHeight = ref<number>(55)
 try {
   const v = Number(localStorage.getItem(STORAGE_SPLIT))
@@ -476,12 +528,10 @@ function startSplitterDrag(e: MouseEvent) {
   window.addEventListener('mouseup', onUp)
 }
 
-// Monaco
 const monacoReady = ref(false)
 const monacoRefs = reactive<Record<number, any>>({})
 
 onMounted(() => {
-  // 懒加载检测
   import('monaco-editor')
     .then(() => {
       monacoReady.value = true
@@ -641,7 +691,6 @@ async function loadPreview() {
     grid.rows = res.rows
     preview.total = res.total
     preview.hasMore = res.has_more
-    // 尝试加载列名用于补全
     try {
       const cols = await workbenchApi.columns(currentConn.value.id, {
         database: preview.database,
@@ -650,9 +699,7 @@ async function loadPreview() {
       })
       allColumnNames.value = cols.items.map((c) => c.name)
     } catch {}
-  } catch {
-    /* 拦截器已提示 */
-  }
+  } catch {}
 }
 
 function previewPage(delta: number) {
@@ -660,16 +707,47 @@ function previewPage(delta: number) {
   loadPreview()
 }
 
-// ---------- 历史 ----------
+// ---------- 历史增强 ----------
 const history = ref<QueryHistoryItem[]>([])
 const historyLoading = ref(false)
 const historyFilter = ref('all')
 const historyKeyword = ref('')
+const historyConnFilter = ref<number | ''>('')
+const historyTotal = ref(0)
+const pinnedIds = ref<Set<number>>(new Set())
 
-const filteredHistory = computed(() => {
+try {
+  const raw = localStorage.getItem(STORAGE_PINNED)
+  if (raw) pinnedIds.value = new Set(JSON.parse(raw))
+} catch {}
+
+function isPinned(id: number) {
+  return pinnedIds.value.has(id)
+}
+function togglePin(id: number) {
+  if (pinnedIds.value.has(id)) pinnedIds.value.delete(id)
+  else pinnedIds.value.add(id)
+  try {
+    localStorage.setItem(STORAGE_PINNED, JSON.stringify([...pinnedIds.value]))
+  } catch {}
+}
+
+const allConnections = computed(() => {
+  return (treeRef.value as any)?.connectionsRef?.value || []
+})
+
+const sortedHistory = computed(() => {
   const kw = historyKeyword.value.toLowerCase()
-  if (!kw) return history.value
-  return history.value.filter((h) => h.sql_text.toLowerCase().includes(kw) || (h.database_name || '').toLowerCase().includes(kw))
+  let list = [...history.value]
+  if (kw) {
+    list = list.filter((h) => h.sql_text.toLowerCase().includes(kw) || (h.database_name || '').toLowerCase().includes(kw) || (h.connection_name || '').toLowerCase().includes(kw))
+  }
+  return list.sort((a, b) => {
+    const pa = isPinned(a.id) ? 0 : 1
+    const pb = isPinned(b.id) ? 0 : 1
+    if (pa !== pb) return pa - pb
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  })
 })
 
 function onResultTabChange(name: string | number) {
@@ -681,10 +759,13 @@ async function loadHistory() {
   try {
     const res = await workbenchApi.history({
       status: historyFilter.value === 'all' ? '' : historyFilter.value,
+      connection_id: historyConnFilter.value ? Number(historyConnFilter.value) : undefined,
+      keyword: historyKeyword.value || undefined,
       page: 1,
       page_size: 100,
     })
     history.value = res.items
+    historyTotal.value = res.total
   } finally {
     historyLoading.value = false
   }
@@ -715,13 +796,34 @@ async function clearHistory() {
   loadHistory()
 }
 
-// ---------- Redis ----------
+// ---------- Redis 增强 ----------
 const redisLoading = ref(false)
 const redisView = ref<'overview' | 'keys' | 'value'>('overview')
 const redisOverview = ref<RedisOverview | null>(null)
 const redisKeys = ref<RedisKey[]>([])
+const redisKeysTotal = ref(0)
 const redisValue = ref<RedisValue | null>(null)
 const redisPattern = ref('*')
+const redisTypeFilter = ref('all')
+const redisTTL = ref<number>(-1)
+const redisPatternHistory = ref<string[]>([])
+const prettyToggle = ref(true)
+
+try {
+  const raw = localStorage.getItem(STORAGE_REDIS_PATTERNS)
+  if (raw) redisPatternHistory.value = JSON.parse(raw)
+} catch {}
+
+function typeBadge(t: string) {
+  const map: Record<string, string> = {
+    string: 'bg-emerald-400/15 text-emerald-300',
+    hash: 'bg-indigo-400/15 text-indigo-300',
+    list: 'bg-amber-400/15 text-amber-300',
+    set: 'bg-violet-400/15 text-violet-300',
+    zset: 'bg-rose-400/15 text-rose-300',
+  }
+  return map[t] || 'bg-white/10 text-white/50'
+}
 
 const redisStatCards = computed(() => {
   const o = redisOverview.value
@@ -763,8 +865,17 @@ async function loadRedisKeys() {
   if (!currentConn.value) return
   redisLoading.value = true
   try {
-    const res = await workbenchApi.redisKeys(currentConn.value.id, redisPattern.value || '*')
+    const res = await workbenchApi.redisKeys(currentConn.value.id, redisPattern.value || '*', 200, redisTypeFilter.value)
     redisKeys.value = res.items
+    redisKeysTotal.value = (res as any).total ?? res.items.length
+    // 记录 pattern 历史
+    const pat = redisPattern.value.trim()
+    if (pat && pat !== '*' && !redisPatternHistory.value.includes(pat)) {
+      redisPatternHistory.value = [pat, ...redisPatternHistory.value].slice(0, 10)
+      try {
+        localStorage.setItem(STORAGE_REDIS_PATTERNS, JSON.stringify(redisPatternHistory.value))
+      } catch {}
+    }
   } finally {
     redisLoading.value = false
   }
@@ -774,15 +885,37 @@ async function inspectRedisKey(key: string) {
   redisLoading.value = true
   try {
     redisValue.value = await workbenchApi.redisValue(currentConn.value.id, key)
+    redisTTL.value = redisValue.value?.ttl ?? -1
     redisView.value = 'value'
   } finally {
     redisLoading.value = false
   }
 }
-const redisValueText = computed(() => {
+const prettyIsJSON = computed(() => {
+  const v = redisValue.value?.value
+  if (typeof v === 'string') {
+    try {
+      JSON.parse(v)
+      return true
+    } catch {
+      return false
+    }
+  }
+  return typeof v === 'object'
+})
+const displayedRedisValue = computed(() => {
   const v = redisValue.value?.value
   if (v === null || v === undefined) return '(nil)'
-  if (typeof v === 'string') return v
+  if (!prettyToggle.value) {
+    return typeof v === 'string' ? v : JSON.stringify(v)
+  }
+  if (typeof v === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(v), null, 2)
+    } catch {
+      return v
+    }
+  }
   try {
     return JSON.stringify(v, null, 2)
   } catch {
@@ -791,10 +924,51 @@ const redisValueText = computed(() => {
 })
 async function copyRedisValue() {
   try {
-    await navigator.clipboard.writeText(redisValueText.value)
+    await navigator.clipboard.writeText(displayedRedisValue.value)
     ElMessage.success('已复制')
   } catch {
     ElMessage.warning('复制失败')
+  }
+}
+async function deleteRedisKey(key: string) {
+  if (!key) return
+  if (isReadonly.value) {
+    ElMessage.warning('只读角色不可删除')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(`确认删除键 "${key}"？此操作不可恢复`, '删除确认', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+  } catch {
+    return
+  }
+  if (!currentConn.value) return
+  try {
+    await workbenchApi.redisDeleteKey(currentConn.value.id, key)
+    ElMessage.success('已删除')
+    if ((redisValue.value as any)?.key === key) redisView.value = 'keys'
+    loadRedisKeys()
+  } catch {
+    ElMessage.error('删除失败')
+  }
+}
+function deleteCurrentRedisKey() {
+  const k = (redisValue.value as any)?.key || ''
+  if (k) deleteRedisKey(k)
+}
+async function updateTTL() {
+  if (!currentConn.value || !redisValue.value) return
+  if (isReadonly.value) {
+    ElMessage.warning('只读角色不可修改')
+    return
+  }
+  const k = (redisValue.value as any).key || ''
+  if (!k) return
+  try {
+    await workbenchApi.redisUpdateTTL(currentConn.value.id, k, redisTTL.value)
+    ElMessage.success('TTL 已更新')
+    if (redisValue.value) redisValue.value.ttl = redisTTL.value
+  } catch {
+    ElMessage.error('更新失败')
   }
 }
 

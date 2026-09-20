@@ -112,7 +112,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.5.0', env: 'arena', note: '数据源mock已完善：5连接/3代理/1隧道(废弃)' })
+    return ok(res, { status: 'ok', version: 'mock-0.6.0', env: 'arena', note: 'Step3: 30条历史+Redis12键+columns增强+pattern/type过滤' })
   }
 
   // 认证
@@ -416,27 +416,159 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { items: [{ name: 'orders', type: 'table', comment: '订单主表' }, { name: 'v_monthly_sales', type: 'view', comment: '月度视图' }] })
   }
   if (pathname === '/api/v1/metadata/columns' && method === 'GET') {
-    return ok(res, { items: [{ name: 'id', data_type: 'bigint', is_primary: true, is_nullable: false }, { name: 'total_amount', data_type: 'numeric', is_primary: false, is_nullable: true }] })
+    const table = (query.table || '').toLowerCase()
+    const common = {
+      orders: [
+        { name: 'id', data_type: 'bigint', is_primary: true, is_nullable: false, ordinal: 1 },
+        { name: 'order_no', data_type: 'varchar(32)', is_primary: false, is_nullable: false, ordinal: 2 },
+        { name: 'user_id', data_type: 'bigint', is_primary: false, is_nullable: false, ordinal: 3 },
+        { name: 'total_amount', data_type: 'numeric(12,2)', is_primary: false, is_nullable: true, ordinal: 4 },
+        { name: 'status', data_type: 'smallint', is_primary: false, is_nullable: false, ordinal: 5 },
+        { name: 'created_at', data_type: 'timestamptz', is_primary: false, is_nullable: false, ordinal: 6 },
+        { name: 'updated_at', data_type: 'timestamptz', is_primary: false, is_nullable: true, ordinal: 7 },
+      ],
+      users: [
+        { name: 'id', data_type: 'bigint', is_primary: true, is_nullable: false, ordinal: 1 },
+        { name: 'username', data_type: 'varchar(64)', is_primary: false, is_nullable: false, ordinal: 2 },
+        { name: 'email', data_type: 'varchar(128)', is_primary: false, is_nullable: true, ordinal: 3 },
+        { name: 'status', data_type: 'smallint', is_primary: false, is_nullable: false, ordinal: 4 },
+        { name: 'created_at', data_type: 'datetime', is_primary: false, is_nullable: false, ordinal: 5 },
+      ],
+    }
+    const items = common[table] || common['orders']
+    return ok(res, { items })
   }
   if (pathname === '/api/v1/data/preview' && method === 'GET') {
     return ok(res, { columns: ['id', 'total_amount'], rows: [[1, 100], [2, 200], [3, 300]], total: 120, page: Number(query.page||1), page_size: Number(query.page_size||20), has_more: true })
   }
   if (pathname === '/api/v1/redis/overview' && method === 'GET') {
-    return ok(res, { version: '7.2 mock', mode: 'standalone', uptime_days: 12, connected_clients: 5, used_memory_human: '12.3M', total_keys: 1234 })
+    const cid = Number(query.connection_id)
+    const conn = connections.find(c=>c.id===cid)
+    return ok(res, { version: '7.2.4 mock', mode: 'standalone', os: 'Linux 5.15 x86_64', uptime_days: 12 + Math.floor(Math.random()*5), connected_clients: 5 + Math.floor(Math.random()*10), used_memory_mb: 128 + Math.floor(Math.random()*50), used_memory_human: '128M', total_commands: 123456 + Math.floor(Math.random()*10000), total_keys: 1234, keyspaces: [{ db: 'db0', keys: 800, expires: 120 }, { db: 'db1', keys: 434, expires: 30 }] })
+  }
+  // Redis 键空间 - 增强
+  if (!globalThis.__redisKeys) {
+    globalThis.__redisKeys = [
+      { key: 'user:1', type: 'string', ttl: 3600, size: 128, value: JSON.stringify({ id: 1, name: '张三', email: 'zhangsan@example.com' }) },
+      { key: 'user:2', type: 'string', ttl: 3600, size: 128, value: JSON.stringify({ id: 2, name: '李四' }) },
+      { key: 'user:1001:profile', type: 'hash', ttl: -1, size: 5, value: { name: '王五', age: '28', city: '上海' } },
+      { key: 'order:100', type: 'hash', ttl: -1, size: 8, value: { id: '100', amount: '299.99', status: 'paid' } },
+      { key: 'cart:42', type: 'hash', ttl: 1800, size: 3, value: { 'item:1': '2', 'item:2': '1' } },
+      { key: 'session:abc123', type: 'string', ttl: 7200, size: 256, value: 'eyJhbGciOiJIUzI1NiJ9.mock' },
+      { key: 'queue:orders', type: 'list', ttl: -1, size: 12, value: ['order:101', 'order:102', 'order:103'] },
+      { key: 'tags:popular', type: 'set', ttl: -1, size: 8, value: ['electronics', 'books', 'clothing', 'food'] },
+      { key: 'leaderboard:weekly', type: 'zset', ttl: 86400, size: 100, value: [{ member: 'user:1', score: 1500 }, { member: 'user:2', score: 1200 }] },
+      { key: 'cache:product:123', type: 'string', ttl: 600, size: 512, value: JSON.stringify({ id: 123, name: 'iPhone 15', price: 5999 }) },
+      { key: 'stats:daily:2026-05-11', type: 'hash', ttl: 86400*7, size: 24, value: { pv: '12345', uv: '3456' } },
+      { key: 'lock:order:100', type: 'string', ttl: 30, size: 32, value: 'locked' },
+    ]
   }
   if (pathname === '/api/v1/redis/keys' && method === 'GET') {
-    return ok(res, { items: [{ key: 'user:1', type: 'string', ttl: 3600 }, { key: 'order:100', type: 'hash', ttl: -1 }], cursor: 0 })
+    let items = [...(globalThis.__redisKeys || [])]
+    const pattern = query.pattern || '*'
+    const typeFilter = query.type || ''
+    const limit = Number(query.limit || 200)
+    if (pattern && pattern !== '*') {
+      // 简单通配：支持 * 前后缀
+      const regexStr = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')
+      const re = new RegExp(`^${regexStr}$`, 'i')
+      items = items.filter(k => re.test(k.key))
+    }
+    if (typeFilter && typeFilter !== 'all') {
+      items = items.filter(k => k.type === typeFilter)
+    }
+    const returned = items.slice(0, limit).map(({ key, type, ttl }) => ({ key, type, ttl }))
+    return ok(res, { items: returned, returned: returned.length, total: items.length, cursor: 0 })
   }
   if (pathname === '/api/v1/redis/value' && method === 'GET') {
-    return ok(res, { key: query.key || 'user:1', type: 'string', value: 'mock value' })
+    const key = query.key || ''
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found) {
+      return json(res, 40400, null, 404)
+    }
+    return ok(res, { key: found.key, type: found.type, ttl: found.ttl, size: found.size, value: found.value })
+  }
+  if (pathname === '/api/v1/redis/key' && method === 'DELETE') {
+    const body = await readBody(req)
+    const key = body.key || query.key || ''
+    if (globalThis.__redisKeys) {
+      const idx = globalThis.__redisKeys.findIndex((k) => k.key === key)
+      if (idx >= 0) globalThis.__redisKeys.splice(idx, 1)
+    }
+    return ok(res, { key, deleted: true })
+  }
+  if (pathname === '/api/v1/redis/key/ttl' && method === 'PUT') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const ttl = Number(body.ttl)
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (found) found.ttl = ttl
+    return ok(res, { key, ttl })
+  }
+  // 查询历史 - 增强版 v0.6.0：30条，支持 keyword/connection_id/status 过滤
+  if (!globalThis.__historySeeded) {
+    globalThis.__historySeeded = true
+    globalThis.__queryHistory = []
+    const sampleSQLs = [
+      'SELECT * FROM orders LIMIT 100',
+      'SELECT COUNT(*) FROM users WHERE status = 1',
+      'SELECT DATE(created_at) as day, SUM(amount) as total FROM orders GROUP BY 1 ORDER BY 1',
+      'UPDATE orders SET status = 2 WHERE id = 1001',
+      'DELETE FROM temp_orders WHERE created_at < NOW() - INTERVAL 30 DAY',
+      'SELECT * FROM orders WHERE amount > 1000 ORDER BY created_at DESC LIMIT 20',
+      'SELECT u.name, COUNT(o.id) as order_cnt FROM users u LEFT JOIN orders o ON u.id = o.user_id GROUP BY u.name',
+      'SELECT * FROM users WHERE email LIKE %test%',
+      'INSERT INTO audit_log (action, user_id) VALUES (login, 1)',
+      'SELECT * FROM orders_archive WHERE created_at < 2024-01-01',
+    ]
+    const now = Date.now()
+    for (let i = 0; i < 30; i++) {
+      const conn = connections[i % connections.length]
+      const sql = sampleSQLs[i % sampleSQLs.length]
+      const status = i % 7 === 0 ? 0 : 1
+      globalThis.__queryHistory.push({
+        id: 100 - i,
+        connection_id: conn.id,
+        connection_name: conn.name,
+        user_id: 1,
+        database_name: conn.database || (conn.type === 'postgres' ? 'orders' : 'users'),
+        sql_text: sql,
+        status,
+        affected_rows: status === 1 && (sql.toUpperCase().includes('UPDATE') || sql.toUpperCase().includes('DELETE') || sql.toUpperCase().includes('INSERT')) ? Math.floor(Math.random()*20)+1 : null,
+        execution_time_ms: 10 + Math.floor(Math.random()*300),
+        row_count: status === 1 ? Math.floor(Math.random()*500) : 0,
+        error_message: status === 0 ? 'syntax error at or near "WHERE"' : null,
+        created_at: new Date(now - i * 3600 * 1000 - Math.random()*3600*1000).toISOString(),
+      })
+    }
   }
   if (pathname === '/api/v1/query/history' && method === 'GET') {
-    return ok(res, { items: [{ id: 1, connection_id: 1, connection_name: '订单核心库', database_name: 'orders', sql_text: 'SELECT * FROM orders LIMIT 100', status: 1, execution_time_ms: 72, created_at: new Date().toISOString() }], total: 1, page: 1, page_size: 20 })
+    let items = [...(globalThis.__queryHistory || [])]
+    if (query.connection_id) {
+      const cid = Number(query.connection_id)
+      items = items.filter(h => h.connection_id === cid)
+    }
+    if (query.status === 'success' || query.status === '1') items = items.filter(h => h.status === 1)
+    if (query.status === 'failed' || query.status === '0') items = items.filter(h => h.status === 0)
+    if (query.keyword || query.q) {
+      const kw = (query.keyword || query.q || '').toLowerCase()
+      if (kw) items = items.filter(h => h.sql_text.toLowerCase().includes(kw) || (h.database_name||'').toLowerCase().includes(kw) || (h.connection_name||'').toLowerCase().includes(kw))
+    }
+    const page = Number(query.page || 1)
+    const pageSize = Number(query.page_size || 20)
+    const start = (page - 1) * pageSize
+    return ok(res, { items: items.slice(start, start + pageSize), total: items.length, page, page_size: pageSize })
   }
   if (pathname.startsWith('/api/v1/query/history/') && method === 'DELETE') {
-    return ok(res, { id: Number(pathname.split('/').pop()) })
+    const id = Number(pathname.split('/').pop())
+    if (globalThis.__queryHistory) {
+      const idx = globalThis.__queryHistory.findIndex((h) => h.id === id)
+      if (idx >= 0) globalThis.__queryHistory.splice(idx, 1)
+    }
+    return ok(res, { id })
   }
   if (pathname === '/api/v1/query/history' && method === 'DELETE') {
+    if (globalThis.__queryHistory) globalThis.__queryHistory = []
     return ok(res, { ok: true })
   }
 
