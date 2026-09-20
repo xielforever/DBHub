@@ -60,6 +60,25 @@
       </button>
     </div>
 
+    <!-- AI 建议条 -->
+    <div v-if="aiSuggestions.length" class="px-4 py-2 flex flex-wrap gap-2 bg-violet-500/10 border-b border-violet-400/20">
+      <span class="text-[11px] text-violet-300 flex items-center gap-1"><Sparkles class="w-3 h-3" /> AI 建议：</span>
+      <button
+        v-for="s in aiSuggestions"
+        :key="s.label"
+        class="px-2 py-0.5 rounded-full text-[11px] bg-white/10 hover:bg-white/15 text-white/70 transition-colors"
+        @click="applySuggestion(s)"
+      >{{ s.label }}</button>
+    </div>
+
+    <!-- 洞察条 -->
+    <div v-if="insights.length" class="px-4 py-2 grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white/[0.02] border-b border-white/10">
+      <div v-for="ins in insights" :key="ins.label" class="rounded-lg bg-white/5 border border-white/10 p-2">
+        <p class="text-[10px] text-white/40">{{ ins.label }}</p>
+        <p class="text-xs font-medium mt-0.5">{{ ins.value }}</p>
+      </div>
+    </div>
+
     <!-- 图表区 -->
     <div class="flex-1 min-h-0 p-3 overflow-auto">
       <div v-if="!columns.length" class="h-full flex items-center justify-center text-sm text-white/35">
@@ -110,7 +129,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { BookmarkPlus } from 'lucide-vue-next'
+import { BookmarkPlus, Sparkles } from 'lucide-vue-next'
 import ChartCard, { type ChartKind, type ChartConfig } from '../../../components/business/chart/ChartCard.vue'
 import { reportApi } from '../../../api/report'
 import { useUserStore } from '../../../stores/user'
@@ -155,6 +174,65 @@ watch(() => props.columns, (cols) => {
     config.metrics = numericColumns.value.slice(0, 2).length ? numericColumns.value.slice(0,2) : cols.slice(1,3)
   }
 }, { immediate: true })
+
+interface Suggestion { label: string; chartType: ChartKind; dimension?: string; metrics?: string[]; aggregation?: ChartConfig['aggregation'] }
+const aiSuggestions = computed<Suggestion[]>(() => {
+  if (!props.columns.length || !props.rows.length) return []
+  const suggestions: Suggestion[] = []
+  const numCols = numericColumns.value
+  const catCols = nonNumericColumns.value
+  const firstCat = catCols[0]
+  const firstNum = numCols[0]
+  if (firstCat && firstNum) {
+    suggestions.push({ label: `按 ${firstCat} 看 ${firstNum} 总和`, chartType: 'bar', dimension: firstCat, metrics: [firstNum], aggregation: 'sum' })
+    suggestions.push({ label: `${firstNum} 占比`, chartType: 'pie', dimension: firstCat, metrics: [firstNum], aggregation: 'sum' })
+    if (numCols.length > 1) {
+      suggestions.push({ label: `${firstCat} 趋势对比`, chartType: 'line', dimension: firstCat, metrics: numCols.slice(0,2), aggregation: 'sum' })
+    }
+  }
+  if (firstNum) {
+    suggestions.push({ label: `${firstNum} 指标卡`, chartType: 'metric', metrics: [firstNum], aggregation: 'sum' })
+  }
+  const timeCol = props.columns.find(c => /time|date|created|updated/i.test(c))
+  if (timeCol && firstNum) {
+    suggestions.push({ label: `按 ${timeCol} 趋势`, chartType: 'line', dimension: timeCol, metrics: [firstNum], aggregation: 'sum' })
+  }
+  return suggestions.slice(0,5)
+})
+function applySuggestion(s: Suggestion) {
+  chartType.value = s.chartType
+  if (s.dimension) config.dimension = s.dimension
+  if (s.metrics) config.metrics = s.metrics
+  if (s.aggregation) config.aggregation = s.aggregation
+  ElMessage.success(`已应用：${s.label}`)
+}
+const insights = computed(() => {
+  if (!props.columns.length || !props.rows.length) return []
+  const rows = props.rows
+  const numCols = numericColumns.value
+  const list: { label: string; value: string }[] = []
+  list.push({ label: '总行数', value: `${rows.length}` })
+  list.push({ label: '列数', value: `${props.columns.length}` })
+  const firstNum = numCols[0]
+  if (firstNum) {
+    const idx = props.columns.indexOf(firstNum)
+    if (idx >= 0) {
+      const nums = rows.map(r => Number((r as any)[idx]) || 0)
+      const sum = nums.reduce((a,b)=>a+b,0)
+      const avg = sum / (nums.length || 1)
+      const max = Math.max(...nums)
+      const min = Math.min(...nums)
+      list.push({ label: `${firstNum} 求和`, value: sum.toLocaleString() })
+      list.push({ label: `${firstNum} 均值`, value: avg.toFixed(2) })
+      list.push({ label: `${firstNum} 范围`, value: `${min} ~ ${max}` })
+    }
+  }
+  // NULL 统计
+  let nullCount = 0
+  rows.forEach(r => { (r as any[]).forEach(v => { if (v === null || v === undefined) nullCount++ }) })
+  if (nullCount > 0) list.push({ label: 'NULL 数', value: `${nullCount}` })
+  return list.slice(0,8)
+})
 
 // 保存报表
 const saveOpen = ref(false)

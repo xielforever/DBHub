@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.7.0', env: 'arena', note: 'Step6: snippets 5条+EXPLAIN+虚拟滚动+列过滤' })
+    return ok(res, { status: 'ok', version: 'mock-0.8.0', env: 'arena', note: 'Step8: Redis完整编辑+列显隐+行选+自动LIMIT+收藏最近' })
   }
 
   // 认证
@@ -523,6 +523,120 @@ const server = http.createServer(async (req, res) => {
     const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
     if (found) found.ttl = ttl
     return ok(res, { key, ttl })
+  }
+  if (pathname === '/api/v1/redis/key' && method === 'POST') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const type = body.type || 'string'
+    const value = body.value ?? ''
+    const ttl = body.ttl !== undefined ? Number(body.ttl) : -1
+    if (!key) return json(res, 40000, null, 400)
+    if (!globalThis.__redisKeys) globalThis.__redisKeys = []
+    const exists = globalThis.__redisKeys.find((k) => k.key === key)
+    if (exists) {
+      exists.type = type
+      exists.value = value
+      exists.ttl = ttl
+      exists.size = typeof value === 'string' ? value.length : JSON.stringify(value).length
+    } else {
+      globalThis.__redisKeys.unshift({ key, type, ttl, size: typeof value === 'string' ? value.length : 100, value })
+    }
+    return ok(res, { key, type, ttl })
+  }
+  if (pathname === '/api/v1/redis/key/value' && method === 'PUT') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const value = body.value
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found) return json(res, 40400, null, 404)
+    found.value = value
+    found.size = typeof value === 'string' ? value.length : JSON.stringify(value).length
+    return ok(res, { key, type: found.type, value: found.value })
+  }
+  if (pathname === '/api/v1/redis/hash/field' && method === 'PUT') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const field = body.field || ''
+    const value = body.value || ''
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found || found.type !== 'hash') return json(res, 40400, null, 404)
+    if (typeof found.value !== 'object' || Array.isArray(found.value)) found.value = {}
+    found.value[field] = value
+    return ok(res, { key, field, value })
+  }
+  if (pathname === '/api/v1/redis/hash/field' && method === 'DELETE') {
+    const body = await readBody(req)
+    const key = body.key || query.key || ''
+    const field = body.field || query.field || ''
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (found && found.type === 'hash' && typeof found.value === 'object') {
+      delete found.value[field]
+    }
+    return ok(res, { key, field, deleted: true })
+  }
+  if (pathname === '/api/v1/redis/list/push' && method === 'POST') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const value = body.value || ''
+    const direction = body.direction || 'right'
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found || found.type !== 'list') return json(res, 40400, null, 404)
+    if (!Array.isArray(found.value)) found.value = []
+    if (direction === 'left') found.value.unshift(value)
+    else found.value.push(value)
+    return ok(res, { key, value })
+  }
+  if (pathname === '/api/v1/redis/list/pop' && method === 'POST') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const direction = body.direction || 'right'
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found || found.type !== 'list' || !Array.isArray(found.value)) return json(res, 40400, null, 404)
+    const val = direction === 'left' ? found.value.shift() : found.value.pop()
+    return ok(res, { key, value: val })
+  }
+  if (pathname === '/api/v1/redis/set/member' && method === 'POST') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const member = body.member || ''
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found || found.type !== 'set') return json(res, 40400, null, 404)
+    if (!Array.isArray(found.value)) found.value = []
+    if (!found.value.includes(member)) found.value.push(member)
+    return ok(res, { key, member })
+  }
+  if (pathname === '/api/v1/redis/set/member' && method === 'DELETE') {
+    const body = await readBody(req)
+    const key = body.key || query.key || ''
+    const member = body.member || query.member || ''
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (found && Array.isArray(found.value)) {
+      found.value = found.value.filter((m) => m !== member)
+    }
+    return ok(res, { key, member, deleted: true })
+  }
+  if (pathname === '/api/v1/redis/zset/member' && method === 'POST') {
+    const body = await readBody(req)
+    const key = body.key || ''
+    const member = body.member || ''
+    const score = Number(body.score || 0)
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (!found || found.type !== 'zset') return json(res, 40400, null, 404)
+    if (!Array.isArray(found.value)) found.value = []
+    const idx = found.value.findIndex((x) => x.member === member)
+    if (idx >= 0) found.value[idx].score = score
+    else found.value.push({ member, score })
+    return ok(res, { key, member, score })
+  }
+  if (pathname === '/api/v1/redis/zset/member' && method === 'DELETE') {
+    const body = await readBody(req)
+    const key = body.key || query.key || ''
+    const member = body.member || query.member || ''
+    const found = (globalThis.__redisKeys || []).find((k) => k.key === key)
+    if (found && Array.isArray(found.value)) {
+      found.value = found.value.filter((x) => x.member !== member)
+    }
+    return ok(res, { key, member, deleted: true })
   }
   // 查询历史 - 增强版 v0.6.0：30条，支持 keyword/connection_id/status 过滤
   if (!globalThis.__historySeeded) {

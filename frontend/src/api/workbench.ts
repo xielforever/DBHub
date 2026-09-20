@@ -157,6 +157,36 @@ export const workbenchApi = {
       ttl,
     })
   },
+  redisCreateKey(connectionId: number, payload: { key: string; type: string; value: unknown; ttl?: number }) {
+    return request.post<unknown, { key: string }>(`/redis/key`, { connection_id: connectionId, ...payload })
+  },
+  redisUpdateValue(connectionId: number, key: string, value: unknown) {
+    return request.put<unknown, { key: string }>(`/redis/key/value`, { connection_id: connectionId, key, value })
+  },
+  redisHashSet(connectionId: number, key: string, field: string, value: string) {
+    return request.put<unknown, { key: string }>(`/redis/hash/field`, { connection_id: connectionId, key, field, value })
+  },
+  redisHashDel(connectionId: number, key: string, field: string) {
+    return request.delete<unknown, { key: string }>(`/redis/hash/field`, { data: { connection_id: connectionId, key, field }, params: { connection_id: connectionId, key, field } } as any)
+  },
+  redisListPush(connectionId: number, key: string, value: string, direction: 'left' | 'right' = 'right') {
+    return request.post<unknown, { key: string }>(`/redis/list/push`, { connection_id: connectionId, key, value, direction })
+  },
+  redisListPop(connectionId: number, key: string, direction: 'left' | 'right' = 'right') {
+    return request.post<unknown, { key: string; value: unknown }>(`/redis/list/pop`, { connection_id: connectionId, key, direction })
+  },
+  redisSetAdd(connectionId: number, key: string, member: string) {
+    return request.post<unknown, { key: string }>(`/redis/set/member`, { connection_id: connectionId, key, member })
+  },
+  redisSetRemove(connectionId: number, key: string, member: string) {
+    return request.delete<unknown, { key: string }>(`/redis/set/member`, { data: { connection_id: connectionId, key, member }, params: { connection_id: connectionId, key, member } } as any)
+  },
+  redisZSetAdd(connectionId: number, key: string, member: string, score: number) {
+    return request.post<unknown, { key: string }>(`/redis/zset/member`, { connection_id: connectionId, key, member, score })
+  },
+  redisZSetRemove(connectionId: number, key: string, member: string) {
+    return request.delete<unknown, { key: string }>(`/redis/zset/member`, { data: { connection_id: connectionId, key, member }, params: { connection_id: connectionId, key, member } } as any)
+  },
 }
 
 export type { DbType }

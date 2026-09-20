@@ -305,6 +305,7 @@
                     <el-option label="zset" value="zset" />
                   </el-select>
                   <button class="ghost-button !py-1.5 !px-3 text-xs" @click="loadRedisKeys">扫描</button>
+                  <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1" @click="openNewKeyDialog"><Plus class="w-3 h-3" /> 新建</button>
                   <span class="text-[11px] text-white/30">{{ redisKeys.length }} / {{ redisKeysTotal }}</span>
                 </div>
                 <div class="flex-1 overflow-auto">
@@ -357,12 +358,107 @@
                   <button class="ghost-button !py-1 !px-2 text-[11px] text-rose-300/80 flex items-center gap-1" :disabled="isReadonly" @click="deleteCurrentRedisKey"><Trash2 class="w-3 h-3" /> 删除</button>
                 </div>
 
-                <div class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                <!-- String 编辑 -->
+                <div v-if="redisValue.type === 'string'" class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
+                    <span class="text-[11px] text-white/40">String 值 · {{ prettyIsJSON ? 'JSON' : '文本' }}</span>
+                    <div class="flex gap-1">
+                      <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="prettyToggle = !prettyToggle">{{ prettyToggle ? '原始' : '美化' }}</button>
+                      <button class="ghost-button !py-0.5 !px-2 text-[10px] text-emerald-300" :disabled="isReadonly" @click="saveRedisString">保存</button>
+                    </div>
+                  </div>
+                  <textarea v-model="redisStringEdit" class="w-full min-h-[120px] bg-transparent p-3 text-xs font-mono outline-none resize-y" placeholder="输入新值" />
+                </div>
+
+                <!-- Hash 编辑 -->
+                <div v-else-if="redisValue.type === 'hash'" class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
+                    <span class="text-[11px] text-white/40">Hash 字段 · {{ Object.keys(redisHashEdit).length }} 个</span>
+                    <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="addHashField">+ 字段</button>
+                  </div>
+                  <div class="p-2 space-y-1 max-h-[40vh] overflow-auto">
+                    <div v-for="(_v, field) in redisHashEdit" :key="field" class="flex gap-1 items-center">
+                      <input :value="field" class="glass-input !py-1 text-[11px] w-32" disabled />
+                      <input v-model="(redisHashEdit as any)[field]" class="glass-input !py-1 text-[11px] flex-1" placeholder="值" />
+                      <button class="ghost-button !py-1 !px-1.5 text-[10px]" :disabled="isReadonly" @click="saveHashField(String(field))">保存</button>
+                      <button class="ghost-button !py-1 !px-1.5 text-[10px] text-rose-300" :disabled="isReadonly" @click="deleteHashField(String(field))"><Trash2 class="w-3 h-3" /></button>
+                    </div>
+                    <div v-if="newHashField.show" class="flex gap-1 items-center pt-2 border-t border-white/10">
+                      <input v-model="newHashField.field" class="glass-input !py-1 text-[11px] w-32" placeholder="新字段" />
+                      <input v-model="newHashField.value" class="glass-input !py-1 text-[11px] flex-1" placeholder="值" />
+                      <button class="ghost-button !py-1 !px-2 text-[10px]" @click="confirmAddHashField">确认</button>
+                      <button class="ghost-button !py-1 !px-2 text-[10px]" @click="newHashField.show=false">取消</button>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- List 编辑 -->
+                <div v-else-if="redisValue.type === 'list'" class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                  <div class="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
+                    <span class="text-[11px] text-white/40">List 元素 · {{ (redisListEdit as any[]).length }} 个</span>
+                    <div class="flex gap-1">
+                      <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="redisListPop('left')">LPOP</button>
+                      <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="redisListPop('right')">RPOP</button>
+                    </div>
+                  </div>
+                  <div class="p-2 space-y-1 max-h-[30vh] overflow-auto">
+                    <div v-for="(item, idx) in redisListEdit" :key="idx" class="flex gap-2 items-center text-xs">
+                      <span class="text-white/30 w-6 text-right">{{ idx }}</span>
+                      <span class="flex-1 font-mono truncate bg-white/5 rounded px-2 py-1">{{ item }}</span>
+                    </div>
+                  </div>
+                  <div class="p-2 border-t border-white/10 flex gap-1">
+                    <input v-model="newListValue" class="glass-input !py-1 text-[11px] flex-1" placeholder="新元素值" />
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" @click="redisListPush('left')">LPUSH</button>
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" @click="redisListPush('right')">RPUSH</button>
+                  </div>
+                </div>
+
+                <!-- Set 编辑 -->
+                <div v-else-if="redisValue.type === 'set'" class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                  <div class="px-3 py-2 border-b border-white/10 bg-white/5 text-[11px] text-white/40">Set 成员 · {{ (redisSetEdit as any[]).length }} 个</div>
+                  <div class="p-2 flex flex-wrap gap-1.5 max-h-[30vh] overflow-auto">
+                    <div v-for="m in redisSetEdit" :key="m" class="flex items-center gap-1 px-2 py-1 rounded-full bg-white/10 text-xs">
+                      <span class="font-mono">{{ m }}</span>
+                      <button class="text-white/30 hover:text-rose-300" @click="removeSetMember(m)"><Trash2 class="w-3 h-3" /></button>
+                    </div>
+                  </div>
+                  <div class="p-2 border-t border-white/10 flex gap-1">
+                    <input v-model="newSetMember" class="glass-input !py-1 text-[11px] flex-1" placeholder="新成员" />
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" @click="addSetMember">SADD</button>
+                  </div>
+                </div>
+
+                <!-- ZSet 编辑 -->
+                <div v-else-if="redisValue.type === 'zset'" class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
+                  <div class="px-3 py-2 border-b border-white/10 bg-white/5 text-[11px] text-white/40">ZSet 成员 · 按分数排序</div>
+                  <div class="p-2 space-y-1 max-h-[35vh] overflow-auto">
+                    <div v-for="z in redisZSetEdit" :key="z.member" class="flex gap-2 items-center text-xs">
+                      <input v-model.number="z.score" class="glass-input !py-1 text-[11px] w-20" type="number" />
+                      <span class="flex-1 font-mono truncate bg-white/5 rounded px-2 py-1">{{ z.member }}</span>
+                      <button class="ghost-button !py-1 !px-1.5 text-[10px]" @click="saveZSetMember(z)">保存分数</button>
+                      <button class="ghost-button !py-1 !px-1.5 text-[10px] text-rose-300" @click="removeZSetMember(z.member)"><Trash2 class="w-3 h-3" /></button>
+                    </div>
+                  </div>
+                  <div class="p-2 border-t border-white/10 flex gap-1">
+                    <input v-model="newZSetMember.member" class="glass-input !py-1 text-[11px] flex-1" placeholder="成员" />
+                    <input v-model.number="newZSetMember.score" class="glass-input !py-1 text-[11px] w-24" type="number" placeholder="分数" />
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" @click="addZSetMember">ZADD</button>
+                  </div>
+                </div>
+
+                <!-- 通用预览兜底 -->
+                <div v-else class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
                   <div class="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
                     <span class="text-[11px] text-white/40">值预览 · {{ prettyIsJSON ? 'JSON' : redisValue.type }}</span>
                     <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="prettyToggle = !prettyToggle">{{ prettyToggle ? '原始' : '美化' }}</button>
                   </div>
                   <pre class="text-xs font-mono p-3 overflow-auto max-h-[40vh] whitespace-pre-wrap break-all">{{ displayedRedisValue }}</pre>
+                </div>
+
+                <!-- 新建 Key 按钮 -->
+                <div class="flex justify-end pt-2">
+                  <button class="ghost-button !py-1 !px-3 text-[11px] flex items-center gap-1" @click="openNewKeyDialog"><Plus class="w-3 h-3" /> 新建 Key</button>
                 </div>
               </div>
             </div>
@@ -515,8 +611,46 @@
           <li>生产环境执行写操作会二次确认，保障安全</li>
           <li>编辑器与结果区可拖拽分割，比例自动记忆；结果区支持列显隐/冻结/行选/导出 INSERT/Markdown</li>
           <li>双击行查看详情，右键单元格可复制行 JSON/INSERT</li>
+          <li>Redis 支持 String/Hash/List/Set/ZSet 全量编辑，TTL 更新，新建 Key</li>
         </ul>
       </div>
+    </el-dialog>
+
+    <!-- Redis 新建 Key -->
+    <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
+      <div class="space-y-3">
+        <div>
+          <p class="text-xs text-white/50 mb-1">Key</p>
+          <el-input v-model="newKeyForm.key" placeholder="例如：user:1001:profile" />
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <p class="text-xs text-white/50 mb-1">类型</p>
+            <el-select v-model="newKeyForm.type" class="w-full" popper-class="glass-popper">
+              <el-option label="string" value="string" />
+              <el-option label="hash" value="hash" />
+              <el-option label="list" value="list" />
+              <el-option label="set" value="set" />
+              <el-option label="zset" value="zset" />
+            </el-select>
+          </div>
+          <div class="w-28">
+            <p class="text-xs text-white/50 mb-1">TTL (秒)</p>
+            <el-input-number v-model="newKeyForm.ttl" :min="-1" :max="86400*30" size="default" class="w-full" />
+          </div>
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">初始值</p>
+          <el-input v-model="newKeyForm.value" type="textarea" :rows="4" :placeholder="newKeyPlaceholder" />
+          <p class="text-[11px] text-white/30 mt-1">复杂类型支持 JSON 数组/对象，或单值会自动包装</p>
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button class="ghost-button" @click="newKeyDialogOpen=false">取消</button>
+          <button class="liquid-button" @click="createNewKey">创建</button>
+        </div>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -1046,6 +1180,28 @@ const redisTTL = ref<number>(-1)
 const redisPatternHistory = ref<string[]>([])
 const prettyToggle = ref(true)
 
+const redisStringEdit = ref('')
+const redisHashEdit = reactive<Record<string, string>>({})
+const newHashField = reactive({ show: false, field: '', value: '' })
+const redisListEdit = ref<string[]>([])
+const newListValue = ref('')
+const redisSetEdit = ref<string[]>([])
+const newSetMember = ref('')
+const redisZSetEdit = ref<{ member: string; score: number }[]>([])
+const newZSetMember = reactive({ member: '', score: 0 })
+const newKeyDialogOpen = ref(false)
+const newKeyForm = reactive({ key: '', type: 'string', value: '', ttl: -1 })
+const newKeyPlaceholder = computed(() => {
+  switch (newKeyForm.type) {
+    case 'string': return '字符串值'
+    case 'hash': return '{"field":"value"}'
+    case 'list': return '["a","b"]'
+    case 'set': return '["a","b"]'
+    case 'zset': return '[{"member":"a","score":1}]'
+    default: return ''
+  }
+})
+
 const abortController = ref<AbortController | null>(null)
 
 // ---------- Step4: EXPLAIN / Snippet / Shortcuts ----------
@@ -1369,6 +1525,20 @@ async function inspectRedisKey(key: string) {
   try {
     redisValue.value = await workbenchApi.redisValue(currentConn.value.id, key)
     redisTTL.value = redisValue.value?.ttl ?? -1
+    const v = redisValue.value?.value
+    const t = redisValue.value?.type
+    if (t === 'string') {
+      redisStringEdit.value = typeof v === 'string' ? v : JSON.stringify(v, null, 2)
+    } else if (t === 'hash' && v && typeof v === 'object') {
+      Object.keys(redisHashEdit).forEach(k => delete (redisHashEdit as any)[k])
+      Object.entries(v as any).forEach(([k, val]) => { (redisHashEdit as any)[k] = String(val) })
+    } else if (t === 'list' && Array.isArray(v)) {
+      redisListEdit.value = [...(v as string[])]
+    } else if (t === 'set' && Array.isArray(v)) {
+      redisSetEdit.value = [...(v as string[])]
+    } else if (t === 'zset' && Array.isArray(v)) {
+      redisZSetEdit.value = (v as any[]).map((it: any) => ({ member: it.member, score: it.score }))
+    }
     redisView.value = 'value'
   } finally {
     redisLoading.value = false
@@ -1452,6 +1622,155 @@ async function updateTTL() {
     if (redisValue.value) redisValue.value.ttl = redisTTL.value
   } catch {
     ElMessage.error('更新失败')
+  }
+}
+
+async function saveRedisString() {
+  if (!currentConn.value || !redisValue.value) return
+  if (isReadonly.value) { ElMessage.warning('只读角色不可修改'); return }
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisUpdateValue(currentConn.value.id, k, redisStringEdit.value)
+    ElMessage.success('已保存')
+    redisValue.value.value = redisStringEdit.value
+  } catch { ElMessage.error('保存失败') }
+}
+function addHashField() { newHashField.show = true; newHashField.field = ''; newHashField.value = '' }
+async function confirmAddHashField() {
+  if (!newHashField.field.trim()) { ElMessage.warning('字段名必填'); return }
+  await saveHashField(newHashField.field.trim(), newHashField.value)
+  newHashField.show = false
+}
+async function saveHashField(field: string, val?: string) {
+  if (!currentConn.value || !redisValue.value) return
+  if (isReadonly.value) { ElMessage.warning('只读角色不可修改'); return }
+  const k = (redisValue.value as any).key || ''
+  const v = val ?? (redisHashEdit as any)[field]
+  try {
+    await workbenchApi.redisHashSet(currentConn.value.id, k, field, v)
+    ElMessage.success(`字段 ${field} 已保存`)
+    ;(redisHashEdit as any)[field] = v
+    if (redisValue.value?.value && typeof redisValue.value.value === 'object') {
+      ;(redisValue.value.value as any)[field] = v
+    }
+  } catch { ElMessage.error('保存失败') }
+}
+async function deleteHashField(field: string) {
+  if (!currentConn.value || !redisValue.value) return
+  if (isReadonly.value) { ElMessage.warning('只读角色不可删除'); return }
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisHashDel(currentConn.value.id, k, field)
+    ElMessage.success(`字段 ${field} 已删除`)
+    delete (redisHashEdit as any)[field]
+    if (redisValue.value?.value && typeof redisValue.value.value === 'object') {
+      delete (redisValue.value.value as any)[field]
+    }
+  } catch { ElMessage.error('删除失败') }
+}
+async function redisListPush(dir: 'left' | 'right') {
+  if (!currentConn.value || !redisValue.value) return
+  if (!newListValue.value) { ElMessage.warning('值不能为空'); return }
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisListPush(currentConn.value.id, k, newListValue.value, dir)
+    ElMessage.success(`${dir === 'left' ? 'LPUSH' : 'RPUSH'} 成功`)
+    if (dir === 'left') redisListEdit.value.unshift(newListValue.value)
+    else redisListEdit.value.push(newListValue.value)
+    newListValue.value = ''
+  } catch { ElMessage.error('操作失败') }
+}
+async function redisListPop(dir: 'left' | 'right') {
+  if (!currentConn.value || !redisValue.value) return
+  const k = (redisValue.value as any).key || ''
+  try {
+    const res = await workbenchApi.redisListPop(currentConn.value.id, k, dir) as any
+    if (res?.value !== null && res?.value !== undefined) {
+      ElMessage.success(`弹出：${res.value}`)
+      if (dir === 'left') redisListEdit.value.shift()
+      else redisListEdit.value.pop()
+    } else {
+      ElMessage.info('列表为空')
+    }
+  } catch { ElMessage.error('操作失败') }
+}
+async function addSetMember() {
+  if (!currentConn.value || !redisValue.value) return
+  if (!newSetMember.value) { ElMessage.warning('成员不能为空'); return }
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisSetAdd(currentConn.value.id, k, newSetMember.value)
+    ElMessage.success('已添加')
+    if (!redisSetEdit.value.includes(newSetMember.value)) redisSetEdit.value.push(newSetMember.value)
+    newSetMember.value = ''
+  } catch { ElMessage.error('添加失败') }
+}
+async function removeSetMember(member: string) {
+  if (!currentConn.value || !redisValue.value) return
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisSetRemove(currentConn.value.id, k, member)
+    ElMessage.success('已移除')
+    redisSetEdit.value = redisSetEdit.value.filter(m => m !== member)
+  } catch { ElMessage.error('移除失败') }
+}
+async function addZSetMember() {
+  if (!currentConn.value || !redisValue.value) return
+  if (!newZSetMember.member) { ElMessage.warning('成员不能为空'); return }
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisZSetAdd(currentConn.value.id, k, newZSetMember.member, Number(newZSetMember.score) || 0)
+    ElMessage.success('已添加')
+    const existing = redisZSetEdit.value.find(z => z.member === newZSetMember.member)
+    if (existing) existing.score = Number(newZSetMember.score) || 0
+    else redisZSetEdit.value.push({ member: newZSetMember.member, score: Number(newZSetMember.score) || 0 })
+    redisZSetEdit.value.sort((a,b) => a.score - b.score)
+    newZSetMember.member = ''; newZSetMember.score = 0
+  } catch { ElMessage.error('添加失败') }
+}
+async function saveZSetMember(z: { member: string; score: number }) {
+  if (!currentConn.value || !redisValue.value) return
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisZSetAdd(currentConn.value.id, k, z.member, Number(z.score) || 0)
+    ElMessage.success(`成员 ${z.member} 分数已更新`)
+    redisZSetEdit.value.sort((a,b) => a.score - b.score)
+  } catch { ElMessage.error('更新失败') }
+}
+async function removeZSetMember(member: string) {
+  if (!currentConn.value || !redisValue.value) return
+  const k = (redisValue.value as any).key || ''
+  try {
+    await workbenchApi.redisZSetRemove(currentConn.value.id, k, member)
+    ElMessage.success('已移除')
+    redisZSetEdit.value = redisZSetEdit.value.filter(z => z.member !== member)
+  } catch { ElMessage.error('移除失败') }
+}
+function openNewKeyDialog() {
+  newKeyForm.key = ''
+  newKeyForm.type = 'string'
+  newKeyForm.value = ''
+  newKeyForm.ttl = -1
+  newKeyDialogOpen.value = true
+}
+async function createNewKey() {
+  if (!currentConn.value) return
+  if (!newKeyForm.key.trim()) { ElMessage.warning('Key 不能为空'); return }
+  try {
+    let val: any = newKeyForm.value
+    if (newKeyForm.type === 'hash' || newKeyForm.type === 'set' || newKeyForm.type === 'list' || newKeyForm.type === 'zset') {
+      try { val = JSON.parse(newKeyForm.value || '{}') } catch { /* keep string */ }
+      if (newKeyForm.type === 'hash' && typeof val === 'string') val = { field: val }
+      if (newKeyForm.type === 'set' && typeof val === 'string') val = [val]
+      if (newKeyForm.type === 'list' && typeof val === 'string') val = [val]
+      if (newKeyForm.type === 'zset' && typeof val === 'string') val = [{ member: val, score: 0 }]
+    }
+    await workbenchApi.redisCreateKey(currentConn.value.id, { key: newKeyForm.key.trim(), type: newKeyForm.type, value: val, ttl: newKeyForm.ttl })
+    ElMessage.success('已创建')
+    newKeyDialogOpen.value = false
+    loadRedisKeys()
+  } catch (e: any) {
+    ElMessage.error(e?.message || '创建失败')
   }
 }
 

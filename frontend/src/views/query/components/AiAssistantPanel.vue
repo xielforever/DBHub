@@ -127,6 +127,8 @@ const quickPrompts = [
   { label: '生成查询', icon: Search, prompt: '根据当前表生成一条查询示例', gen: () => genSelect() },
   { label: '解释SQL', icon: Wand2, prompt: '解释当前编辑器中的SQL', gen: () => explainSQL() },
   { label: '优化', icon: BarChart3, prompt: '优化当前SQL并给出索引建议', gen: () => optimizeSQL() },
+  { label: '生成报表', icon: BarChart3, prompt: '生成报表 SQL', gen: () => genReport() },
+  { label: 'INSERT', icon: Plus, prompt: '生成 INSERT 示例', gen: () => genInsert() },
 ]
 
 function genSelect() {
@@ -134,6 +136,14 @@ function genSelect() {
   const db = props.currentConnection?.database || ''
   const qualified = db ? `${db}.${t}` : t
   return `SELECT * FROM ${qualified} LIMIT 20;`
+}
+function genReport() {
+  const t = props.tables[0] || 'orders'
+  return `SELECT DATE(created_at) as day, COUNT(*) as cnt, SUM(amount) as total\nFROM ${t}\nWHERE created_at >= NOW() - INTERVAL '30 days'\nGROUP BY 1 ORDER BY 1;`
+}
+function genInsert() {
+  const t = props.tables[0] || 'your_table'
+  return `INSERT INTO ${t} (id, name, created_at) VALUES (1, '示例', NOW());`
 }
 function explainSQL() {
   const sql = (props.currentSql || '').slice(0, 200) || 'SELECT * FROM table'
@@ -151,6 +161,68 @@ function applyQuick(q: (typeof quickPrompts)[0]) {
   scrollBottom()
 }
 
+function detectIntent(text: string): { type: string; sql: string; explain: string } {
+  const t = props.tables[0] || 'orders'
+  const lower = text.toLowerCase()
+  if (lower.includes('top') || text.includes('前') || text.includes('排行')) {
+    return {
+      type: 'top',
+      sql: `SELECT * FROM ${t} ORDER BY id DESC LIMIT 10;`,
+      explain: `按 ${t} 倒序取前 10 条，常用于排行榜场景`
+    }
+  }
+  if (lower.includes('count') || text.includes('总数') || text.includes('多少')) {
+    return {
+      type: 'count',
+      sql: `SELECT COUNT(*) as total FROM ${t};`,
+      explain: `统计 ${t} 总行数`
+    }
+  }
+  if (lower.includes('group') || text.includes('分组') || text.includes('分布')) {
+    const col = props.tables[1] || 'status'
+    return {
+      type: 'group',
+      sql: `SELECT ${col}, COUNT(*) as cnt FROM ${t} GROUP BY ${col} ORDER BY cnt DESC;`,
+      explain: `按 ${col} 分组统计分布`
+    }
+  }
+  if (text.includes('近7天') || lower.includes('7 days') || text.includes('周')) {
+    return {
+      type: 'trend',
+      sql: `SELECT DATE(created_at) as day, COUNT(*) as cnt, SUM(amount) as total\nFROM ${t}\nWHERE created_at >= NOW() - INTERVAL '7 days'\nGROUP BY 1 ORDER BY 1;`,
+      explain: `近7天趋势，建议用折线图展示`
+    }
+  }
+  if (text.includes('近30天') || lower.includes('30 days') || text.includes('月')) {
+    return {
+      type: 'trend',
+      sql: `SELECT DATE(created_at) as day, COUNT(*) as cnt, SUM(amount) as total\nFROM ${t}\nWHERE created_at >= NOW() - INTERVAL '30 days'\nGROUP BY 1 ORDER BY 1;`,
+      explain: `近30天趋势，建议用柱状图或折线图`
+    }
+  }
+  if (lower.includes('join') || text.includes('关联')) {
+    const t2 = props.tables[1] || 'users'
+    return {
+      type: 'join',
+      sql: `SELECT a.*, b.name as ${t2}_name\nFROM ${t} a\nLEFT JOIN ${t2} b ON a.user_id = b.id\nLIMIT 100;`,
+      explain: `${t} 关联 ${t2} 查询示例`
+    }
+  }
+  if (text.includes('慢') || lower.includes('slow') || lower.includes('optim')) {
+    const sql = props.currentSql || `SELECT * FROM ${t}`
+    return {
+      type: 'optimize',
+      sql: `${sql.includes('LIMIT') ? sql : sql + ' LIMIT 100'}`,
+      explain: `优化建议：1) 避免 SELECT * 2) 添加 WHERE 过滤 3) 为常用过滤列建索引 4) 大表用 keyset 分页`
+    }
+  }
+  return {
+    type: 'generic',
+    sql: `-- 根据：${text}\nSELECT * FROM ${t} LIMIT 20;`,
+    explain: `根据你的描述生成查询，可进一步细化`
+  }
+}
+
 async function send() {
   const text = input.value.trim()
   if (!text) return
@@ -160,26 +232,16 @@ async function send() {
   await nextTick()
   scrollBottom()
 
-  // 占位：简单规则生成
   setTimeout(() => {
-    let sql = ''
-    if (text.includes('近7天') || text.toLowerCase().includes('7 days')) {
-      const t = props.tables[0] || 'orders'
-      sql = `SELECT DATE(created_at) as day, COUNT(*) as cnt, SUM(amount) as total\nFROM ${t}\nWHERE created_at >= NOW() - INTERVAL '7 days'\nGROUP BY 1 ORDER BY 1;`
-    } else if (text.includes('销售额') || text.toLowerCase().includes('sales')) {
-      const t = props.tables[0] || 'orders'
-      sql = `SELECT SUM(amount) as sales FROM ${t} WHERE status = 'paid';`
-    } else {
-      const t = props.tables[0] || 'your_table'
-      sql = `-- 根据：${text}\nSELECT * FROM ${t} LIMIT 20;`
-    }
-    messages.value.push({ role: 'assistant', content: `已根据上下文生成：\n${sql}`, sql })
+    const intent = detectIntent(text)
+    const content = `${intent.explain}\n\n${intent.sql}`
+    messages.value.push({ role: 'assistant', content, sql: intent.sql })
     sending.value = false
     scrollBottom()
     try {
       localStorage.setItem('dbhub_ai_history', JSON.stringify(messages.value.slice(-20)))
     } catch {}
-  }, 600)
+  }, 500)
 }
 
 function scrollBottom() {
