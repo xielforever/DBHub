@@ -619,8 +619,72 @@ curl http://localhost:8080/api/health
 
 **POST** `/api/v1/reports/{id}/star` `{ "star": true|false }` → `{ "starred": true }`，任意登录用户，幂等
 
-### 11.5 仪表盘与分享（M4 预留）
+### 11.5 仪表盘 CRUD（M4-FR-02）
 
-- 迁移已包含 `sys_dashboards`、`sys_share_tokens`，API 在 M4 实现：`/dashboards`、`/shares`、`/s/:token` 免登录只读
-- 分享 token 仅存 SHA-256 哈希，支持有效期与吊销
+> 读：登录可用；写：`admin`/`developer`；私有仅 owner/admin 可见；收藏任意登录用户。
+
+- **POST** `/api/v1/dashboards` `{ name(必填≤128), description?, visibility?: private|shared, layout?: [{report_id,x,y,w,h}] }` → `{ id }`
+  - `layout` 为 12 栅格：`w` 1~12，`x/y/h` 可选，M4 前端简化为报表 ID 列表组合
+- **GET** `/api/v1/dashboards?q=&scope=mine|starred|shared|all&visibility=&page=&page_size=` → `{ items, total }`
+  - `scope` 同报表；`items[].layout` 为原始 JSON；`starred` 布尔投影
+- **GET** `/api/v1/dashboards/{id}`：私有校验 owner/admin
+- **PUT** `/api/v1/dashboards/{id}`：仅 owner/admin，支持改名/描述/可见性/布局
+- **DELETE** `/api/v1/dashboards/{id}`：仅 owner/admin，级联逻辑由前端清理分享
+- **POST** `/api/v1/dashboards/{id}/star` `{ starred: bool }` → `{ starred }`
+
+Dashboard 响应示例：
+
+```json
+{
+  "id": 1, "name": "销售总览", "description": "月度指标",
+  "visibility": "shared", "layout": [{"report_id":1,"x":0,"y":0,"w":6,"h":4},{"report_id":2,"x":6,"y":0,"w":6,"h":4}],
+  "owner_user_id": 1, "owner_name": "admin",
+  "starred_by": [1], "starred": true,
+  "created_at": "2026-09-20T10:00:00Z", "updated_at": "2026-09-20T10:00:00Z"
+}
+```
+
+### 11.6 分享与公开只读页（M4-FR-03）
+
+> 创建/列表/吊销/删除需登录；写角色才能创建分享，且仅 owner/admin 可分享自己的报表/仪表盘；公开页 `/api/v1/public/s/{token}` 免登录。
+
+- **POST** `/api/v1/shares`（写角色，记审计）
+```json
+{ "subject_type": "report|dashboard", "subject_id": 1, "expire_days": 1|7|30|null }
+```
+`expire_days` 空=永久；服务端生成 24 字节 hex token，仅存储 SHA-256 哈希；明文仅创建时返回一次。
+
+响应：
+
+```json
+{ "id": 1, "subject_type": "report", "subject_id": 1, "token": "a1b2c3...", "expire_at": "2026-09-27T10:00:00Z", "created_at": "2026-09-20T10:00:00Z" }
+```
+
+- **GET** `/api/v1/shares?subject_type=report&subject_id=1` → `{ items: [{ id, subject_type, subject_id, expire_at, access_count, revoked, created_at }] }`
+- **POST** `/api/v1/shares/{id}/revoke` → `{ id, revoked: true }`
+- **DELETE** `/api/v1/shares/{id}` → `{ id }`
+
+- **GET** `/api/v1/public/s/{token}`（免登录，无需 Bearer）
+  - 校验：hash 是否存在、是否 revoked、是否过期（`expire_at`）
+  - 访问计数异步 `access_count+1`
+  - 响应：
+
+```json
+{
+  "share_id": 1,
+  "subject_type": "dashboard",
+  "subject": { "id": 1, "name": "销售总览", "layout": [...], "reports": [{ "id":1,"name":"月度销售","chart_type":"bar", ... }] },
+  "owner_name": "admin",
+  "expire_at": "2026-09-27T10:00:00Z",
+  "access_count": 5
+}
+```
+
+报表分享 `subject` 为 Report 详情；仪表盘分享 `subject` 包含 `layout` 与 `reports` 快照（便于公开页无需二次鉴权即可渲染）。过期/吊销/不存在均返回 `40400`。
+
+### 11.7 前端路由
+
+- `/reports` 报表中心（M3）
+- `/dashboards` 仪表盘列表/查看/编辑/分享（M4，12 栅格、刷新全部、收藏）
+- `/s/:token` 公开只读分享页（M4，免登录，暗色玻璃卡片+ChartCard 只读）
 
