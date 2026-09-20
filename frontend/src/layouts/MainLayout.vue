@@ -167,6 +167,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  BarChart3,
   Boxes,
   ChevronDown,
   Database,
@@ -210,6 +211,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
       { name: 'assets', label: '数据资产', to: '/assets', icon: Boxes },
       { name: 'connections', label: '数据源管理', to: '/connections', icon: Database },
       { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
+      { name: 'reports', label: '报表中心', to: '/reports', icon: BarChart3 },
     ],
   },
   {

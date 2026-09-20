@@ -49,6 +49,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: 'SQL 工作台', icon: 'SquareTerminal' },
       },
       {
+        path: 'reports',
+        name: 'reports',
+        component: () => import('../views/report/ReportsView.vue'),
+        meta: { title: '报表中心', icon: 'BarChart3' },
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('../views/admin/UsersView.vue'),

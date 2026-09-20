@@ -142,6 +142,17 @@
             </div>
           </el-tab-pane>
 
+          <!-- 图表（M3） -->
+          <el-tab-pane label="图表" name="chart" class="flex flex-col min-h-0 flex-1">
+            <ResultChartPane
+              :columns="grid.columns"
+              :rows="(grid.rows as unknown[][])"
+              :sql="currentTab.sql"
+              :connection-id="currentConn?.id ?? 0"
+              :database="currentTab.database"
+            />
+          </el-tab-pane>
+
           <!-- 查询历史 -->
           <el-tab-pane label="历史" name="history" class="flex flex-col min-h-0 flex-1">
             <div class="flex items-center gap-2 px-4 py-2 border-b border-white/10">
@@ -294,6 +305,7 @@ import {
 } from 'lucide-vue-next'
 import ConnectionTreePanel from './components/ConnectionTreePanel.vue'
 import AiAssistantPanel from './components/AiAssistantPanel.vue'
+import ResultChartPane from './components/ResultChartPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
