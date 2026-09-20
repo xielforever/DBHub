@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.8.0', env: 'arena', note: 'Step8: Redis完整编辑+列显隐+行选+自动LIMIT+收藏最近' })
+    return ok(res, { status: 'ok', version: 'mock-0.10.0', env: 'arena', note: 'Step10: EXPLAIN可视化+Redis树+批量+全量编辑' })
   }
 
   // 认证
@@ -407,13 +407,27 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req)
     const rawSql = body.sql || ''
     const sql = rawSql.toLowerCase()
+    const conn = connections.find(c => c.id === Number(body.connection_id))
+    const connType = conn?.type || 'postgres'
     if (sql.trim().startsWith('explain')) {
-      // 返回模拟执行计划
-      const isPg = (body.database || '').toLowerCase().includes('orders') || true
-      if (isPg) {
-        return ok(res, { kind: 'query', columns: ['QUERY PLAN'], rows: [['Seq Scan on orders  (cost=0.00..120.30 rows=100 width=64)'], ['  Filter: (amount > 1000)'], ['Planning Time: 0.12 ms'], ['Execution Time: 2.34 ms']], truncated: false, duration_ms: 18 })
+      if (connType === 'mysql') {
+        // MySQL EXPLAIN with filesort and temporary
+        if (sql.includes('join')) {
+          return ok(res, { kind: 'query', columns: ['id', 'select_type', 'table', 'type', 'possible_keys', 'key', 'rows', 'Extra'], rows: [[1, 'SIMPLE', 'orders', 'ALL', 'idx_user', null, 120000, 'Using where'], [1, 'SIMPLE', 'users', 'ref', 'PRIMARY', 'PRIMARY', 1, 'Using index']], truncated: false, duration_ms: 22 })
+        }
+        if (sql.includes('group') || sql.includes('order')) {
+          return ok(res, { kind: 'query', columns: ['id', 'select_type', 'table', 'type', 'possible_keys', 'key', 'rows', 'Extra'], rows: [[1, 'SIMPLE', 'orders', 'ALL', null, null, 120000, 'Using temporary; Using filesort']], truncated: false, duration_ms: 18 })
+        }
+        return ok(res, { kind: 'query', columns: ['id', 'select_type', 'table', 'type', 'possible_keys', 'key', 'rows', 'Extra'], rows: [[1, 'SIMPLE', 'orders', 'ALL', 'idx_status', null, 120000, 'Using where']], truncated: false, duration_ms: 15 })
       } else {
-        return ok(res, { kind: 'query', columns: ['id', 'select_type', 'table', 'type', 'possible_keys', 'key', 'rows'], rows: [[1, 'SIMPLE', 'orders', 'ALL', null, null, 120000]], truncated: false, duration_ms: 15 })
+        // PG: richer plan
+        if (sql.includes('join')) {
+          return ok(res, { kind: 'query', columns: ['QUERY PLAN'], rows: [['Hash Join  (cost=120.30..340.50 rows=1000 width=128)'], ['  Hash Cond: (orders.user_id = users.id)'], ['  ->  Seq Scan on orders  (cost=0.00..120.30 rows=1000 width=64)'], ['        Filter: (amount > 1000)'], ['  ->  Hash  (cost=20.00..20.00 rows=500 width=64)'], ['        ->  Seq Scan on users  (cost=0.00..20.00 rows=500 width=64)'], ['Planning Time: 0.24 ms'], ['Execution Time: 12.34 ms']], truncated: false, duration_ms: 28 })
+        }
+        if (sql.includes('group') || sql.includes('order')) {
+          return ok(res, { kind: 'query', columns: ['QUERY PLAN'], rows: [['GroupAggregate  (cost=200.00..300.00 rows=30 width=32)'], ['  Group Key: status'], ['  ->  Sort  (cost=200.00..210.00 rows=1000 width=32)'], ['        Sort Key: status'], ['        ->  Seq Scan on orders  (cost=0.00..120.30 rows=1000 width=32)'], ['Planning Time: 0.18 ms'], ['Execution Time: 8.12 ms']], truncated: false, duration_ms: 22 })
+        }
+        return ok(res, { kind: 'query', columns: ['QUERY PLAN'], rows: [['Seq Scan on orders  (cost=0.00..120.30 rows=100 width=64)'], ['  Filter: (amount > 1000)'], ['Planning Time: 0.12 ms'], ['Execution Time: 2.34 ms']], truncated: false, duration_ms: 18 })
       }
     }
     if (sql.includes('count')) {

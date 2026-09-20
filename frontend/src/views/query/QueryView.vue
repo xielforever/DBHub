@@ -187,6 +187,11 @@
               <p class="text-white/80">执行成功，影响 {{ writeResult.affected_rows ?? 0 }} 行 · 耗时 {{ writeResult.duration_ms }} ms</p>
               <button class="ghost-button !py-1 !px-3 text-xs mt-2" @click="resetGrid">清空结果</button>
             </div>
+            <ExplainPlan
+              v-else-if="isExplainResult"
+              :columns="grid.columns"
+              :rows="grid.rows as any"
+            />
             <ResultGrid
               v-else
               :columns="grid.columns"
@@ -306,6 +311,10 @@
                   </el-select>
                   <button class="ghost-button !py-1.5 !px-3 text-xs" @click="loadRedisKeys">扫描</button>
                   <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1" @click="openNewKeyDialog"><Plus class="w-3 h-3" /> 新建</button>
+                  <div class="flex items-center gap-1 ml-1">
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" :class="redisViewMode==='list' ? 'bg-white/10' : ''" @click="redisViewMode='list'">列表</button>
+                    <button class="ghost-button !py-1 !px-2 text-[11px]" :class="redisViewMode==='tree' ? 'bg-white/10' : ''" @click="redisViewMode='tree'">树</button>
+                  </div>
                   <span class="text-[11px] text-white/30">{{ redisKeys.length }} / {{ redisKeysTotal }}</span>
                 </div>
 
@@ -320,7 +329,10 @@
                   <button class="ghost-button !py-1 !px-2 text-[11px]" @click="redisSelectedKeys.clear()">清空选择</button>
                 </div>
 
-                <div class="flex-1 overflow-auto">
+                <div v-if="redisViewMode==='tree'" class="flex-1 overflow-auto p-2">
+                  <RedisKeyTree :items="redisKeys" :expanded="redisTreeExpanded" @select="onRedisTreeSelect" @toggle="onRedisTreeToggle" />
+                </div>
+                <div v-else class="flex-1 overflow-auto">
                   <table class="w-full text-xs">
                     <thead class="text-white/45 sticky top-0 bg-[#141428]/90 backdrop-blur z-10">
                       <tr>
@@ -708,6 +720,8 @@ import AiAssistantPanel from './components/AiAssistantPanel.vue'
 import ResultChartPane from './components/ResultChartPane.vue'
 import SqlMonaco from './components/SqlMonaco.vue'
 import ResultGrid from './components/ResultGrid.vue'
+import ExplainPlan from './components/ExplainPlan.vue'
+import RedisKeyTree from './components/RedisKeyTree.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -1218,6 +1232,12 @@ const newKeyPlaceholder = computed(() => {
 const redisSelectedKeys = reactive(new Set<string>())
 const redisBatchTTL = ref<number>(-1)
 const isAllRedisSelected = computed(() => redisKeys.value.length > 0 && redisSelectedKeys.size === redisKeys.value.length)
+const redisViewMode = ref<'list' | 'tree'>('list')
+const redisTreeExpanded = reactive(new Set<string>())
+const isExplainResult = computed(() => {
+  const cols = grid.columns.map(c => c.toLowerCase())
+  return cols.includes('query plan') || cols.includes('select_type') || (grid.columns.length === 1 && (grid.columns[0] || '').toLowerCase().includes('plan'))
+})
 
 const abortController = ref<AbortController | null>(null)
 
@@ -1839,6 +1859,13 @@ function exportSelectedKeys() {
   a.download = `redis_keys_${new Date().toISOString().slice(0,10)}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+function onRedisTreeToggle(node: any) {
+  if (redisTreeExpanded.has(node.path)) redisTreeExpanded.delete(node.path)
+  else redisTreeExpanded.add(node.path)
+}
+function onRedisTreeSelect(key: string) {
+  inspectRedisKey(key)
 }
 
 function addTab() {
