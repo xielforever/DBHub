@@ -16,11 +16,13 @@ const props = withDefaults(
     tables?: string[]
     columns?: string[]
     placeholder?: string
+    minimap?: boolean
   }>(),
   {
     tables: () => [],
     columns: () => [],
     placeholder: '',
+    minimap: false,
   },
 )
 
@@ -28,6 +30,7 @@ const emit = defineEmits<{
   (e: 'update:modelValue', v: string): void
   (e: 'run'): void
   (e: 'format'): void
+  (e: 'selection-change', len: number): void
 }>()
 
 const containerRef = ref<HTMLDivElement | null>(null)
@@ -87,7 +90,7 @@ async function init() {
     fontSize: 13,
     lineHeight: 20,
     fontFamily: 'JetBrains Mono, Fira Code, Cascadia Code, Menlo, monospace',
-    minimap: { enabled: false },
+    minimap: { enabled: !!props.minimap },
     wordWrap: 'on',
     scrollBeyondLastLine: false,
     automaticLayout: false,
@@ -110,6 +113,14 @@ async function init() {
   editor.onDidChangeModelContent(() => {
     const v = editor.getValue()
     if (v !== props.modelValue) emit('update:modelValue', v)
+  })
+  // 选中变化
+  editor.onDidChangeCursorSelection((e: any) => {
+    try {
+      const model = editor.getModel()
+      const sel = model?.getValueInRange(e.selection) || ''
+      emit('selection-change', sel.length)
+    } catch {}
   })
 
   // 快捷键：Ctrl+Enter 运行
@@ -187,6 +198,15 @@ watch(
     if (editor && v !== editor.getValue()) {
       editor.setValue(v)
     }
+  },
+)
+
+watch(
+  () => props.minimap,
+  (v) => {
+    try {
+      editor?.updateOptions({ minimap: { enabled: !!v } })
+    } catch {}
   },
 )
 

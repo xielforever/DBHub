@@ -12,6 +12,7 @@
       @generate-select="onGenerateSelect"
       @redis-overview="onRedisOverview"
       @redis-keys="onRedisKeys"
+      @insert-table-name="onInsertTableName"
     />
 
     <el-drawer v-model="treeDrawerOpen" title="数据源" direction="ltr" size="82%" lazy class="glass-drawer">
@@ -24,6 +25,7 @@
         @generate-select="(p) => { onGenerateSelect(p); treeDrawerOpen = false }"
         @redis-overview="(c) => { onRedisOverview(c); treeDrawerOpen = false }"
         @redis-keys="(c) => { onRedisKeys(c); treeDrawerOpen = false }"
+        @insert-table-name="(n) => { onInsertTableName(n); treeDrawerOpen = false }"
       />
     </el-drawer>
 
@@ -73,12 +75,23 @@
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5" @click="addTab">
                 <Plus class="w-3.5 h-3.5" /> 新查询
               </button>
+              <el-dropdown trigger="click" popper-class="glass-popper" @command="onEditorOptionCommand">
+                <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1"><Settings2 class="w-3.5 h-3.5" /> 选项</button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="toggle-minimap">{{ minimapEnabled ? '关闭小地图' : '开启小地图' }}</el-dropdown-item>
+                    <el-dropdown-item command="toggle-autolimit">{{ autoLimitEnabled ? '关闭自动 LIMIT 1000' : '开启自动 LIMIT 1000' }}</el-dropdown-item>
+                    <el-dropdown-item command="add-limit">为当前 SELECT 添加 LIMIT 100</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <div class="hidden sm:block h-5 w-px bg-white/10" />
               <span v-if="currentConn" class="flex items-center gap-1.5 text-xs text-white/65">
                 <component :is="currentConn.type === 'redis' ? KeyRound : Database" class="w-3.5 h-3.5" :style="{ color: connColor(currentConn.type) }" />
                 {{ currentConn.name }}
                 <span v-if="currentConn.environment === 'prod'" class="px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px]">PROD</span>
                 <span v-if="currentConn.proxy_name" class="px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[10px] flex items-center gap-1"><Waypoints class="w-3 h-3" />{{ currentConn.proxy_name }}</span>
+                <span v-if="autoLimitEnabled" class="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px]">自动 LIMIT</span>
               </span>
               <div v-if="currentConn && currentConn.type !== 'redis'" class="w-32 sm:w-40 shrink-0">
                 <el-select
@@ -93,6 +106,7 @@
               </div>
               <div class="flex-1" />
               <div class="flex items-center gap-1">
+                <span class="text-[10px] text-white/25 hidden md:inline">{{ editorStats.chars }} 字符 · {{ editorStats.lines }} 行<span v-if="editorStats.selected"> · 已选 {{ editorStats.selected }} 字符</span></span>
                 <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1" @click="openSnippetDialog" title="保存当前 SQL 为片段">
                   <Bookmark class="w-3.5 h-3.5" /> 收藏
                 </button>
@@ -103,7 +117,7 @@
                   <Keyboard class="w-3.5 h-3.5" />
                 </button>
               </div>
-              <span class="hidden lg:flex items-center gap-1 text-[10px] text-white/25 ml-1"><Keyboard class="w-3 h-3" /> ⌘+Enter 运行 · ⇧⌘+F 格式化 · ? 帮助</span>
+              <span class="hidden lg:flex items-center gap-1 text-[10px] text-white/25 ml-1"><Keyboard class="w-3 h-3" /> 选中执行 · ⌘+Enter 运行 · ⇧⌘+F 格式化 · ? 帮助</span>
               <button class="ghost-button !py-1.5 !px-3 text-xs flex items-center gap-1.5 xl:hidden" @click="aiDrawerOpen = true">
                 <Sparkles class="w-3.5 h-3.5" /> AI
               </button>
@@ -116,11 +130,13 @@
                 v-model="tab.sql"
                 :tables="allTableNames"
                 :columns="allColumnNames"
+                :minimap="minimapEnabled"
                 :placeholder="currentConn && currentConn.type === 'redis'
                   ? '-- Redis 数据源不支持 SQL，请在左下方结果区浏览键空间'
-                  : '-- 先在左侧选择数据源与表，然后在此编写 SQL，Ctrl/Cmd + Enter 运行'"
+                  : '-- 先在左侧选择数据源与表，然后在此编写 SQL，Ctrl/Cmd + Enter 运行，选中部分 SQL 仅执行选中段'"
                 @run="runQuery"
                 @format="formatCurrent"
+                @selection-change="onSelectionChange"
               />
               <textarea
                 v-else
@@ -179,6 +195,7 @@
               :base-index="viewMode === 'preview' ? (preview.page - 1) * preview.pageSize : 0"
               :sql="currentTab.sql"
               :fullscreen="resultFullscreen"
+              :table-name="preview.table || 'result_table'"
               @toggle-fullscreen="resultFullscreen = !resultFullscreen"
             />
           </el-tab-pane>
@@ -353,7 +370,7 @@
 
           <el-tab-pane label="消息" name="message" class="flex flex-col min-h-0 flex-1">
             <div class="p-4 text-sm font-mono space-y-1 overflow-auto flex-1">
-              <p v-if="!messages.length" class="text-white/35">编辑器就绪，等待执行…</p>
+              <p v-if="!messages.length" class="text-white/35">编辑器就绪，等待执行… 选中部分 SQL 时仅执行选中段</p>
               <p v-for="(m, i) in messages" :key="i" :class="m.level === 'error' ? 'text-rose-300' : m.level === 'success' ? 'text-emerald-300' : 'text-white/50'">
                 [{{ m.time }}] {{ m.text }}
               </p>
@@ -493,10 +510,11 @@
       <div class="mt-4 p-3 rounded-xl bg-indigo-500/10 border border-indigo-400/20 text-[11px] text-indigo-200/70">
         <p class="font-medium mb-1">💡 小技巧</p>
         <ul class="list-disc pl-4 space-y-1">
-          <li>选中表后右键可生成 SELECT *，一键插入编辑器</li>
+          <li>选中部分 SQL 后运行仅执行选中段，未选中则执行光标所在语句或全部</li>
           <li>历史可 Pin 置顶，Redis 支持 * ? 通配与类型筛选</li>
           <li>生产环境执行写操作会二次确认，保障安全</li>
-          <li>编辑器与结果区可拖拽分割，比例自动记忆</li>
+          <li>编辑器与结果区可拖拽分割，比例自动记忆；结果区支持列显隐/冻结/行选/导出 INSERT/Markdown</li>
+          <li>双击行查看详情，右键单元格可复制行 JSON/INSERT</li>
         </ul>
       </div>
     </el-dialog>
@@ -526,6 +544,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings2,
   Share2,
   ShieldAlert,
   Sparkles,
@@ -574,6 +593,7 @@ const STORAGE_TABS = 'dbhub_query_tabs_v2'
 const STORAGE_SPLIT = 'dbhub_query_split'
 const STORAGE_PINNED = 'dbhub_history_pinned'
 const STORAGE_REDIS_PATTERNS = 'dbhub_redis_patterns'
+const STORAGE_EDITOR_OPTS = 'dbhub_editor_opts'
 
 function loadTabsFromStorage(): { tabs: EditorTab[]; active: number } | null {
   try {
@@ -670,6 +690,52 @@ function startSplitterDrag(e: MouseEvent) {
 const monacoReady = ref(false)
 const monacoRefs = reactive<Record<number, any>>({})
 
+// 编辑器选项
+const minimapEnabled = ref(false)
+const autoLimitEnabled = ref(true)
+const editorStats = reactive({ chars: 0, lines: 1, selected: 0 })
+try {
+  const raw = localStorage.getItem(STORAGE_EDITOR_OPTS)
+  if (raw) {
+    const parsed = JSON.parse(raw)
+    minimapEnabled.value = !!parsed.minimap
+    autoLimitEnabled.value = parsed.autoLimit !== false
+  }
+} catch {}
+watch([minimapEnabled, autoLimitEnabled], () => {
+  try {
+    localStorage.setItem(STORAGE_EDITOR_OPTS, JSON.stringify({ minimap: minimapEnabled.value, autoLimit: autoLimitEnabled.value }))
+  } catch {}
+})
+
+function updateEditorStats() {
+  const sql = currentTab.value.sql || ''
+  editorStats.chars = sql.length
+  editorStats.lines = sql ? sql.split('\n').length : 1
+}
+watch(() => currentTab.value.sql, updateEditorStats, { immediate: true })
+function onSelectionChange(len: number) {
+  editorStats.selected = len
+}
+function onEditorOptionCommand(cmd: string) {
+  if (cmd === 'toggle-minimap') {
+    minimapEnabled.value = !minimapEnabled.value
+    ElMessage.success(minimapEnabled.value ? '已开启小地图' : '已关闭小地图')
+  } else if (cmd === 'toggle-autolimit') {
+    autoLimitEnabled.value = !autoLimitEnabled.value
+    ElMessage.success(autoLimitEnabled.value ? '已开启自动 LIMIT 1000' : '已关闭自动 LIMIT')
+  } else if (cmd === 'add-limit') {
+    const sql = currentTab.value.sql
+    if (!sql.toUpperCase().includes('LIMIT')) {
+      const monaco = monacoRefs[currentTab.value.id]
+      if (monaco) monaco.insertText(' LIMIT 100')
+      else currentTab.value.sql = sql + ' LIMIT 100'
+    } else {
+      ElMessage.info('已包含 LIMIT')
+    }
+  }
+}
+
 onMounted(() => {
   import('monaco-editor')
     .then(() => {
@@ -741,6 +807,29 @@ function isDangerousSQL(sql: string) {
   return /\b(DELETE|UPDATE|DROP|TRUNCATE|ALTER)\b/.test(up)
 }
 
+function getExecutionSQL(): string {
+  // 优先使用 Monaco 选中文本
+  const monaco = monacoRefs[currentTab.value.id]
+  if (monaco) {
+    try {
+      const sel = monaco.getSelection?.()
+      if (sel && sel.trim().length) return sel.trim()
+    } catch {}
+  }
+  return currentTab.value.sql.trim()
+}
+
+function applyAutoLimit(sql: string): string {
+  if (!autoLimitEnabled.value) return sql
+  const up = sql.toUpperCase()
+  // 仅对单条 SELECT 且无 LIMIT 的语句自动加 LIMIT 1000
+  if (!up.startsWith('SELECT')) return sql
+  if (up.includes('LIMIT')) return sql
+  // 如果包含多条语句（分号），不自动加
+  if ((sql.match(/;/g) || []).length > 1) return sql
+  return `${sql.replace(/;?\s*$/, '')} LIMIT 1000`
+}
+
 async function runQuery() {
   if (!currentConn.value) {
     ElMessage.warning('请先在左侧选择数据源')
@@ -750,11 +839,14 @@ async function runQuery() {
     ElMessage.info('Redis 不支持 SQL，请使用 Redis 浏览页签')
     return
   }
-  const sql = currentTab.value.sql.trim()
+  let sql = getExecutionSQL()
   if (!sql) {
     ElMessage.warning('SQL 内容不能为空')
     return
   }
+  const originalSQL = sql
+  sql = applyAutoLimit(sql)
+  const autoLimited = sql !== originalSQL
   if (currentConn.value.environment === 'prod' && isDangerousSQL(sql)) {
     try {
       await ElMessageBox.confirm(
@@ -771,7 +863,7 @@ async function runQuery() {
   resetGrid()
   viewMode.value = 'sql'
   resultTab.value = 'result'
-  log(`开始执行：${sql.replace(/\s+/g, ' ').slice(0, 80)}`)
+  log(`${autoLimited ? '[自动 LIMIT 1000] ' : ''}开始执行：${sql.replace(/\s+/g, ' ').slice(0, 80)}`)
   try {
     const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal)
     lastDuration.value = res.duration_ms
@@ -779,7 +871,7 @@ async function runQuery() {
       grid.columns = res.columns ?? []
       grid.rows = res.rows ?? []
       grid.truncated = Boolean(res.truncated)
-      log(`查询成功，返回 ${grid.rows.length} 行，耗时 ${res.duration_ms} ms`, 'success')
+      log(`查询成功，返回 ${grid.rows.length} 行，耗时 ${res.duration_ms} ms${autoLimited ? '（已自动 LIMIT）' : ''}`, 'success')
     } else {
       writeResult.value = res
       log(`执行成功，影响 ${res.affected_rows ?? 0} 行，耗时 ${res.duration_ms} ms`, 'success')
@@ -973,14 +1065,17 @@ const snippetForm = reactive({ name: '', sql: '', visibility: 'private' as 'priv
 const shortcutsOpen = ref(false)
 
 const shortcuts = [
-  { keys: '⌘ + Enter', desc: '运行查询' },
+  { keys: '⌘ + Enter', desc: '运行查询（选中仅执行选中）' },
   { keys: '⇧ + ⌘ + F', desc: '格式化 SQL' },
   { keys: '⌘ + /', desc: '注释/取消注释' },
   { keys: 'Ctrl + Space', desc: '触发补全' },
   { keys: '?', desc: '打开快捷键面板' },
   { keys: '拖拽分割线', desc: '调整编辑器/结果比例' },
   { keys: '单击单元格', desc: '复制单元格' },
-  { keys: '右键表名', desc: '生成 SELECT / 复制' },
+  { keys: '双击行', desc: '打开行详情' },
+  { keys: '右键单元格', desc: '复制行 JSON/INSERT/列名' },
+  { keys: '↑↓', desc: '结果区键盘导航' },
+  { keys: '拖拽表名', desc: '拖拽表到编辑器插入' },
 ]
 
 function loadSnippets() {
@@ -1033,7 +1128,7 @@ async function deleteTeamSnippet(id: number) {
 }
 
 function openSnippetDialog() {
-  const sql = currentTab.value.sql.trim()
+  const sql = getExecutionSQL()
   if (!sql) {
     ElMessage.warning('当前编辑器无 SQL')
     return
@@ -1060,7 +1155,6 @@ async function saveSnippet() {
   try {
     localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value.slice(0, 100)))
   } catch {}
-  // 同步到后端
   try {
     const { snippetApi } = await import('../../api/snippet')
     await snippetApi.create({
@@ -1145,7 +1239,7 @@ async function explainQuery() {
     ElMessage.warning('请先选择数据源')
     return
   }
-  const sql = currentTab.value.sql.trim()
+  const sql = getExecutionSQL()
   if (!sql) {
     ElMessage.warning('SQL 为空')
     return
@@ -1188,7 +1282,6 @@ function cancelQuery() {
   running.value = false
 }
 
-// 监听 ? 打开快捷键
 function onKeydown(e: KeyboardEvent) {
   if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const target = e.target as HTMLElement
@@ -1199,8 +1292,6 @@ function onKeydown(e: KeyboardEvent) {
 onMounted(() => {
   window.addEventListener('keydown', onKeydown)
 })
-// 需要在组件卸载时移除，但 onMounted 已有另一个，此处复用
-// 为避免重复监听，实际在下面 onMounted 中合并处理，临时保留
 
 try {
   const raw = localStorage.getItem(STORAGE_REDIS_PATTERNS)
@@ -1261,7 +1352,6 @@ async function loadRedisKeys() {
     const res = await workbenchApi.redisKeys(currentConn.value.id, redisPattern.value || '*', 200, redisTypeFilter.value)
     redisKeys.value = res.items
     redisKeysTotal.value = (res as any).total ?? res.items.length
-    // 记录 pattern 历史
     const pat = redisPattern.value.trim()
     if (pat && pat !== '*' && !redisPatternHistory.value.includes(pat)) {
       redisPatternHistory.value = [pat, ...redisPatternHistory.value].slice(0, 10)
@@ -1365,7 +1455,6 @@ async function updateTTL() {
   }
 }
 
-// ---------- Tab 管理 ----------
 function addTab() {
   const t = newTab()
   tabs.value.push(t)
@@ -1397,6 +1486,13 @@ function onGenerateSelect(payload: { conn: ConnectionItem; database: string; sch
   }
   currentTab.value.database = payload.database
   ElMessage.success(`已生成 SELECT：${payload.table.name}`)
+}
+
+function onInsertTableName(name: string) {
+  const tab = currentTab.value
+  const monaco = monacoRefs[tab.id]
+  if (monaco) monaco.insertText(name)
+  else tab.sql = tab.sql ? `${tab.sql} ${name}` : name
 }
 
 function onAiInsert(sql: string) {

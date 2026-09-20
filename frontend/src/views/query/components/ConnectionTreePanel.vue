@@ -5,13 +5,41 @@
         <h2 class="text-sm font-medium flex items-center gap-2">
           <FolderTree class="w-4 h-4 text-indigo-300" /> 数据源
         </h2>
-        <button class="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" aria-label="刷新连接树" @click="reload(true)">
-          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
-        </button>
+        <div class="flex items-center gap-1">
+          <button class="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" title="全部折叠" @click="collapseAll">
+            <ChevronsUpDown class="w-3.5 h-3.5" />
+          </button>
+          <button class="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" aria-label="刷新连接树" @click="reload(true)">
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
+          </button>
+        </div>
       </div>
       <div class="relative">
         <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
         <input v-model.trim="keyword" class="glass-input !py-1.5 !pl-8 text-xs w-full" placeholder="搜索连接/库/表" />
+      </div>
+      <!-- 收藏与最近 -->
+      <div v-if="favorites.length" class="mt-1 rounded-xl bg-amber-500/5 border border-amber-400/10 p-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[11px] text-amber-300/70 flex items-center gap-1"><Star class="w-3 h-3" /> 收藏的表</span>
+          <button class="text-[10px] text-white/30 hover:text-white/60" @click="clearFavorites">清空</button>
+        </div>
+        <div class="space-y-0.5">
+          <button v-for="fav in favorites" :key="fav.key" class="tree-row !py-1 text-[11px]" @click="jumpFavorite(fav)" draggable="true" @dragstart="onDragTable($event, fav.name)">
+            <Table2 class="w-3 h-3 text-amber-300" /><span class="truncate">{{ fav.name }}</span><span class="text-[10px] text-white/30 truncate">{{ fav.db }}</span>
+          </button>
+        </div>
+      </div>
+      <div v-if="recentTables.length" class="mt-1 rounded-xl bg-white/5 border border-white/10 p-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-[11px] text-white/40 flex items-center gap-1"><Clock3 class="w-3 h-3" /> 最近浏览</span>
+          <button class="text-[10px] text-white/30 hover:text-white/60" @click="clearRecent">清空</button>
+        </div>
+        <div class="space-y-0.5">
+          <button v-for="rt in recentTables.slice(0,5)" :key="rt.key" class="tree-row !py-1 text-[11px]" @click="jumpFavorite(rt)" draggable="true" @dragstart="onDragTable($event, rt.name)">
+            <History class="w-3 h-3 text-white/30" /><span class="truncate">{{ rt.name }}</span><span class="text-[10px] text-white/30 truncate">{{ rt.db }}</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -71,11 +99,16 @@
                           <button
                             class="tree-row flex-1"
                             :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, sch, t.name) }"
+                            draggable="true"
+                            @dragstart="onDragTable($event, t.name)"
                             @click="emitTable(conn, db.name, sch, t)"
                             @contextmenu.prevent="openContextMenu($event, conn, db.name, sch, t)"
                           >
                             <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
                             <span class="truncate">{{ t.name }}</span>
+                          </button>
+                          <button class="opacity-0 group-hover/table:opacity-100 p-1 text-amber-300/60 hover:text-amber-300" :class="{ 'opacity-100': isFavorite(conn.id, db.name, sch, t.name) }" @click.stop="toggleFavorite(conn, db.name, sch, t)">
+                            <Star class="w-3 h-3" :class="{ 'fill-amber-300': isFavorite(conn.id, db.name, sch, t.name) }" />
                           </button>
                           <button class="opacity-0 group-hover/table:opacity-100 p-1 text-white/30 hover:text-white" @click.stop="openContextMenu($event, conn, db.name, sch, t)">
                             <MoreHorizontal class="w-3 h-3" />
@@ -99,11 +132,16 @@
                       <button
                         class="tree-row flex-1"
                         :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, '', t.name) }"
+                        draggable="true"
+                        @dragstart="onDragTable($event, t.name)"
                         @click="emitTable(conn, db.name, '', t)"
                         @contextmenu.prevent="openContextMenu($event, conn, db.name, '', t)"
                       >
                         <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
                         <span class="truncate">{{ t.name }}</span>
+                      </button>
+                      <button class="opacity-0 group-hover/table:opacity-100 p-1 text-amber-300/60 hover:text-amber-300" :class="{ 'opacity-100': isFavorite(conn.id, db.name, '', t.name) }" @click.stop="toggleFavorite(conn, db.name, '', t)">
+                        <Star class="w-3 h-3" :class="{ 'fill-amber-300': isFavorite(conn.id, db.name, '', t.name) }" />
                       </button>
                       <button class="opacity-0 group-hover/table:opacity-100 p-1 text-white/30 hover:text-white" @click.stop="openContextMenu($event, conn, db.name, '', t)">
                         <MoreHorizontal class="w-3 h-3" />
@@ -121,7 +159,7 @@
     <!-- 右键菜单 -->
     <div
       v-if="contextMenu.visible"
-      class="fixed z-[9999] glass-panel !p-1 min-w-[180px] shadow-2xl border border-white/15"
+      class="fixed z-[9999] glass-panel !p-1 min-w-[200px] shadow-2xl border border-white/15"
       :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
       @mouseleave="contextMenu.visible = false"
     >
@@ -131,6 +169,13 @@
       <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxSelect">
         <Code2 class="w-3.5 h-3.5" /> 生成 SELECT
       </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxInsertName">
+        <Plus class="w-3.5 h-3.5" /> 插入表名到编辑器
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxToggleFav">
+        <Star class="w-3.5 h-3.5" /> {{ isFavorite(contextMenu.conn?.id || 0, contextMenu.database, contextMenu.schema, contextMenu.table?.name || '') ? '取消收藏' : '收藏表' }}
+      </button>
+      <div class="h-px bg-white/10 my-1" />
       <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxCopyName">
         <Copy class="w-3.5 h-3.5" /> 复制表名
       </button>
@@ -146,16 +191,21 @@ import { computed, reactive, ref, shallowReactive } from 'vue'
 import {
   Activity,
   ChevronRight,
+  ChevronsUpDown,
+  Clock3,
   Code2,
   Copy,
   Database,
   Eye,
   Folder,
   FolderTree,
+  History,
   KeyRound,
   MoreHorizontal,
+  Plus,
   RefreshCw,
   Search,
+  Star,
   Table2,
   Waypoints,
 } from 'lucide-vue-next'
@@ -170,6 +220,7 @@ const emit = defineEmits<{
   (e: 'redis-overview', conn: ConnectionItem): void
   (e: 'redis-keys', conn: ConnectionItem): void
   (e: 'generate-select', payload: { conn: ConnectionItem; database: string; schema: string; table: TableInfo }): void
+  (e: 'insert-table-name', name: string): void
 }>()
 
 const connections = ref<ConnectionItem[]>([])
@@ -197,6 +248,58 @@ const contextMenu = reactive({
   table: null as TableInfo | null,
 })
 
+// 收藏与最近
+interface FavItem { key: string; name: string; db: string; schema: string; connId: number; conn: ConnectionItem; table: TableInfo }
+const STORAGE_FAV = 'dbhub_table_fav'
+const STORAGE_RECENT = 'dbhub_table_recent'
+const favorites = ref<FavItem[]>([])
+const recentTables = ref<FavItem[]>([])
+try {
+  const rawFav = localStorage.getItem(STORAGE_FAV)
+  if (rawFav) favorites.value = JSON.parse(rawFav)
+  const rawRecent = localStorage.getItem(STORAGE_RECENT)
+  if (rawRecent) recentTables.value = JSON.parse(rawRecent)
+} catch {}
+function persistFav() {
+  try { localStorage.setItem(STORAGE_FAV, JSON.stringify(favorites.value.slice(0, 30))) } catch {}
+}
+function persistRecent() {
+  try { localStorage.setItem(STORAGE_RECENT, JSON.stringify(recentTables.value.slice(0, 20))) } catch {}
+}
+function isFavorite(connId: number, db: string, schema: string, tableName: string) {
+  const key = `${connId}:${db}:${schema}:${tableName}`
+  return favorites.value.some((f) => f.key === key)
+}
+function toggleFavorite(conn: ConnectionItem, db: string, schema: string, table: TableInfo) {
+  const key = `${conn.id}:${db}:${schema}:${table.name}`
+  const idx = favorites.value.findIndex((f) => f.key === key)
+  if (idx >= 0) favorites.value.splice(idx, 1)
+  else favorites.value.unshift({ key, name: table.name, db, schema, connId: conn.id, conn, table })
+  persistFav()
+}
+function clearFavorites() { favorites.value = []; persistFav() }
+function clearRecent() { recentTables.value = []; persistRecent() }
+function addRecent(conn: ConnectionItem, db: string, schema: string, table: TableInfo) {
+  const key = `${conn.id}:${db}:${schema}:${table.name}`
+  recentTables.value = recentTables.value.filter((r) => r.key !== key)
+  recentTables.value.unshift({ key, name: table.name, db, schema, connId: conn.id, conn, table })
+  recentTables.value = recentTables.value.slice(0, 20)
+  persistRecent()
+}
+function jumpFavorite(fav: FavItem) {
+  // 尝试找到连接对象
+  const conn = connections.value.find((c) => c.id === fav.connId) || fav.conn
+  if (conn) emit('preview-table', { conn, database: fav.db, schema: fav.schema, table: fav.table })
+}
+function onDragTable(e: DragEvent, name: string) {
+  e.dataTransfer?.setData('text/plain', name)
+}
+function collapseAll() {
+  expandedConns.value = new Set()
+  openSchemaNodes.value = new Set()
+  openTableNodes.value = new Set()
+}
+
 let loadingPromise: Promise<void> | null = null
 async function reload(force = false) {
   if (loadingPromise && !force) return loadingPromise
@@ -221,7 +324,6 @@ const filteredConnections = computed(() => {
     if (c.name.toLowerCase().includes(kw)) return true
     const dbList = dbs[c.id] || []
     if (dbList.some((d) => d.name.toLowerCase().includes(kw))) return true
-    // 检查表
     const prefix = `${c.id}:`
     return Object.keys(tables).some((k) => k.startsWith(prefix) && tables[k]?.some((t) => t.name.toLowerCase().includes(kw)))
   })
@@ -330,6 +432,7 @@ async function toggleTables(conn: ConnectionItem, db: string, sch: string) {
 
 function emitTable(conn: ConnectionItem, db: string, sch: string, table: TableInfo) {
   activeTableKey.value = `${conn.id}:${db}:${sch}:${table.name}`
+  addRecent(conn, db, sch, table)
   emit('preview-table', { conn, database: db, schema: sch, table })
 }
 function isActiveTable(connId: number, db: string, sch: string, name: string) {
@@ -363,6 +466,18 @@ function ctxPreview() {
 function ctxSelect() {
   if (contextMenu.conn && contextMenu.table) {
     emit('generate-select', { conn: contextMenu.conn, database: contextMenu.database, schema: contextMenu.schema, table: contextMenu.table })
+  }
+  contextMenu.visible = false
+}
+function ctxInsertName() {
+  if (contextMenu.table) {
+    emit('insert-table-name', contextMenu.table.name)
+  }
+  contextMenu.visible = false
+}
+function ctxToggleFav() {
+  if (contextMenu.conn && contextMenu.table) {
+    toggleFavorite(contextMenu.conn, contextMenu.database, contextMenu.schema, contextMenu.table)
   }
   contextMenu.visible = false
 }
