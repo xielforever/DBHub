@@ -561,3 +561,66 @@ curl http://localhost:8080/api/health
   { "id": 2, "username": "dev1", "role": "developer" }
 ] }
 ```
+
+## 11. 报表中心 (Reports，M3/M4)
+
+> 读：登录可用；写（创建/编辑/删除/收藏）：`admin`、`developer`，`readonly` 403；私有报表仅 owner/admin 可见。
+
+### 11.1 创建报表（M3 工作台另存为报表）
+
+**POST** `/api/v1/reports`（写角色，记审计）
+
+```json
+{
+  "name": "月度销售趋势",
+  "description": "按月聚合",
+  "connection_id": 1,
+  "database": "postgres",
+  "sql": "SELECT date_trunc('month', created_at) AS month, SUM(total_amount) FROM shop.orders GROUP BY 1 ORDER BY 1",
+  "chart_type": "bar",
+  "chart_config": {
+    "dimension": "month",
+    "metrics": ["sum"],
+    "aggregation": "sum",
+    "sort": "asc",
+    "topN": 20
+  },
+  "visibility": "private"
+}
+```
+
+- `name` 必填 ≤128，`sql` 必填单语句，`chart_type ∈ table|bar|line|pie|metric`，`visibility ∈ private|shared`
+- `chart_config` 为 ChartCard 配置：维度/指标/聚合/排序/TopN
+- 成功返回报表详情，含 `id/owner_user_id/created_at` 等
+
+### 11.2 报表列表
+
+**GET** `/api/v1/reports?q=&scope=mine|starred|shared|all&connection_id=&page=1&page_size=20`
+
+- `scope=mine` 仅本人，`starred` 仅收藏，`shared` 仅共享，`all` 全部（私有仅本人/admin可见）
+- 响应 `{ items: [Report], total, page, page_size }`，Report：
+```json
+{
+  "id": 1, "name": "月度销售", "description": "", "connection_id": 1, "database_name": "postgres",
+  "sql_text": "SELECT ...", "chart_type": "bar", "chart_config": {"dimension":"month","metrics":["sum"]},
+  "visibility": "private", "owner_user_id": 1, "owner_name": "admin",
+  "starred_by": [1], "starred": true,
+  "created_at": "2026-09-20T10:00:00Z", "updated_at": "2026-09-20T10:00:00Z"
+}
+```
+
+### 11.3 报表详情 / 更新 / 删除
+
+- **GET** `/api/v1/reports/{id}`：私有报表仅 owner/admin 可见，否则 403
+- **PUT** `/api/v1/reports/{id}`：仅 owner/admin 可编辑，请求体同创建（部分字段）
+- **DELETE** `/api/v1/reports/{id}`：仅 owner/admin
+
+### 11.4 报表收藏
+
+**POST** `/api/v1/reports/{id}/star` `{ "star": true|false }` → `{ "starred": true }`，任意登录用户，幂等
+
+### 11.5 仪表盘与分享（M4 预留）
+
+- 迁移已包含 `sys_dashboards`、`sys_share_tokens`，API 在 M4 实现：`/dashboards`、`/shares`、`/s/:token` 免登录只读
+- 分享 token 仅存 SHA-256 哈希，支持有效期与吊销
+
