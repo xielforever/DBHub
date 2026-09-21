@@ -89,6 +89,10 @@
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
+              <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" :class="paramDetected ? 'bg-amber-500/20 text-amber-300 border-amber-400/30' : ''" @click="paramDrawerOpen = true">
+                <Braces class="w-3.5 h-3.5" /> 参数
+                <span v-if="paramDetected" class="px-1 py-0.5 rounded-full bg-amber-400/20 text-[10px]">{{ paramDetected }}</span>
+              </button>
               <el-dropdown trigger="click" popper-class="glass-popper" @command="onEditorOptionCommand">
                 <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1"><Settings2 class="w-3.5 h-3.5" /> 选项</button>
                 <template #dropdown>
@@ -240,6 +244,10 @@
 
           <el-tab-pane label="统计" name="stats" class="flex flex-col min-h-0 flex-1">
             <ColumnStatsPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" />
+          </el-tab-pane>
+
+          <el-tab-pane label="快照" name="snapshot" class="flex flex-col min-h-0 flex-1">
+            <ResultSnapshotPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :sql="currentTab.sql" :duration="lastDuration" @restore="onRestoreSnapshot" />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -669,6 +677,11 @@
       </div>
     </el-dialog>
 
+    <!-- 参数面板 -->
+    <el-drawer v-model="paramDrawerOpen" title="查询参数" direction="rtl" size="380px" class="glass-drawer">
+      <ParamPanel :sql="currentTab.sql" @apply="onParamApply" @update:values="onParamValuesUpdate" />
+    </el-drawer>
+
     <!-- Redis 新建 Key -->
     <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
@@ -714,6 +727,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Bookmark,
+  Braces,
   CheckCircle2,
   Copy,
   Database,
@@ -750,6 +764,8 @@ import ResultGrid from './components/ResultGrid.vue'
 import ExplainPlan from './components/ExplainPlan.vue'
 import RedisKeyTree from './components/RedisKeyTree.vue'
 import ColumnStatsPane from './components/ColumnStatsPane.vue'
+import ParamPanel from './components/ParamPanel.vue'
+import ResultSnapshotPane from './components/ResultSnapshotPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -1035,6 +1051,20 @@ async function runQuery() {
     ElMessage.warning('SQL 内容不能为空')
     return
   }
+  // 参数化检测：如果有 {{}} 或 :param 且未填充，提示打开参数面板
+  if (paramDetected.value > 0) {
+    const hasUnfilled = Object.keys(paramValues.value).length < paramDetected.value
+    // 简单检查：若 sql 中仍包含 {{ 或 :param 且对应值为空，则打开参数面板
+    const missing = (sql.match(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g) || []).some((raw: string) => {
+      const name = raw.replace(/\{\{|\}\}|\s/g, '')
+      return !paramValues.value[name]
+    })
+    if (missing && hasUnfilled) {
+      ElMessage.info(`检测到 ${paramDetected.value} 个参数，请先填写参数`)
+      paramDrawerOpen.value = true
+      return
+    }
+  }
   const originalSQL = sql
   sql = applyAutoLimit(sql)
   const autoLimited = sql !== originalSQL
@@ -1074,8 +1104,8 @@ async function runQuery() {
       log(err instanceof Error ? err.message : '执行失败', 'error')
       resultTab.value = 'message'
     }
-    if (transactionActive.value) transactionQueries.value++
   } finally {
+    if (transactionActive.value) transactionQueries.value++
     running.value = false
     abortController.value = null
     if (resultTab.value === 'history') loadHistory()
@@ -1268,6 +1298,13 @@ const transactionActive = ref(false)
 const transactionId = ref('')
 const transactionStartedAt = ref('')
 const transactionQueries = ref(0)
+const paramDrawerOpen = ref(false)
+const paramValues = ref<Record<string, string>>({})
+const paramDetected = computed(() => {
+  const sql = currentTab.value.sql || ''
+  const count = (sql.match(/\{\{\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\}\}/g) || []).length + (sql.match(/(?<!:):[a-zA-Z_][a-zA-Z0-9_]*\b/g) || []).length + (sql.match(/\$\d+\b/g) || []).length
+  return count
+})
 const isExplainResult = computed(() => {
   const cols = grid.columns.map(c => c.toLowerCase())
   return cols.includes('query plan') || cols.includes('select_type') || (grid.columns.length === 1 && (grid.columns[0] || '').toLowerCase().includes('plan'))
@@ -1949,6 +1986,64 @@ async function loadTransactionStatus() {
     if (res.queries !== undefined) transactionQueries.value = res.queries
     if (!res.active) { transactionId.value = ''; transactionStartedAt.value = ''; transactionQueries.value = 0 }
   } catch {}
+}
+
+function onParamValuesUpdate(v: Record<string, string>) {
+  paramValues.value = v
+}
+function onParamApply(values: Record<string, string>, finalSql: string) {
+  paramValues.value = values
+  paramDrawerOpen.value = false
+  // 直接执行替换后 SQL
+  // 临时替换执行，执行完恢复？我们直接用 finalSql 执行，不改原 SQL
+  // 为了让用户看到替换结果，我们把 finalSql 存到一个临时变量并调用 runQueryWithSql
+  runQueryWithSql(finalSql)
+}
+async function runQueryWithSql(sqlOverride: string) {
+  if (!currentConn.value) { ElMessage.warning('请先在左侧选择数据源'); return }
+  if (currentConn.value.type === 'redis') { ElMessage.info('Redis 不支持 SQL'); return }
+  let sql = sqlOverride.trim()
+  if (!sql) { ElMessage.warning('SQL 为空'); return }
+  sql = applyAutoLimit(sql)
+  if (currentConn.value.environment === 'prod' && isDangerousSQL(sql)) {
+    try {
+      await ElMessageBox.confirm(`生产环境 ${currentConn.value.name} 即将执行写操作：\n${sql.slice(0,200)}\n\n确认继续？`, '生产环境二次确认', { type: 'warning' })
+    } catch { return }
+  }
+  running.value = true
+  abortController.value = new AbortController()
+  resetGrid()
+  viewMode.value = 'sql'
+  resultTab.value = 'result'
+  log(`开始执行（参数化）：${sql.replace(/\s+/g,' ').slice(0,80)}`)
+  try {
+    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal, paramValues.value)
+    lastDuration.value = res.duration_ms
+    if (res.kind === 'query') {
+      grid.columns = res.columns ?? []
+      grid.rows = res.rows ?? []
+      grid.truncated = Boolean(res.truncated)
+      log(`查询成功，返回 ${grid.rows.length} 行，耗时 ${res.duration_ms} ms`, 'success')
+    } else {
+      writeResult.value = res
+      log(`执行成功，影响 ${res.affected_rows ?? 0} 行，耗时 ${res.duration_ms} ms`, 'success')
+    }
+  } catch (err: any) {
+    if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') log('查询已取消','info')
+    else { log(err instanceof Error ? err.message : '执行失败','error'); resultTab.value = 'message' }
+  } finally {
+    running.value = false
+    abortController.value = null
+    if (transactionActive.value) transactionQueries.value++
+    if (resultTab.value === 'history') loadHistory()
+  }
+}
+function onRestoreSnapshot(snap: any) {
+  grid.columns = snap.columns
+  grid.rows = snap.rows
+  lastDuration.value = snap.duration_ms
+  resultTab.value = 'result'
+  ElMessage.success(`已恢复快照：${snap.name}`)
 }
 
 function addTab() {

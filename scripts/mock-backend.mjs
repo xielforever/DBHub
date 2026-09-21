@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.11.0', env: 'arena', note: 'Step11: 事务模式+列统计直方图+EXPLAIN可视化+Redis树' })
+    return ok(res, { status: 'ok', version: 'mock-0.12.0', env: 'arena', note: 'Step12: 参数化+快照对比+事务+统计+EXPLAIN可视化+Redis树' })
   }
 
   // 认证
@@ -440,11 +440,27 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { active: false })
   }
 
-  // 查询执行 - 支持 EXPLAIN
+  // 查询执行 - 支持 EXPLAIN + 参数化
   if (pathname === '/api/v1/query/execute' && method === 'POST') {
     const body = await readBody(req)
     const rawSql = body.sql || ''
-    const sql = rawSql.toLowerCase()
+    const params = body.params || {}
+    // 参数替换预览（mock 仅记录，不真实替换执行，仅用于演示）
+    let replacedSql = rawSql
+    try {
+      for (const [k, v] of Object.entries(params)) {
+        const esc = String(v).replace(/'/g, "''")
+        const quoted = isNaN(Number(v)) || v === '' ? `'${esc}'` : String(v)
+        if (k.startsWith('$')) {
+          replacedSql = replacedSql.split(k).join(quoted)
+        } else {
+          replacedSql = replacedSql.split(`{{${k}}}`).join(quoted)
+          replacedSql = replacedSql.split(`{{ ${k} }}`).join(quoted)
+          replacedSql = replacedSql.replace(new RegExp(`(?<!:):${k}\\b`, 'g'), quoted)
+        }
+      }
+    } catch {}
+    const sql = replacedSql.toLowerCase()
     const cid = Number(body.connection_id)
     if (globalThis.__transactions && globalThis.__transactions[cid]) {
       globalThis.__transactions[cid].queries = (globalThis.__transactions[cid].queries || 0) + 1
