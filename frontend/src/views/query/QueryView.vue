@@ -49,7 +49,13 @@
             class="flex flex-col min-h-0 flex-1"
           >
             <template #label>
-              <span class="flex items-center gap-2 px-1">
+              <span
+                class="flex items-center gap-2 px-1"
+                draggable="true"
+                @dragstart="onTabDragStart($event, tab.id)"
+                @dragover.prevent="onTabDragOver($event)"
+                @drop="onTabDrop($event, tab.id)"
+              >
                 <FileCode2 class="w-3.5 h-3.5" />{{ tab.name }}
                 <span v-if="tab.sql.trim().length" class="w-1.5 h-1.5 rounded-full bg-indigo-400/80 ml-1" />
               </span>
@@ -100,6 +106,13 @@
                     <el-dropdown-item command="toggle-minimap">{{ minimapEnabled ? '关闭小地图' : '开启小地图' }}</el-dropdown-item>
                     <el-dropdown-item command="toggle-autolimit">{{ autoLimitEnabled ? '关闭自动 LIMIT 1000' : '开启自动 LIMIT 1000' }}</el-dropdown-item>
                     <el-dropdown-item command="add-limit">为当前 SELECT 添加 LIMIT 100</el-dropdown-item>
+                    <el-dropdown-item divided command="theme-dark">主题：暗色玻璃</el-dropdown-item>
+                    <el-dropdown-item command="theme-light">主题：明亮</el-dropdown-item>
+                    <el-dropdown-item command="theme-hc">主题：高对比</el-dropdown-item>
+                    <el-dropdown-item divided command="font-inc">字体增大</el-dropdown-item>
+                    <el-dropdown-item command="font-dec">字体减小</el-dropdown-item>
+                    <el-dropdown-item command="toggle-wrap">{{ editorWordWrap === 'on' ? '关闭自动换行' : '开启自动换行' }}</el-dropdown-item>
+                    <el-dropdown-item divided command="command-palette">命令面板 ⌘K</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
@@ -149,6 +162,9 @@
                 :tables="allTableNames"
                 :columns="allColumnNames"
                 :minimap="minimapEnabled"
+                :theme="editorTheme"
+                :font-size="editorFontSize"
+                :word-wrap="editorWordWrap"
                 :placeholder="currentConn && currentConn.type === 'redis'
                   ? '-- Redis 数据源不支持 SQL，请在左下方结果区浏览键空间'
                   : '-- 先在左侧选择数据源与表，然后在此编写 SQL，Ctrl/Cmd + Enter 运行，选中部分 SQL 仅执行选中段'"
@@ -698,6 +714,8 @@
       <ParamPanel :sql="currentTab.sql" @apply="onParamApply" @update:values="onParamValuesUpdate" />
     </el-drawer>
 
+    <CommandPalette ref="commandPaletteRef" :commands="paletteCommands" />
+
     <!-- Redis 新建 Key -->
     <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
@@ -742,8 +760,10 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  BarChart3,
   Bookmark,
   Braces,
+  Camera,
   CheckCircle2,
   GitCompare,
 
@@ -786,6 +806,7 @@ import ParamPanel from './components/ParamPanel.vue'
 import ResultSnapshotPane from './components/ResultSnapshotPane.vue'
 import AiOptimizePane from './components/AiOptimizePane.vue'
 import ExplainComparePane from './components/ExplainComparePane.vue'
+import CommandPalette from './components/CommandPalette.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -943,6 +964,9 @@ watch(() => currentTab.value.sql, updateEditorStats, { immediate: true })
 function onSelectionChange(len: number) {
   editorStats.selected = len
 }
+function persistTheme() {
+  try { localStorage.setItem(STORAGE_THEME, JSON.stringify({ theme: editorTheme.value, fontSize: editorFontSize.value, wordWrap: editorWordWrap.value })) } catch {}
+}
 function onEditorOptionCommand(cmd: string) {
   if (cmd === 'toggle-minimap') {
     minimapEnabled.value = !minimapEnabled.value
@@ -959,8 +983,70 @@ function onEditorOptionCommand(cmd: string) {
     } else {
       ElMessage.info('已包含 LIMIT')
     }
+  } else if (cmd === 'theme-dark') {
+    editorTheme.value = 'dbhub-dark'
+    persistTheme()
+    ElMessage.success('已切换暗色玻璃主题')
+  } else if (cmd === 'theme-light') {
+    editorTheme.value = 'dbhub-light'
+    persistTheme()
+    ElMessage.success('已切换明亮主题')
+  } else if (cmd === 'theme-hc') {
+    editorTheme.value = 'dbhub-hc'
+    persistTheme()
+    ElMessage.success('已切换高对比主题')
+  } else if (cmd === 'font-inc') {
+    editorFontSize.value = Math.min(24, editorFontSize.value + 1)
+    persistTheme()
+  } else if (cmd === 'font-dec') {
+    editorFontSize.value = Math.max(10, editorFontSize.value - 1)
+    persistTheme()
+  } else if (cmd === 'toggle-wrap') {
+    editorWordWrap.value = editorWordWrap.value === 'on' ? 'off' : 'on'
+    persistTheme()
+    ElMessage.success(editorWordWrap.value === 'on' ? '已开启自动换行' : '已关闭自动换行')
+  } else if (cmd === 'command-palette') {
+    commandPaletteRef.value?.open()
   }
 }
+
+let draggedTabId: number | null = null
+function onTabDragStart(e: DragEvent, id: number) {
+  draggedTabId = id
+  if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)) }
+}
+function onTabDragOver(e: DragEvent) {
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+function onTabDrop(e: DragEvent, targetId: number) {
+  e.preventDefault()
+  if (draggedTabId === null || draggedTabId === targetId) return
+  const fromIdx = tabs.value.findIndex(t => t.id === draggedTabId)
+  const toIdx = tabs.value.findIndex(t => t.id === targetId)
+  if (fromIdx === -1 || toIdx === -1) return
+  const moved = tabs.value.splice(fromIdx, 1)[0]
+  if (!moved) return
+  tabs.value.splice(toIdx, 0, moved)
+  draggedTabId = null
+}
+
+const paletteCommands = computed(() => [
+  { id: 'run', label: '运行查询', desc: '执行当前 SQL', icon: Play, iconBg: 'bg-indigo-500/20 text-indigo-300', shortcut: '⌘↵', keywords: ['run','执行'], action: () => runQuery() },
+  { id: 'format', label: '格式化 SQL', desc: '美化当前 SQL', icon: Wand2, iconBg: 'bg-violet-500/20 text-violet-300', shortcut: '⇧⌘F', keywords: ['format'], action: () => formatCurrent() },
+  { id: 'explain', label: 'EXPLAIN 执行计划', desc: '查看执行计划', icon: FileSearch, iconBg: 'bg-amber-500/20 text-amber-300', keywords: ['explain'], action: () => explainQuery() },
+  { id: 'new-tab', label: '新建查询标签', desc: '创建新的 SQL 编辑器', icon: Plus, iconBg: 'bg-emerald-500/20 text-emerald-300', keywords: ['new','tab'], action: () => addTab() },
+  { id: 'save-snippet', label: '收藏为片段', desc: '保存当前 SQL 为片段', icon: Bookmark, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['snippet','收藏'], action: () => openSnippetDialog() },
+  { id: 'snippet-list', label: '片段列表', desc: '查看已保存片段', icon: Library, iconBg: 'bg-white/10 text-white/50', keywords: ['snippet'], action: () => { snippetListOpen.value = true } },
+  { id: 'param-panel', label: '查询参数', desc: '打开参数面板', icon: Braces, iconBg: 'bg-amber-500/20 text-amber-300', keywords: ['param','参数'], action: () => { paramDrawerOpen.value = true } },
+  { id: 'snapshot', label: '保存快照', desc: '保存当前结果', icon: Camera, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['snapshot'], action: () => { resultTab.value = 'snapshot' } },
+  { id: 'ai-optimize', label: 'AI 优化', desc: 'AI 分析查询', icon: Sparkles, iconBg: 'bg-emerald-500/20 text-emerald-300', keywords: ['ai','优化'], action: () => { resultTab.value = 'ai-optimize' } },
+  { id: 'explain-compare', label: '执行计划对比', desc: '对比多个 EXPLAIN', icon: GitCompare, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['compare'], action: () => { resultTab.value = 'explain-compare' } },
+  { id: 'chart', label: '图表视图', desc: '切换到图表', icon: BarChart3, iconBg: 'bg-emerald-500/20 text-emerald-300', keywords: ['chart'], action: () => { resultTab.value = 'chart' } },
+  { id: 'stats', label: '统计视图', desc: '列统计与直方图', icon: Table2, iconBg: 'bg-white/10 text-white/50', keywords: ['stats'], action: () => { resultTab.value = 'stats' } },
+  { id: 'theme-dark', label: '主题：暗色玻璃', desc: '切换暗色主题', icon: Eye, iconBg: 'bg-white/10 text-white/50', keywords: ['theme'], action: () => { editorTheme.value = 'dbhub-dark'; persistTheme() } },
+  { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
+])
+
 
 onMounted(() => {
   import('monaco-editor')
@@ -1325,6 +1411,20 @@ const paramDetected = computed(() => {
   const count = (sql.match(/\{\{\s*[a-zA-Z_][a-zA-Z0-9_]*\s*\}\}/g) || []).length + (sql.match(/(?<!:):[a-zA-Z_][a-zA-Z0-9_]*\b/g) || []).length + (sql.match(/\$\d+\b/g) || []).length
   return count
 })
+const editorTheme = ref('dbhub-dark')
+const editorFontSize = ref(13)
+const editorWordWrap = ref<'on' | 'off'>('on')
+const commandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
+const STORAGE_THEME = 'dbhub_editor_theme'
+try {
+  const raw = localStorage.getItem(STORAGE_THEME)
+  if (raw) {
+    const parsed = JSON.parse(raw)
+    editorTheme.value = parsed.theme || 'dbhub-dark'
+    editorFontSize.value = parsed.fontSize || 13
+    editorWordWrap.value = parsed.wordWrap || 'on'
+  }
+} catch {}
 const isExplainResult = computed(() => {
   const cols = grid.columns.map(c => c.toLowerCase())
   return cols.includes('query plan') || cols.includes('select_type') || (grid.columns.length === 1 && (grid.columns[0] || '').toLowerCase().includes('plan'))
@@ -1567,6 +1667,15 @@ function cancelQuery() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    const target = e.target as HTMLElement
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') && !target.closest('.monaco-editor')) {
+      // allow in inputs except monaco
+    }
+    commandPaletteRef.value?.toggle()
+    return
+  }
   if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
     const target = e.target as HTMLElement
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return

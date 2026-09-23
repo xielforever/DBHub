@@ -17,12 +17,18 @@ const props = withDefaults(
     columns?: string[]
     placeholder?: string
     minimap?: boolean
+    theme?: string
+    fontSize?: number
+    wordWrap?: 'on' | 'off'
   }>(),
   {
     tables: () => [],
     columns: () => [],
     placeholder: '',
     minimap: false,
+    theme: 'dbhub-dark',
+    fontSize: 13,
+    wordWrap: 'on',
   },
 )
 
@@ -80,18 +86,40 @@ async function init() {
       'scrollbarSlider.hoverBackground': '#FFFFFF25',
     },
   })
+  monaco.editor.defineTheme('dbhub-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'keyword', foreground: '7C3AED' },
+      { token: 'string', foreground: '059669' },
+      { token: 'number', foreground: 'D97706' },
+    ],
+    colors: {
+      'editor.background': '#FFFFFF',
+      'editor.foreground': '#1F2937',
+      'editorLineNumber.foreground': '#9CA3AF',
+      'editor.selectionBackground': '#A5B4FC40',
+      'editor.lineHighlightBackground': '#F3F4F6',
+    },
+  })
+  monaco.editor.defineTheme('dbhub-hc', {
+    base: 'hc-black',
+    inherit: true,
+    rules: [],
+    colors: {},
+  })
 
   if (!containerRef.value) return
 
   editor = monaco.editor.create(containerRef.value, {
     value: props.modelValue || '',
     language: 'sql',
-    theme: 'dbhub-dark',
-    fontSize: 13,
+    theme: props.theme || 'dbhub-dark',
+    fontSize: props.fontSize || 13,
     lineHeight: 20,
     fontFamily: 'JetBrains Mono, Fira Code, Cascadia Code, Menlo, monospace',
     minimap: { enabled: !!props.minimap },
-    wordWrap: 'on',
+    wordWrap: props.wordWrap || 'on',
     scrollBeyondLastLine: false,
     automaticLayout: false,
     tabSize: 2,
@@ -209,6 +237,15 @@ watch(
     } catch {}
   },
 )
+watch(() => props.theme, (v) => {
+  try { monaco?.editor.setTheme(v || 'dbhub-dark') } catch {}
+})
+watch(() => props.fontSize, (v) => {
+  try { editor?.updateOptions({ fontSize: v || 13 }) } catch {}
+})
+watch(() => props.wordWrap, (v) => {
+  try { editor?.updateOptions({ wordWrap: v || 'on' }) } catch {}
+})
 
 watch(
   () => [props.tables, props.columns],
