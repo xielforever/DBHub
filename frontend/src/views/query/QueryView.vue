@@ -112,6 +112,7 @@
                     <el-dropdown-item divided command="font-inc">字体增大</el-dropdown-item>
                     <el-dropdown-item command="font-dec">字体减小</el-dropdown-item>
                     <el-dropdown-item command="toggle-wrap">{{ editorWordWrap === 'on' ? '关闭自动换行' : '开启自动换行' }}</el-dropdown-item>
+                    <el-dropdown-item divided command="toggle-vim">{{ editorVimMode ? '关闭 Vim 模式' : '开启 Vim 模式' }}</el-dropdown-item>
                     <el-dropdown-item divided command="command-palette">命令面板 ⌘K</el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -280,6 +281,14 @@
 
           <el-tab-pane label="计划对比" name="explain-compare" class="flex flex-col min-h-0 flex-1">
             <ExplainComparePane :current-explain="isExplainResult ? { columns: grid.columns, rows: (grid.rows as unknown[][]), sql: currentTab.sql, duration: lastDuration } : null" />
+          </el-tab-pane>
+
+          <el-tab-pane label="火焰图" name="flame" class="flex flex-col min-h-0 flex-1">
+            <QueryFlameGraph :duration="lastDuration" :sql="currentTab.sql" />
+          </el-tab-pane>
+
+          <el-tab-pane label="对比" name="compare" class="flex flex-col min-h-0 flex-1">
+            <ResultComparePane :current-columns="grid.columns" :current-rows="(grid.rows as unknown[][])" :current-sql="currentTab.sql" />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -570,6 +579,7 @@
         <footer class="flex items-center gap-4 sm:gap-5 px-4 py-2 border-t border-white/10 text-xs text-white/45 shrink-0">
           <span v-if="lastDuration !== null">执行耗时：<span class="text-emerald-300">{{ lastDuration }} ms</span></span>
           <span v-if="grid.columns.length">行数：<span class="text-indigo-200">{{ grid.rows.length }}</span></span>
+          <span v-if="editorVimMode" class="px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 text-[10px] flex items-center gap-1">Vim</span>
           <span v-if="currentConn?.type === 'redis'" class="text-rose-300/80">Redis 模式</span>
           <span v-if="currentConn?.environment === 'prod'" class="text-rose-300/80 flex items-center gap-1"><ShieldAlert class="w-3 h-3" /> 生产环境</span>
           <span class="flex-1" />
@@ -807,6 +817,8 @@ import ResultSnapshotPane from './components/ResultSnapshotPane.vue'
 import AiOptimizePane from './components/AiOptimizePane.vue'
 import ExplainComparePane from './components/ExplainComparePane.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import QueryFlameGraph from './components/QueryFlameGraph.vue'
+import ResultComparePane from './components/ResultComparePane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -965,7 +977,7 @@ function onSelectionChange(len: number) {
   editorStats.selected = len
 }
 function persistTheme() {
-  try { localStorage.setItem(STORAGE_THEME, JSON.stringify({ theme: editorTheme.value, fontSize: editorFontSize.value, wordWrap: editorWordWrap.value })) } catch {}
+  try { localStorage.setItem(STORAGE_THEME, JSON.stringify({ theme: editorTheme.value, fontSize: editorFontSize.value, wordWrap: editorWordWrap.value, vim: editorVimMode.value })) } catch {}
 }
 function onEditorOptionCommand(cmd: string) {
   if (cmd === 'toggle-minimap') {
@@ -1005,6 +1017,10 @@ function onEditorOptionCommand(cmd: string) {
     editorWordWrap.value = editorWordWrap.value === 'on' ? 'off' : 'on'
     persistTheme()
     ElMessage.success(editorWordWrap.value === 'on' ? '已开启自动换行' : '已关闭自动换行')
+  } else if (cmd === 'toggle-vim') {
+    editorVimMode.value = !editorVimMode.value
+    persistTheme()
+    ElMessage.success(editorVimMode.value ? '已开启 Vim 模式（占位）' : '已关闭 Vim 模式')
   } else if (cmd === 'command-palette') {
     commandPaletteRef.value?.open()
   }
@@ -1044,6 +1060,9 @@ const paletteCommands = computed(() => [
   { id: 'chart', label: '图表视图', desc: '切换到图表', icon: BarChart3, iconBg: 'bg-emerald-500/20 text-emerald-300', keywords: ['chart'], action: () => { resultTab.value = 'chart' } },
   { id: 'stats', label: '统计视图', desc: '列统计与直方图', icon: Table2, iconBg: 'bg-white/10 text-white/50', keywords: ['stats'], action: () => { resultTab.value = 'stats' } },
   { id: 'theme-dark', label: '主题：暗色玻璃', desc: '切换暗色主题', icon: Eye, iconBg: 'bg-white/10 text-white/50', keywords: ['theme'], action: () => { editorTheme.value = 'dbhub-dark'; persistTheme() } },
+  { id: 'toggle-vim', label: editorVimMode.value ? '关闭 Vim 模式' : '开启 Vim 模式', desc: '切换 Vim 键位', icon: Keyboard, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['vim'], action: () => { editorVimMode.value = !editorVimMode.value; persistTheme() } },
+  { id: 'flame', label: '火焰图', desc: '查看性能火焰图', icon: Eye, iconBg: 'bg-orange-500/20 text-orange-300', keywords: ['flame'], action: () => { resultTab.value = 'flame' } },
+  { id: 'compare', label: '结果对比', desc: '跨标签对比结果', icon: GitCompare, iconBg: 'bg-sky-500/20 text-sky-300', keywords: ['compare'], action: () => { resultTab.value = 'compare' } },
   { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
 ])
 
@@ -1414,6 +1433,7 @@ const paramDetected = computed(() => {
 const editorTheme = ref('dbhub-dark')
 const editorFontSize = ref(13)
 const editorWordWrap = ref<'on' | 'off'>('on')
+const editorVimMode = ref(false)
 const commandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
@@ -1423,6 +1443,7 @@ try {
     editorTheme.value = parsed.theme || 'dbhub-dark'
     editorFontSize.value = parsed.fontSize || 13
     editorWordWrap.value = parsed.wordWrap || 'on'
+    editorVimMode.value = !!parsed.vim
   }
 } catch {}
 const isExplainResult = computed(() => {
