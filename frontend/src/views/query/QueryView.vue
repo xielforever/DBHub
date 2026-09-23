@@ -99,6 +99,9 @@
                 <Braces class="w-3.5 h-3.5" /> 参数
                 <span v-if="paramDetected" class="px-1 py-0.5 rounded-full bg-amber-400/20 text-[10px]">{{ paramDetected }}</span>
               </button>
+              <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" @click="shareDialogOpen = true">
+                <Share2 class="w-3.5 h-3.5" /> 分享
+              </button>
               <el-dropdown trigger="click" popper-class="glass-popper" @command="onEditorOptionCommand">
                 <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1"><Settings2 class="w-3.5 h-3.5" /> 选项</button>
                 <template #dropdown>
@@ -118,6 +121,7 @@
                 </template>
               </el-dropdown>
               <div class="hidden sm:block h-5 w-px bg-white/10" />
+              <CollabPresence v-if="currentConn" class="hidden md:flex" />
               <span v-if="currentConn" class="flex items-center gap-1.5 text-xs text-white/65">
                 <component :is="currentConn.type === 'redis' ? KeyRound : Database" class="w-3.5 h-3.5" :style="{ color: connColor(currentConn.type) }" />
                 {{ currentConn.name }}
@@ -289,6 +293,10 @@
 
           <el-tab-pane label="对比" name="compare" class="flex flex-col min-h-0 flex-1">
             <ResultComparePane :current-columns="grid.columns" :current-rows="(grid.rows as unknown[][])" :current-sql="currentTab.sql" />
+          </el-tab-pane>
+
+          <el-tab-pane label="监控" name="monitor" class="flex flex-col min-h-0 flex-1">
+            <PerformanceMonitorPane @reuse="(sql) => { currentTab.sql = sql; resultTab = 'result' }" />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -726,6 +734,10 @@
 
     <CommandPalette ref="commandPaletteRef" :commands="paletteCommands" />
 
+    <el-dialog v-model="shareDialogOpen" title="分享查询" width="520px" class="glass-dialog" :close-on-click-modal="false">
+      <ShareQueryDialog :sql="currentTab.sql" :params="paramValues" :database="currentTab.database" :connection-id="currentConn?.id ?? 0" :columns="grid.columns" :rows="(grid.rows as unknown[][])" @close="shareDialogOpen = false" @shared="onShared" />
+    </el-dialog>
+
     <!-- Redis 新建 Key -->
     <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
@@ -770,6 +782,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  Activity,
   BarChart3,
   Bookmark,
   Braces,
@@ -819,6 +832,9 @@ import ExplainComparePane from './components/ExplainComparePane.vue'
 import CommandPalette from './components/CommandPalette.vue'
 import QueryFlameGraph from './components/QueryFlameGraph.vue'
 import ResultComparePane from './components/ResultComparePane.vue'
+import ShareQueryDialog from './components/ShareQueryDialog.vue'
+import CollabPresence from './components/CollabPresence.vue'
+import PerformanceMonitorPane from './components/PerformanceMonitorPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -1063,6 +1079,8 @@ const paletteCommands = computed(() => [
   { id: 'toggle-vim', label: editorVimMode.value ? '关闭 Vim 模式' : '开启 Vim 模式', desc: '切换 Vim 键位', icon: Keyboard, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['vim'], action: () => { editorVimMode.value = !editorVimMode.value; persistTheme() } },
   { id: 'flame', label: '火焰图', desc: '查看性能火焰图', icon: Eye, iconBg: 'bg-orange-500/20 text-orange-300', keywords: ['flame'], action: () => { resultTab.value = 'flame' } },
   { id: 'compare', label: '结果对比', desc: '跨标签对比结果', icon: GitCompare, iconBg: 'bg-sky-500/20 text-sky-300', keywords: ['compare'], action: () => { resultTab.value = 'compare' } },
+  { id: 'monitor', label: '性能监控', desc: '查看执行性能', icon: Activity, iconBg: 'bg-rose-500/20 text-rose-300', keywords: ['monitor','性能'], action: () => { resultTab.value = 'monitor' } },
+  { id: 'share', label: '分享查询', desc: '生成分享链接', icon: Share2, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['share','分享'], action: () => { shareDialogOpen.value = true } },
   { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
 ])
 
@@ -1435,6 +1453,7 @@ const editorFontSize = ref(13)
 const editorWordWrap = ref<'on' | 'off'>('on')
 const editorVimMode = ref(false)
 const commandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
+const shareDialogOpen = ref(false)
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
   const raw = localStorage.getItem(STORAGE_THEME)
@@ -2194,6 +2213,11 @@ function onRestoreSnapshot(snap: any) {
   lastDuration.value = snap.duration_ms
   resultTab.value = 'result'
   ElMessage.success(`已恢复快照：${snap.name}`)
+}
+function onShared(link: string) {
+  log(`已分享查询：${link}`, 'success')
+  ElMessage.success('分享链接已复制到剪贴板')
+  try { navigator.clipboard.writeText(link) } catch {}
 }
 function onApplyRewrite(newSql: string) {
   const tab = currentTab.value
