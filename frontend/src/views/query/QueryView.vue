@@ -214,11 +214,19 @@
               <p class="text-white/80">执行成功，影响 {{ writeResult.affected_rows ?? 0 }} 行 · 耗时 {{ writeResult.duration_ms }} ms</p>
               <button class="ghost-button !py-1 !px-3 text-xs mt-2" @click="resetGrid">清空结果</button>
             </div>
-            <ExplainPlan
-              v-else-if="isExplainResult"
-              :columns="grid.columns"
-              :rows="grid.rows as any"
-            />
+            <div v-else-if="isExplainResult" class="flex flex-col flex-1 min-h-0">
+              <div class="px-3 py-1.5 flex items-center gap-2 bg-emerald-500/5 border-b border-emerald-400/20 text-xs shrink-0">
+                <span class="text-emerald-300">已识别为执行计划</span>
+                <div class="flex-1" />
+                <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="resultTab = 'ai-optimize'"><Sparkles class="w-3 h-3" /> AI 优化</button>
+                <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="resultTab = 'explain-compare'"><GitCompare class="w-3 h-3" /> 对比</button>
+              </div>
+              <ExplainPlan
+                :columns="grid.columns"
+                :rows="grid.rows as any"
+                class="flex-1 min-h-0"
+              />
+            </div>
             <ResultGrid
               v-else
               :columns="grid.columns"
@@ -248,6 +256,14 @@
 
           <el-tab-pane label="快照" name="snapshot" class="flex flex-col min-h-0 flex-1">
             <ResultSnapshotPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :sql="currentTab.sql" :duration="lastDuration" @restore="onRestoreSnapshot" />
+          </el-tab-pane>
+
+          <el-tab-pane label="AI 优化" name="ai-optimize" class="flex flex-col min-h-0 flex-1">
+            <AiOptimizePane :sql="currentTab.sql" :explain-columns="grid.columns" :explain-rows="(grid.rows as unknown[][])" :duration="lastDuration" :table-columns="grid.columns" @apply-rewrite="onApplyRewrite" @apply-index="onApplyIndex" />
+          </el-tab-pane>
+
+          <el-tab-pane label="计划对比" name="explain-compare" class="flex flex-col min-h-0 flex-1">
+            <ExplainComparePane :current-explain="isExplainResult ? { columns: grid.columns, rows: (grid.rows as unknown[][]), sql: currentTab.sql, duration: lastDuration } : null" />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -729,6 +745,8 @@ import {
   Bookmark,
   Braces,
   CheckCircle2,
+  GitCompare,
+
   Copy,
   Database,
   Download,
@@ -766,6 +784,8 @@ import RedisKeyTree from './components/RedisKeyTree.vue'
 import ColumnStatsPane from './components/ColumnStatsPane.vue'
 import ParamPanel from './components/ParamPanel.vue'
 import ResultSnapshotPane from './components/ResultSnapshotPane.vue'
+import AiOptimizePane from './components/AiOptimizePane.vue'
+import ExplainComparePane from './components/ExplainComparePane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -2044,6 +2064,17 @@ function onRestoreSnapshot(snap: any) {
   lastDuration.value = snap.duration_ms
   resultTab.value = 'result'
   ElMessage.success(`已恢复快照：${snap.name}`)
+}
+function onApplyRewrite(newSql: string) {
+  const tab = currentTab.value
+  const monaco = monacoRefs[tab.id]
+  if (monaco) monaco.insertText('\n' + newSql)
+  else tab.sql = tab.sql ? `${tab.sql}\n${newSql}` : newSql
+  ElMessage.success('已应用重写建议到编辑器')
+  resultTab.value = 'result'
+}
+function onApplyIndex(idx: any) {
+  ElMessageBox.alert(`索引建议：\n${idx.ddl}\n\n请在对应数据库中执行`, '索引推荐', { confirmButtonText: '知道了' })
 }
 
 function addTab() {

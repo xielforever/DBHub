@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.12.0', env: 'arena', note: 'Step12: 参数化+快照对比+事务+统计+EXPLAIN可视化+Redis树' })
+    return ok(res, { status: 'ok', version: 'mock-0.13.0', env: 'arena', note: 'Step13: AI优化+计划对比+参数化+快照+事务+统计' })
   }
 
   // 认证
@@ -438,6 +438,17 @@ const server = http.createServer(async (req, res) => {
       return ok(res, { active: true, transaction_id: tx.transaction_id, started_at: tx.started_at, queries: tx.queries, status: tx.status })
     }
     return ok(res, { active: false })
+  }
+  // AI 优化建议 mock
+  if (pathname === '/api/v1/query/ai-optimize' && method === 'POST') {
+    const body = await readBody(req)
+    const sql = (body.sql || '').toLowerCase()
+    const issues = []
+    const indexes = []
+    if (sql.includes('select *')) issues.push({ severity: 'medium', title: 'SELECT *', description: '建议显式列名' })
+    if (!sql.includes('where')) issues.push({ severity: 'high', title: '全表扫描', description: '缺少 WHERE' })
+    if (sql.includes('join')) indexes.push({ table: 'orders', type: 'B-Tree', ddl: 'CREATE INDEX idx_orders_user_id ON orders (user_id);', benefit: '90%' })
+    return ok(res, { score: 75, summary: '存在优化空间', tags: ['全表扫描'], issues, indexes, rewrites: [], cost: { estimated_rows: '1000', estimated_cost: '120.5', actual_time: 22 } })
   }
 
   // 查询执行 - 支持 EXPLAIN + 参数化
