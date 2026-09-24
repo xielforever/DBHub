@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.15.0', env: 'arena', note: 'Step16: 分享协作+性能监控+火焰图+对比+Vim+主题+命令面板+AI优化' })
+    return ok(res, { status: 'ok', version: 'mock-0.17.0', env: 'arena', note: 'Step17: 队列+限流+审计+分享协作+性能监控+火焰图+对比+Vim+主题' })
   }
 
   // 认证
@@ -1068,8 +1068,56 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/v1/users' && method === 'GET') {
     return ok(res, { items: users, total: users.length, page: 1, page_size: 20 })
   }
+  if (!globalThis.__auditLogs) {
+    globalThis.__auditLogs = []
+    const actions = ['QUERY','LOGIN','TEST','CREATE','UPDATE','DELETE','CHANGE_PASSWORD']
+    const resources = ['SQL','AUTH','CONNECTION','USER','QUERY_HISTORY','PROXY']
+    const usernames = ['admin','dev1','readonly','analyst']
+    const now2 = Date.now()
+    for (let i=0;i<40;i++) {
+      const action = actions[i % actions.length]
+      const resource = resources[i % resources.length]
+      const username = usernames[i % usernames.length]
+      const status = i % 6 === 0 ? 0 : 1
+      globalThis.__auditLogs.push({
+        id: 1000 - i,
+        user_id: (i % 3) + 1,
+        connection_id: ((i % 3) + 1),
+        trace_id: Math.random().toString(36).slice(2,10) + Math.random().toString(36).slice(2,10),
+        action,
+        resource_type: resource,
+        resource_name: action === 'QUERY' ? `conn-${(i%3)+1}` : (resource === 'CONNECTION' ? `conn-${(i%3)+1}` : ''),
+        ip_address: `192.168.1.${(i % 200)+1}`,
+        user_agent: 'Mozilla/5.0',
+        status,
+        error_message: status===0 ? '模拟错误：权限不足或语法错误' : undefined,
+        duration_ms: 10 + Math.floor(Math.random()*300),
+        params: action==='QUERY' ? { sql: ['SELECT * FROM orders LIMIT 100','SELECT COUNT(*) FROM users','UPDATE orders SET status=1 WHERE id=1'][i%3] } : {},
+        created_at: new Date(now2 - i*3600*1000*2).toISOString(),
+        username,
+      })
+    }
+  }
   if (pathname === '/api/v1/audit-logs' && method === 'GET') {
-    return ok(res, { items: [], total: 0, page: 1, page_size: 20 })
+    let items = [...(globalThis.__auditLogs || [])]
+    if (query.username) {
+      const kw = query.username.toLowerCase()
+      items = items.filter(a => (a.username||'').toLowerCase().includes(kw))
+    }
+    if (query.action) items = items.filter(a => a.action === query.action)
+    if (query.resource_type) items = items.filter(a => a.resource_type === query.resource_type)
+    if (query.status === 'success' || query.status === '1') items = items.filter(a => a.status === 1)
+    if (query.status === 'failed' || query.status === '0') items = items.filter(a => a.status === 0)
+    // days filter
+    if (query.days) {
+      const days = Number(query.days)
+      const cutoff = Date.now() - days*86400000
+      items = items.filter(a => new Date(a.created_at).getTime() >= cutoff)
+    }
+    const page = Number(query.page || 1)
+    const pageSize = Number(query.page_size || 20)
+    const start = (page-1)*pageSize
+    return ok(res, { items: items.slice(start, start+pageSize), total: items.length, page, page_size: pageSize })
   }
   if (pathname.startsWith('/api/v1/')) {
     return ok(res, { items: [], total: 0 })

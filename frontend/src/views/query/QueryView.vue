@@ -99,6 +99,13 @@
                 <Braces class="w-3.5 h-3.5" /> 参数
                 <span v-if="paramDetected" class="px-1 py-0.5 rounded-full bg-amber-400/20 text-[10px]">{{ paramDetected }}</span>
               </button>
+              <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5 relative" @click="resultTab = 'queue'">
+                <ListOrdered class="w-3.5 h-3.5" /> 队列
+                <span v-if="queue.filter(q=>q.status==='pending'||q.status==='running').length" class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-500 text-white text-[10px] flex items-center justify-center">{{ queue.filter(q=>q.status==='pending'||q.status==='running').length }}</span>
+              </button>
+              <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" @click="limitsDialogOpen = true">
+                <Gauge class="w-3.5 h-3.5" /> 限流
+              </button>
               <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" @click="shareDialogOpen = true">
                 <Share2 class="w-3.5 h-3.5" /> 分享
               </button>
@@ -297,6 +304,18 @@
 
           <el-tab-pane label="监控" name="monitor" class="flex flex-col min-h-0 flex-1">
             <PerformanceMonitorPane @reuse="(sql) => { currentTab.sql = sql; resultTab = 'result' }" />
+          </el-tab-pane>
+
+          <el-tab-pane label="队列" name="queue" class="flex flex-col min-h-0 flex-1">
+            <QueryQueuePane :queue="queue" :concurrency="queueConcurrency" :paused="queuePaused" :queue-enabled="queueEnabled" @toggle-pause="queuePaused = !queuePaused" @toggle-enabled="queueEnabled = !queueEnabled" @clear="clearQueue" @cancel="cancelQueueItem" @remove="removeQueueItem" @requeue="requeueItem" @move-up="moveQueueItem($event, -1)" @move-down="moveQueueItem($event, 1)" @update-concurrency="queueConcurrency = $event" @add-demo="addDemoQueueItem" />
+          </el-tab-pane>
+
+          <el-tab-pane label="限制" name="limits" class="flex flex-col min-h-0 flex-1">
+            <ResourceLimitsPane v-model="resourceLimits" @save="onLimitsSave" />
+          </el-tab-pane>
+
+          <el-tab-pane label="审计" name="audit" class="flex flex-col min-h-0 flex-1">
+            <QueryAuditPane />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -738,6 +757,10 @@
       <ShareQueryDialog :sql="currentTab.sql" :params="paramValues" :database="currentTab.database" :connection-id="currentConn?.id ?? 0" :columns="grid.columns" :rows="(grid.rows as unknown[][])" @close="shareDialogOpen = false" @shared="onShared" />
     </el-dialog>
 
+    <el-drawer v-model="limitsDialogOpen" title="资源限制" direction="rtl" size="420px" class="glass-drawer">
+      <ResourceLimitsPane v-model="resourceLimits" @save="onLimitsSave" />
+    </el-drawer>
+
     <!-- Redis 新建 Key -->
     <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
@@ -784,6 +807,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Activity,
   BarChart3,
+  Gauge,
+  ListOrdered,
+  ScrollText,
   Bookmark,
   Braces,
   Camera,
@@ -835,6 +861,9 @@ import ResultComparePane from './components/ResultComparePane.vue'
 import ShareQueryDialog from './components/ShareQueryDialog.vue'
 import CollabPresence from './components/CollabPresence.vue'
 import PerformanceMonitorPane from './components/PerformanceMonitorPane.vue'
+import QueryQueuePane from './components/QueryQueuePane.vue'
+import ResourceLimitsPane from './components/ResourceLimitsPane.vue'
+import QueryAuditPane from './components/QueryAuditPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
   workbenchApi,
@@ -1081,6 +1110,9 @@ const paletteCommands = computed(() => [
   { id: 'compare', label: '结果对比', desc: '跨标签对比结果', icon: GitCompare, iconBg: 'bg-sky-500/20 text-sky-300', keywords: ['compare'], action: () => { resultTab.value = 'compare' } },
   { id: 'monitor', label: '性能监控', desc: '查看执行性能', icon: Activity, iconBg: 'bg-rose-500/20 text-rose-300', keywords: ['monitor','性能'], action: () => { resultTab.value = 'monitor' } },
   { id: 'share', label: '分享查询', desc: '生成分享链接', icon: Share2, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['share','分享'], action: () => { shareDialogOpen.value = true } },
+  { id: 'queue', label: '查询队列', desc: '查看队列', icon: ListOrdered, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['queue','队列'], action: () => { resultTab.value = 'queue' } },
+  { id: 'limits', label: '资源限制', desc: '超时与行数限制', icon: Gauge, iconBg: 'bg-amber-500/20 text-amber-300', keywords: ['limit','限流'], action: () => { limitsDialogOpen.value = true } },
+  { id: 'audit', label: '查询审计', desc: '查看审计日志', icon: ScrollText, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['audit','审计'], action: () => { resultTab.value = 'audit' } },
   { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
 ])
 
@@ -1211,7 +1243,11 @@ async function runQuery() {
   const originalSQL = sql
   sql = applyAutoLimit(sql)
   const autoLimited = sql !== originalSQL
-  if (currentConn.value.environment === 'prod' && isDangerousSQL(sql)) {
+  if (resourceLimits.value.blockUnsafeWrite && isUnsafeWrite(sql)) {
+    ElMessage.error('已拦截：UPDATE/DELETE 缺少 WHERE，为防止全表误操作，请补充条件')
+    return
+  }
+  if (resourceLimits.value.confirmProdWrite && currentConn.value.environment === 'prod' && isDangerousSQL(sql)) {
     try {
       await ElMessageBox.confirm(
         `当前连接为生产环境（${currentConn.value.name}），即将执行写操作：\n${sql.slice(0, 200)}\n\n确认继续？`,
@@ -1221,9 +1257,27 @@ async function runQuery() {
     } catch {
       return
     }
+  } else if (!resourceLimits.value.confirmProdWrite && currentConn.value.environment === 'prod' && isDangerousSQL(sql)) {
+    // 检查后仍记录日志
+    log(`[限流] 生产写操作自动放行：${sql.slice(0,60)}`, 'info')
+  }
+  // 队列：若正在执行且启用队列，则入队
+  if (running.value && queueEnabled.value) {
+    return enqueueQuery(sql)
+  }
+  // 若已暂停队列且不在执行，仍入队
+  if (queuePaused.value && queueEnabled.value) {
+    return enqueueQuery(sql)
   }
   running.value = true
   abortController.value = new AbortController()
+  let timeoutId: any = null
+  if (resourceLimits.value.timeoutMs > 0) {
+    timeoutId = setTimeout(() => {
+      try { abortController.value?.abort() } catch {}
+      log(`查询超时（>${resourceLimits.value.timeoutMs}ms）已自动取消`, 'error')
+    }, resourceLimits.value.timeoutMs)
+  }
   resetGrid()
   viewMode.value = 'sql'
   resultTab.value = 'result'
@@ -1248,10 +1302,15 @@ async function runQuery() {
       resultTab.value = 'message'
     }
   } finally {
+    if (timeoutId) clearTimeout(timeoutId)
     if (transactionActive.value) transactionQueries.value++
     running.value = false
     abortController.value = null
     if (resultTab.value === 'history') loadHistory()
+    // 队列：执行完成后自动拉起下一个
+    if (queueEnabled.value && !queuePaused.value) {
+      setTimeout(() => processQueue(), 150)
+    }
   }
 }
 
@@ -1454,6 +1513,22 @@ const editorWordWrap = ref<'on' | 'off'>('on')
 const editorVimMode = ref(false)
 const commandPaletteRef = ref<InstanceType<typeof CommandPalette> | null>(null)
 const shareDialogOpen = ref(false)
+interface QueueItem { id: number; sql: string; database: string; connectionId: number; connectionName: string; status: 'pending' | 'running' | 'success' | 'failed' | 'canceled'; enqueuedAt: string; startedAt?: string; finishedAt?: string; duration?: number; error?: string }
+const queue = ref<QueueItem[]>([])
+const queuePaused = ref(false)
+const queueConcurrency = ref(1)
+const queueEnabled = ref(true)
+const limitsDialogOpen = ref(false)
+const resourceLimits = ref({ timeoutMs: 30000, maxRows: 1000, blockUnsafeWrite: true, autoLimit: true, confirmProdWrite: true })
+try {
+  const raw = localStorage.getItem('dbhub_resource_limits')
+  if (raw) Object.assign(resourceLimits.value, JSON.parse(raw))
+} catch {}
+try {
+  const rawQ = localStorage.getItem('dbhub_query_queue')
+  if (rawQ) queue.value = JSON.parse(rawQ)
+} catch {}
+watch(queue, v => { try { localStorage.setItem('dbhub_query_queue', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
   const raw = localStorage.getItem(STORAGE_THEME)
@@ -2179,8 +2254,20 @@ async function runQueryWithSql(sqlOverride: string) {
       await ElMessageBox.confirm(`生产环境 ${currentConn.value.name} 即将执行写操作：\n${sql.slice(0,200)}\n\n确认继续？`, '生产环境二次确认', { type: 'warning' })
     } catch { return }
   }
+  if (resourceLimits.value.blockUnsafeWrite && isUnsafeWrite(sql)) {
+    ElMessage.error('已拦截：UPDATE/DELETE 缺少 WHERE')
+    return
+  }
+  if (running.value && queueEnabled.value) {
+    enqueueQuery(sql)
+    return
+  }
   running.value = true
   abortController.value = new AbortController()
+  let wqsTimeout: any = null
+  if (resourceLimits.value.timeoutMs > 0) {
+    wqsTimeout = setTimeout(() => { try { abortController.value?.abort() } catch {}; log(`查询超时（>${resourceLimits.value.timeoutMs}ms）已自动取消`, 'error') }, resourceLimits.value.timeoutMs)
+  }
   resetGrid()
   viewMode.value = 'sql'
   resultTab.value = 'result'
@@ -2201,10 +2288,12 @@ async function runQueryWithSql(sqlOverride: string) {
     if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED') log('查询已取消','info')
     else { log(err instanceof Error ? err.message : '执行失败','error'); resultTab.value = 'message' }
   } finally {
+    if (wqsTimeout) clearTimeout(wqsTimeout)
     running.value = false
     abortController.value = null
     if (transactionActive.value) transactionQueries.value++
     if (resultTab.value === 'history') loadHistory()
+    if (queueEnabled.value && !queuePaused.value) setTimeout(() => processQueue(), 150)
   }
 }
 function onRestoreSnapshot(snap: any) {
@@ -2218,6 +2307,144 @@ function onShared(link: string) {
   log(`已分享查询：${link}`, 'success')
   ElMessage.success('分享链接已复制到剪贴板')
   try { navigator.clipboard.writeText(link) } catch {}
+}
+function onLimitsSave(v: any) {
+  resourceLimits.value = v
+  autoLimitEnabled.value = v.autoLimit
+  try { localStorage.setItem('dbhub_resource_limits', JSON.stringify(v)) } catch {}
+  ElMessage.success('资源限制已生效')
+  limitsDialogOpen.value = false
+}
+function isUnsafeWrite(sql: string) {
+  const up = sql.trim().toUpperCase()
+  if (/^(UPDATE|DELETE)/.test(up) && !/WHERE/.test(up)) return true
+  return false
+}
+let queueSeq = Date.now()
+function enqueueQuery(sql: string) {
+  if (!currentConn.value) { ElMessage.warning('请先选择数据源'); return false }
+  if (resourceLimits.value.blockUnsafeWrite && isUnsafeWrite(sql)) {
+    ElMessage.error('已拦截：UPDATE/DELETE 缺少 WHERE，为防止全表误操作')
+    return false
+  }
+  const item: QueueItem = { id: ++queueSeq, sql, database: currentTab.value.database, connectionId: currentConn.value.id, connectionName: currentConn.value.name, status: 'pending', enqueuedAt: new Date().toISOString() }
+  queue.value.push(item)
+  log(`已入队 #${item.id}：${sql.slice(0,60)}`, 'info')
+  if (!queuePaused.value) processQueue()
+  resultTab.value = 'queue'
+  return true
+}
+async function processQueue() {
+  if (queuePaused.value) return
+  const runningCount = queue.value.filter(q => q.status === 'running').length
+  if (runningCount >= queueConcurrency.value) return
+  const next = queue.value.find(q => q.status === 'pending')
+  if (!next) return
+  if (!currentConn.value || next.connectionId !== currentConn.value.id) {
+    // if connection mismatch, still try to run with its own connection? For now skip and mark failed
+    // attempt to find connection in tree
+    const conn = (treeRef.value as any)?.findConnection?.(next.connectionId)
+    if (!conn) { next.status = 'failed'; next.error = '连接不存在'; return }
+  }
+  next.status = 'running'
+  next.startedAt = new Date().toISOString()
+  log(`队列执行 #${next.id}`, 'info')
+  let timeoutId: any = null
+  const ac = new AbortController()
+  const timeoutMs = resourceLimits.value.timeoutMs
+  timeoutId = setTimeout(() => ac.abort(), timeoutMs)
+  try {
+    const res = await workbenchApi.execute(next.connectionId, next.sql, next.database, ac.signal)
+    clearTimeout(timeoutId)
+    next.finishedAt = new Date().toISOString()
+    next.duration = res.duration_ms
+    if (res.kind === 'query' && res.duration_ms > resourceLimits.value.timeoutMs) {
+      // already handled
+    }
+    if (next.connectionId === currentConn.value?.id) {
+      // if current connection matches, update grid
+      if (res.kind === 'query') {
+        // enforce maxRows client-side hint
+        if (res.rows && res.rows.length > resourceLimits.value.maxRows) {
+          ElMessage.warning(`已截断：返回 ${res.rows.length} 行，超过限制 ${resourceLimits.value.maxRows}`)
+        }
+        grid.columns = res.columns ?? []
+        grid.rows = res.rows ?? []
+        grid.truncated = Boolean(res.truncated)
+        resultTab.value = 'result'
+      } else {
+        writeResult.value = res
+      }
+      lastDuration.value = res.duration_ms
+    }
+    next.status = 'success'
+    log(`队列 #${next.id} 完成 ${res.duration_ms}ms`, 'success')
+  } catch (err: any) {
+    clearTimeout(timeoutId)
+    next.finishedAt = new Date().toISOString()
+    if (err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED' || err?.message?.includes('canceled') || err?.message?.includes('abort')) {
+      next.status = 'canceled'
+      next.error = '已取消/超时'
+      log(`队列 #${next.id} 已取消`, 'info')
+    } else {
+      next.status = 'failed'
+      next.error = err instanceof Error ? err.message : '执行失败'
+      log(`队列 #${next.id} 失败：${next.error}`, 'error')
+    }
+  } finally {
+    // continue processing next items
+    setTimeout(() => processQueue(), 100)
+  }
+}
+function cancelQueueItem(id: number) {
+  const item = queue.value.find(q => q.id === id)
+  if (!item) return
+  if (item.status === 'running') {
+    // try abort current if it's the running one and matches global controller
+    if (abortController.value) abortController.value.abort()
+    item.status = 'canceled'
+    item.error = '用户取消'
+    ElMessage.info('已取消执行')
+  } else if (item.status === 'pending') {
+    item.status = 'canceled'
+    item.error = '已取消'
+  }
+}
+function removeQueueItem(id: number) {
+  queue.value = queue.value.filter(q => q.id !== id)
+}
+function requeueItem(id: number) {
+  const item = queue.value.find(q => q.id === id)
+  if (!item) return
+  item.status = 'pending'
+  item.error = undefined
+  item.startedAt = undefined
+  item.finishedAt = undefined
+  item.duration = undefined
+  item.enqueuedAt = new Date().toISOString()
+  if (!queuePaused.value) processQueue()
+}
+function moveQueueItem(id: number, delta: number) {
+  const idx = queue.value.findIndex(q => q.id === id)
+  if (idx === -1) return
+  const target = idx + delta
+  if (target < 0 || target >= queue.value.length) return
+  // only allow moving pending items among pending
+  const item = queue.value.splice(idx, 1)[0]!
+  queue.value.splice(target, 0, item)
+}
+function clearQueue() {
+  queue.value = queue.value.filter(q => q.status === 'running')
+  ElMessage.success('已清空队列')
+}
+function addDemoQueueItem() {
+  const demos = [
+    'SELECT * FROM orders WHERE status = 1 LIMIT 100',
+    'SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY',
+    'SELECT DATE(created_at) as day, SUM(total_amount) FROM orders GROUP BY 1 ORDER BY 1',
+  ]
+  const sql = demos[Math.floor(Math.random()*demos.length)]!
+  enqueueQuery(sql)
 }
 function onApplyRewrite(newSql: string) {
   const tab = currentTab.value
