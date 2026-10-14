@@ -330,6 +330,14 @@
             <ColumnAuthPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :role="authRole" :watermark-enabled="watermarkEnabled" :row-policy-enabled="rowPolicyEnabled" :row-policy-sql="rowPolicySql" :column-perms="columnPerms" @change-role="authRole = $event" @set-perm="onSetColumnPerm" @toggle-watermark="watermarkEnabled = !watermarkEnabled" @toggle-row-policy="rowPolicyEnabled = !rowPolicyEnabled" />
           </el-tab-pane>
 
+          <el-tab-pane label="血缘" name="lineage" class="flex flex-col min-h-0 flex-1">
+            <DataLineagePane :current-table="lineageTable" :current-db="lineageDb" :fallback-table="preview.table || 'orders'" @select="(n)=> ElMessage.info(`已选择 ${n.name}`)" @create-ticket="onCreateTicketFromLineage" />
+          </el-tab-pane>
+
+          <el-tab-pane label="工单" name="ticket" class="flex flex-col min-h-0 flex-1">
+            <ChangeTicketPane :tickets="tickets" @create="onTicketCreate" @update-status="onTicketStatus" />
+          </el-tab-pane>
+
           <el-tab-pane label="审计" name="audit" class="flex flex-col min-h-0 flex-1">
             <QueryAuditPane />
           </el-tab-pane>
@@ -829,6 +837,8 @@ import {
   BarChart3,
   Eye,
   EyeOff,
+  GitBranch,
+  Ticket,
   Gauge,
   ListOrdered,
   ScrollText,
@@ -889,6 +899,8 @@ import SensitiveMaskPane from './components/SensitiveMaskPane.vue'
 import ExportApprovalDialog from './components/ExportApprovalDialog.vue'
 import ColumnAuthPane from './components/ColumnAuthPane.vue'
 import WatermarkOverlay from './components/WatermarkOverlay.vue'
+import DataLineagePane from './components/DataLineagePane.vue'
+import ChangeTicketPane from './components/ChangeTicketPane.vue'
 import QueryAuditPane from './components/QueryAuditPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
@@ -1141,6 +1153,8 @@ const paletteCommands = computed(() => [
   { id: 'audit', label: '查询审计', desc: '查看审计日志', icon: ScrollText, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['audit','审计'], action: () => { resultTab.value = 'audit' } },
   { id: 'mask', label: '脱敏管控', desc: '敏感数据脱敏', icon: ShieldCheck, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['mask','脱敏'], action: () => { resultTab.value = 'mask' } },
   { id: 'auth', label: '列级授权', desc: '权限与水印', icon: KeyRound, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['auth','权限'], action: () => { resultTab.value = 'auth' } },
+  { id: 'lineage', label: '数据血缘', desc: '血缘与影响', icon: GitBranch, iconBg: 'bg-emerald-500/20 text-emerald-300', keywords: ['lineage','血缘'], action: () => { resultTab.value = 'lineage' } },
+  { id: 'ticket', label: '变更工单', desc: '工单管理', icon: Ticket, iconBg: 'bg-amber-500/20 text-amber-300', keywords: ['ticket','工单'], action: () => { resultTab.value = 'ticket' } },
   { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
 ])
 
@@ -1555,6 +1569,11 @@ const watermarkEnabled = ref(true)
 const rowPolicyEnabled = ref(false)
 const rowPolicySql = ref("department = current_user_dept()")
 const authRole = ref(userStore.role || 'developer')
+const tickets = ref<{ id:number; title:string; type:'ddl'|'dml'|'index'; table:string; sql:string; risk:'low'|'medium'|'high'; status:'pending'|'approved'|'rejected'|'executed'; requester:string; reason:string; created_at:string }[]>([
+  { id: 1001, title: 'orders 添加索引 idx_amount', type: 'index', table: 'orders', sql: 'CREATE INDEX idx_amount ON orders (total_amount)', risk: 'low', status: 'pending', requester: 'dev1', reason: '优化慢查询', created_at: new Date(Date.now()-3600*1000).toISOString() },
+  { id: 1002, title: 'users 扩展 email 长度', type: 'ddl', table: 'users', sql: 'ALTER TABLE users ALTER COLUMN email TYPE varchar(256)', risk: 'medium', status: 'approved', requester: 'admin', reason: '支持更长邮箱', created_at: new Date(Date.now()-86400*1000).toISOString() },
+])
+try { const tt = localStorage.getItem('dbhub_tickets'); if (tt) tickets.value = JSON.parse(tt) } catch {}
 const resourceLimits = ref({ timeoutMs: 30000, maxRows: 1000, blockUnsafeWrite: true, autoLimit: true, confirmProdWrite: true })
 try { const m = localStorage.getItem('dbhub_mask_enabled'); if (m) maskEnabled.value = JSON.parse(m) } catch {}
 try { const er = localStorage.getItem('dbhub_export_requests'); if (er) exportRequests.value = JSON.parse(er) } catch {}
@@ -1575,6 +1594,7 @@ watch(exportRequests, v => { try { localStorage.setItem('dbhub_export_requests',
 watch(columnPerms, v => { try { localStorage.setItem('dbhub_column_perms', JSON.stringify(v)) } catch {} }, { deep: true })
 watch(watermarkEnabled, v => { try { localStorage.setItem('dbhub_watermark', JSON.stringify(v)) } catch {} })
 watch(rowPolicyEnabled, v => { try { localStorage.setItem('dbhub_row_policy', JSON.stringify(v)) } catch {} })
+watch(tickets, v => { try { localStorage.setItem('dbhub_tickets', JSON.stringify(v.slice(0,50))) } catch {} }, { deep: true })
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
   const raw = localStorage.getItem(STORAGE_THEME)
@@ -2361,6 +2381,12 @@ function onLimitsSave(v: any) {
   ElMessage.success('资源限制已生效')
   limitsDialogOpen.value = false
 }
+const lineageTable = computed(() => {
+  // 尝试从 SQL 中提取首个 FROM 表名
+  const m = currentTab.value.sql.match(/from\s+([a-zA-Z_][a-zA-Z0-9_\.]*)/i)
+  return m ? m[1]!.split('.').pop()! : (preview.table || 'orders')
+})
+const lineageDb = computed(() => currentTab.value.database || preview.database || 'orders')
 const sensitiveCount = computed(() => grid.columns.filter(c => /(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(c)).length)
 function onExportSubmit(payload: { format:string; scope:string; maskMode:string; reason:string }) {
   const id = Date.now()
@@ -2426,6 +2452,18 @@ function clearExportRequests() {
 function onSetColumnPerm(col: string, perm: 'visible'|'masked'|'hidden') {
   columnPerms.value = { ...columnPerms.value, [col]: perm }
   ElMessage.success(`${col} 已设为 ${perm==='visible' ? '可见' : perm==='masked' ? '掩码' : '隐藏'}`)
+}
+function onCreateTicketFromLineage() {
+  resultTab.value = 'ticket'
+  ElMessage.info('已跳转至工单，可基于血缘影响创建变更')
+}
+function onTicketCreate(payload: { title:string; type:'ddl'|'dml'|'index'; table:string; sql:string; risk:'low'|'medium'|'high'; reason:string }) {
+  const id = Date.now()
+  tickets.value.unshift({ id, title: payload.title, type: payload.type, table: payload.table, sql: payload.sql, risk: payload.risk, status: 'pending', requester: userStore.user?.username || 'user', reason: payload.reason, created_at: new Date().toISOString() })
+}
+function onTicketStatus(id:number, status:string) {
+  const t = tickets.value.find(x=>x.id===id)
+  if (t) { t.status = status as any; ElMessage.success(`工单 #${id} 已 ${status==='approved'?'批准':status==='rejected'?'拒绝':status==='executed'?'执行':'更新'}`) }
 }
 function isUnsafeWrite(sql: string) {
   const up = sql.trim().toUpperCase()
