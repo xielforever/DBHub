@@ -162,6 +162,21 @@
         </div>
       </article>
     </section>
+
+    <!-- 查询性能监控（复用工作台监控能力） -->
+    <section class="grid grid-cols-1 gap-4">
+      <article class="glass-card p-0 overflow-hidden">
+        <div class="px-5 py-3 border-b border-white/10 flex items-center gap-2">
+          <h2 class="font-medium">查询性能监控</h2>
+          <span class="text-xs text-white/40">复用 SQL 工作台监控能力 · 实时</span>
+          <div class="flex-1" />
+          <button class="ghost-button text-xs py-1 px-2" @click="$router.push('/query')">前往工作台</button>
+        </div>
+        <div class="h-[520px]">
+          <PerformanceMonitorPane @reuse="(sql)=> $router.push({ path: '/query', query: { sql } })" />
+        </div>
+      </article>
+    </section>
   </div>
 </template>
 
@@ -179,6 +194,7 @@ import {
   Users,
 } from 'lucide-vue-next'
 import EChart from '../../components/base/EChart.vue'
+import PerformanceMonitorPane from '../query/components/PerformanceMonitorPane.vue'
 import { useUserStore } from '../../stores/user'
 import { dashboardApi, type MetricsOverview } from '../../api/dashboard'
 

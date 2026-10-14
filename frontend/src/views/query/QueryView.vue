@@ -109,6 +109,9 @@
               <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" @click="limitsDialogOpen = true">
                 <Gauge class="w-3.5 h-3.5" /> 限流
               </button>
+              <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" :disabled="!grid.rows.length" @click="openSaveReport">
+                <BookmarkPlus class="w-3.5 h-3.5" /> 另存报表
+              </button>
               <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" @click="shareDialogOpen = true">
                 <Share2 class="w-3.5 h-3.5" /> 分享
               </button>
@@ -763,6 +766,45 @@
       <ExportApprovalDialog :columns="grid.columns" :rows="grid.rows.length" :sensitive-count="sensitiveCount" @close="exportDialogOpen=false" @submit="onExportSubmit" @masked-export="onMaskedExport" />
     </el-dialog>
 
+    <el-dialog v-model="saveReportOpen" title="另存为报表" width="520px" class="glass-dialog" :close-on-click-modal="false">
+      <div class="space-y-3">
+        <div>
+          <p class="text-xs text-white/50 mb-1">报表名称</p>
+          <el-input v-model="saveReportForm.name" placeholder="例如：月度订单趋势" maxlength="64" />
+        </div>
+        <div>
+          <p class="text-xs text-white/50 mb-1">描述</p>
+          <el-input v-model="saveReportForm.description" type="textarea" :rows="2" placeholder="报表用途" />
+        </div>
+        <div class="flex gap-3">
+          <div class="flex-1">
+            <p class="text-xs text-white/50 mb-1">图表类型</p>
+            <el-select v-model="saveReportForm.chart_type" class="w-full" popper-class="glass-popper">
+              <el-option label="表格" value="table" />
+              <el-option label="柱状图" value="bar" />
+              <el-option label="折线图" value="line" />
+              <el-option label="饼图" value="pie" />
+              <el-option label="指标卡" value="metric" />
+            </el-select>
+          </div>
+          <div class="flex-1">
+            <p class="text-xs text-white/50 mb-1">可见性</p>
+            <el-select v-model="saveReportForm.visibility" class="w-full" popper-class="glass-popper">
+              <el-option label="私有" value="private" />
+              <el-option label="共享" value="shared" />
+            </el-select>
+          </div>
+        </div>
+        <p class="text-[11px] text-white/30">将固化：数据源 #{{ currentConn?.id }} / 库 {{ currentTab.database || '默认' }} / SQL + 结果列 {{ grid.columns.length }} 列</p>
+      </div>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <button class="ghost-button" @click="saveReportOpen=false">取消</button>
+          <button class="liquid-button" :disabled="savingReport" @click="doSaveReport">{{ savingReport ? '保存中…' : '保存' }}</button>
+        </div>
+      </template>
+    </el-dialog>
+
     <!-- Redis 新建 Key -->
     <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
@@ -813,6 +855,7 @@ import {
   ListOrdered,
   ShieldCheck,
   Bookmark,
+  BookmarkPlus,
   Braces,
   Camera,
   CheckCircle2,
@@ -867,6 +910,7 @@ import ExportApprovalDialog from './components/ExportApprovalDialog.vue'
 import ColumnAuthPane from './components/ColumnAuthPane.vue'
 import WatermarkOverlay from './components/WatermarkOverlay.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
+import { reportApi } from '../../api/report'
 import {
   workbenchApi,
   type ExecResult,
@@ -1523,6 +1567,10 @@ const limitsDialogOpen = ref(false)
 const maskEnabled = ref(false)
 const exportRequests = ref<{ id:number; format:string; rows:number; reason:string; status:'pending'|'approved'|'rejected'; created_at:string }[]>([])
 const exportDialogOpen = ref(false)
+const saveReportOpen = ref(false)
+const savingReport = ref(false)
+const saveReportForm = reactive({ name: '', description: '', visibility: 'private' as 'private' | 'shared', chart_type: 'table' as string })
+
 const columnPerms = ref<Record<string, 'visible'|'masked'|'hidden'>>({})
 const watermarkEnabled = ref(true)
 const rowPolicyEnabled = ref(false)
@@ -2396,6 +2444,34 @@ function clearExportRequests() {
   exportRequests.value = exportRequests.value.filter(r=>r.status==='pending')
   ElMessage.success('已清空已处理')
 }
+function openSaveReport() {
+  if (!grid.rows.length) { ElMessage.warning('暂无结果可保存'); return }
+  if (!currentConn.value) { ElMessage.warning('请先选择数据源'); return }
+  if (!currentTab.value.sql.trim()) { ElMessage.warning('SQL 为空'); return }
+  saveReportForm.name = `报表 ${new Date().toLocaleDateString()}`
+  saveReportForm.description = ''
+  saveReportForm.visibility = 'private'
+  saveReportForm.chart_type = 'table'
+  saveReportOpen.value = true
+}
+async function doSaveReport() {
+  if (!saveReportForm.name.trim()) { ElMessage.warning('名称必填'); return }
+  savingReport.value = true
+  try {
+    await reportApi.create({
+      name: saveReportForm.name.trim(),
+      description: saveReportForm.description.trim(),
+      connection_id: currentConn.value!.id,
+      database: currentTab.value.database,
+      sql: currentTab.value.sql,
+      chart_type: saveReportForm.chart_type as any,
+      chart_config: { dimension: grid.columns[0] || '', metrics: grid.columns.slice(1,2), aggregation: 'sum' } as any,
+      visibility: saveReportForm.visibility,
+    })
+    ElMessage.success('已另存为报表，可在报表中心查看')
+    saveReportOpen.value = false
+  } catch (e:any) { ElMessage.error(e?.message || '保存失败') } finally { savingReport.value = false }
+}
 function onSetColumnPerm(col: string, perm: 'visible'|'masked'|'hidden') {
   columnPerms.value = { ...columnPerms.value, [col]: perm }
   ElMessage.success(`${col} 已设为 ${perm==='visible' ? '可见' : perm==='masked' ? '掩码' : '隐藏'}`)
@@ -2607,6 +2683,12 @@ onMounted(async () => {
   if (preselect > 0) {
     const conn = treeRef.value?.findConnection(preselect)
     if (conn) onSelectConnection(conn)
+  }
+  const initSql = route.query.sql as string | undefined
+  if (initSql) {
+    const tab = currentTab.value
+    tab.sql = decodeURIComponent(initSql)
+    resultTab.value = 'result'
   }
 })
 </script>
