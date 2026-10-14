@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.23.0', env: 'arena', note: 'Step23: 报表另存+仪表盘监控+资产血缘' })
+    return ok(res, { status: 'ok', version: 'mock-0.24.0', env: 'arena', note: 'Step24: 工单中心集成+血缘联动' })
   }
 
   // 认证

@@ -73,6 +73,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '代理管理', icon: 'Waypoints' },
       },
       {
+        path: 'tickets',
+        name: 'tickets',
+        component: () => import('../views/ticket/TicketView.vue'),
+        meta: { title: '工单中心', icon: 'Ticket' },
+      },
+      {
         path: 'users',
         name: 'users',
         component: () => import('../views/admin/UsersView.vue'),

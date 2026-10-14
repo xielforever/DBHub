@@ -99,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Search, Ticket } from 'lucide-vue-next'
 
@@ -107,6 +107,7 @@ interface TicketItem { id: number; title: string; type: 'ddl'|'dml'|'index'; tab
 
 const props = defineProps<{
   tickets: TicketItem[]
+  prefill?: { title?: string; table?: string; sql?: string; risk?: string; reason?: string; type?: string } | null
 }>()
 const emit = defineEmits<{
   (e: 'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_at'>): void
@@ -118,6 +119,16 @@ const statusFilter = ref('')
 const keyword = ref('')
 const showCreate = ref(false)
 const form = reactive({ title: '', type: 'ddl', table: 'orders', sql: '', risk: 'low', reason: '' })
+watch(() => props.prefill, (v) => {
+  if (!v) return
+  if (v.title) form.title = v.title
+  if (v.table) form.table = v.table
+  if (v.sql) form.sql = v.sql
+  if (v.risk) form.risk = v.risk as any
+  if ((v as any).type) form.type = (v as any).type as any
+  if (v.reason) form.reason = v.reason
+  showCreate.value = true
+}, { immediate: true, deep: true })
 
 const filtered = computed(() => {
   let out = [...props.tickets]

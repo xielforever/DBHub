@@ -182,6 +182,7 @@ import {
   Settings,
   ShieldCheck,
   SquareTerminal,
+  Ticket,
   UsersRound,
   Waypoints,
   X,
@@ -216,6 +217,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
       { name: 'reports', label: '报表中心', to: '/reports', icon: BarChart3 },
       { name: 'dashboards', label: '仪表盘', to: '/dashboards', icon: LayoutDashboard },
       { name: 'proxies', label: '代理管理', to: '/proxies', icon: Waypoints },
+      { name: 'tickets', label: '工单中心', to: '/tickets', icon: Ticket },
     ],
   },
   {

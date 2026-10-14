@@ -477,7 +477,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Boxes,
@@ -513,6 +513,7 @@ import TreeView from './components/TreeView.vue'
 import DataLineagePane from '../query/components/DataLineagePane.vue'
 
 const route = useRoute()
+const router = useRouter()
 const userStore = useUserStore()
 const canWrite = computed(() => userStore.role !== 'readonly')
 
@@ -856,8 +857,10 @@ function onLineageSelect(node: any) {
 }
 
 function onLineageCreateTicket() {
-  ElMessage.success('已基于血缘影响创建变更工单（演示）')
-  // 若需可在此打开工单创建弹窗或跳转
+  if (!detail.value) return
+  const s = detail.value.snapshot
+  router.push({ path: '/tickets', query: { table: s.table_name, db: s.database_name, risk: 'medium', title: `${s.table_name} 变更（血缘影响）` } })
+  ElMessage.success('已跳转工单中心，可基于血缘影响创建变更单')
 }
 
 // ---------- 同步 ----------
