@@ -128,7 +128,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.26.0', env: 'arena', note: 'Step26: 工单后端落库+Mock' })
+    return ok(res, { status: 'ok', version: 'mock-0.27.0', env: 'arena', note: 'Step27: 血缘后端实时+Mock' })
   }
 
   // 认证
@@ -1018,6 +1018,41 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { id })
   }
 
+  // 血缘 - Step27 mock：根据 table/depth 返回上游/下游模拟
+  if (pathname === '/api/v1/assets/lineage' && method === 'GET') {
+    const table = String(query.table || query.table_name || 'orders').trim() || 'orders'
+    const db = String(query.database || query.db || 'orders').trim() || 'orders'
+    const schema = String(query.schema || 'public').trim() || 'public'
+    const cid = Number(query.connection_id || 1)
+    const depth = Math.max(1, Math.min(3, Number(query.depth || 2)))
+    const centerId = `${cid}.${db}.${schema}.${table}`.toLowerCase()
+    const centerNode = { id: centerId, name: table, type: 'table', db, desc: '当前 · 订单主表' }
+    const upstream = [
+      { id: `${cid}.users.public.users`.toLowerCase(), name: 'users', type: 'table', db: 'users', desc: '用户主表 · FK orders.user_id → users.id' },
+      { id: `${cid}.shop.public.products`.toLowerCase(), name: 'products', type: 'table', db: 'shop', desc: '商品表 · JOIN products.id' },
+      { id: `${cid}.orders.public.orders_staging`.toLowerCase(), name: 'orders_staging', type: 'table', db: 'orders', desc: '临时表 · ETL 来源' },
+    ].slice(0, depth)
+    const downstream = [
+      { id: `${cid}.orders.public.v_monthly_sales`.toLowerCase(), name: 'v_monthly_sales', type: 'view', db: 'orders', desc: '视图 · 依赖 orders' },
+      { id: `${cid}.orders.public.v_user_orders`.toLowerCase(), name: 'v_user_orders', type: 'view', db: 'orders', desc: '视图 · 关联 users' },
+      { id: `report:1`, name: '月度销售趋势', type: 'report', db: 'orders', desc: '报表 #1 · SELECT orders' },
+      { id: `report:3`, name: '今日订单指标', type: 'report', db: 'orders', desc: '报表 #3 · 大盘' },
+    ].slice(0, depth + 1)
+    const nodes = [centerNode, ...upstream, ...downstream]
+    const edges = []
+    for (const u of upstream) edges.push({ from: u.id, to: centerId, kind: 'fk' })
+    for (const d of downstream) {
+      const kind = d.type === 'report' ? 'report' : (d.type === 'view' ? 'sql' : 'fk')
+      edges.push({ from: centerId, to: d.id, kind })
+    }
+    // 深度>1时补充二级边演示
+    if (depth > 1 && upstream.length > 0) {
+      edges.push({ from: `${cid}.users.public.user_profiles`.toLowerCase(), to: upstream[0].id, kind: 'fk' })
+      nodes.push({ id: `${cid}.users.public.user_profiles`.toLowerCase(), name: 'user_profiles', type: 'table', db: 'users', desc: '二级上游 · users 的扩展' })
+    }
+    return ok(res, { center: centerId, nodes, edges, upstream: upstream.length + (depth>1?1:0), downstream: downstream.length, impact: { tables: upstream.length, views: 2, reports: 2 } })
+  }
+
   // 公开分享
   if (pathname.startsWith('/api/v1/public/s/') && method === 'GET') {
     const token = pathname.split('/').pop() || ''
@@ -1219,5 +1254,5 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[mock-backend] listening on 0.0.0.0:${PORT} - datasource mock v0.5.0: ${connections.length} conns, ${proxies.length} proxies, ${tunnels.length} tunnels(deprecated)`)
+  console.log(`[mock-backend] listening on 0.0.0.0:${PORT} - datasource mock v0.5.0+lineage: ${connections.length} conns, ${proxies.length} proxies, ${tunnels.length} tunnels(deprecated)`)
 })

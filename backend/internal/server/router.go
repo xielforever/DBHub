@@ -18,6 +18,7 @@ import (
 	"github.com/user/dbhub/internal/proxyapi"
 	"github.com/user/dbhub/internal/queryapi"
 	"github.com/user/dbhub/internal/reportapi"
+	"github.com/user/dbhub/internal/lineageapi"
 	"github.com/user/dbhub/internal/ticketapi"
 )
 
@@ -198,6 +199,10 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 				middleware.Chain(http.HandlerFunc(aH.Star), requireAuth))
 			mux.Handle("GET /api/v1/users/brief",
 				middleware.Chain(http.HandlerFunc(aH.BriefUsers), requireAuth))
+			// 血缘（M5，Step27 后端实时计算 + 缓存）
+			lH := lineageapi.NewHandler(deps.Meta, deps.History, deps.Reports, deps.Dashboards, log)
+			mux.Handle("GET /api/v1/assets/lineage",
+				middleware.Chain(http.HandlerFunc(lH.Lineage), requireAuth))
 		}
 
 		// ---------- 报表中心（M3/M4） ----------

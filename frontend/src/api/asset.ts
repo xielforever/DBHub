@@ -272,4 +272,7 @@ export const assetApi = {
   briefUsers() {
     return request.get<unknown, { items: BriefUser[] }>('/users/brief')
   },
+  lineage(params: { connection_id: number; database: string; schema: string; table: string; depth?: number | string }) {
+    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number> }>('/assets/lineage', { params })
+  },
 }

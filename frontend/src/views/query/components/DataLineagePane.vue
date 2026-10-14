@@ -6,7 +6,7 @@
       </div>
       <div class="flex-1 min-w-0">
         <p class="text-xs font-medium text-white/80">数据血缘</p>
-        <p class="text-[10px] text-white/40">上游 · 当前 · 下游 · 影响面</p>
+        <p class="text-[10px] text-white/40">上游 · 当前 · 下游 · 影响面 <span v-if="isMock" class="text-amber-300">· 演示</span><span v-else class="text-emerald-300">· 实时</span></p>
       </div>
       <el-select v-model="depth" size="small" class="w-20" popper-class="glass-popper">
         <el-option label="1层" :value="1" />
@@ -103,11 +103,14 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Eye, GitBranch, RefreshCw, Search, Table2 } from 'lucide-vue-next'
+import { assetApi } from '../../../api/asset'
 
 const props = defineProps<{
   currentTable: string
   currentDb: string
   fallbackTable: string
+  connectionId?: number
+  schema?: string
 }>()
 
 const emit = defineEmits<{
@@ -119,32 +122,101 @@ const depth = ref(2)
 const direction = ref<'both'|'upstream'|'downstream'>('both')
 const filter = ref('')
 const loading = ref(false)
+const isMock = ref(false)
 
-interface Node { id: string; name: string; type: 'table'|'view'|'report'; db: string; desc: string }
+interface Node { id: string; name: string; type: 'table'|'view'|'report'|'dashboard'; db: string; desc: string }
 const upstream = ref<Node[]>([])
 const downstream = ref<Node[]>([])
 
-function generate() {
-  loading.value = true
-  setTimeout(() => {
-    upstream.value = [
-      { id: 'u1', name: 'users', type: 'table' as const, db: 'users', desc: '用户主表 · 外键 users.id' },
-      { id: 'u2', name: 'products', type: 'table' as const, db: 'shop', desc: '商品表 · JOIN products.id' },
-      { id: 'u3', name: 'orders_staging', type: 'table' as const, db: 'orders', desc: '临时表 · ETL 来源' },
-    ].slice(0, depth.value) as Node[]
-    downstream.value = [
-      { id: 'd1', name: 'v_monthly_sales', type: 'view' as const, db: 'orders', desc: '视图 · 依赖 orders' },
-      { id: 'd2', name: 'v_user_orders', type: 'view' as const, db: 'orders', desc: '视图 · 关联 users' },
-      { id: 'd3', name: '月度销售趋势', type: 'report' as const, db: 'orders', desc: '报表 #1 · 订阅 12 人' },
-      { id: 'd4', name: '今日订单指标', type: 'report' as const, db: 'orders', desc: '报表 #3 · 大盘' },
-    ].slice(0, depth.value + 1) as Node[]
+async function fetchReal(): Promise<boolean> {
+  const table = props.currentTable || props.fallbackTable
+  if (!table) return false
+  // 若未提供 connectionId/database，则仍尝试按表名查询（后端会模糊匹配）
+  try {
+    const resp: any = await assetApi.lineage({
+      connection_id: props.connectionId || 0,
+      database: props.currentDb || '',
+      schema: props.schema || '',
+      table,
+      depth: depth.value,
+    })
+    const nodes: Node[] = (resp.nodes || []).map((n: any) => ({
+      id: n.id, name: n.name, type: n.type, db: n.db, desc: n.desc || n.type,
+    }))
+    const edges: any[] = resp.edges || []
+    // 中心 id 推断：与当前表同名的节点
+    const center = nodes.find(n => n.name.toLowerCase() === table.toLowerCase()) || nodes.find(n => n.desc === '当前')
+    const centerId = center?.id
+    const ups: Node[] = []
+    const downs: Node[] = []
+    if (centerId) {
+      for (const e of edges) {
+        if (e.to === centerId) {
+          const n = nodes.find(x => x.id === e.from)
+          if (n && n.id !== centerId) ups.push(n)
+        }
+        if (e.from === centerId) {
+          const n = nodes.find(x => x.id === e.to)
+          if (n && n.id !== centerId) downs.push(n)
+        }
+      }
+      // 若边不足，退化：按类型分（report 视为下游，其余按 id 排序前后）
+      if (!ups.length && !downs.length) {
+        for (const n of nodes) {
+          if (n.id === centerId) continue
+          if (n.type === 'report' || n.type === 'view') downs.push(n)
+          else ups.push(n)
+        }
+      }
+    } else {
+      // 未识别中心，简单按半分
+      const half = Math.floor(nodes.length / 2)
+      ups.push(...nodes.slice(0, half))
+      downs.push(...nodes.slice(half))
+    }
+    // 过滤
+    let upsF = ups
+    let downsF = downs
     if (filter.value) {
       const kw = filter.value.toLowerCase()
-      upstream.value = upstream.value.filter(n => n.name.toLowerCase().includes(kw))
-      downstream.value = downstream.value.filter(n => n.name.toLowerCase().includes(kw))
+      upsF = upsF.filter(n => n.name.toLowerCase().includes(kw) || n.db.toLowerCase().includes(kw))
+      downsF = downsF.filter(n => n.name.toLowerCase().includes(kw) || n.db.toLowerCase().includes(kw))
     }
-    loading.value = false
-  }, 400)
+    // 按 depth 截断（后端已按 depth，但前端再保险）
+    upstream.value = upsF.slice(0, depth.value)
+    downstream.value = downsF.slice(0, depth.value + 1)
+    isMock.value = false
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+function generateMock() {
+  isMock.value = true
+  upstream.value = [
+    { id: 'u1', name: 'users', type: 'table' as const, db: 'users', desc: '用户主表 · 外键 users.id' },
+    { id: 'u2', name: 'products', type: 'table' as const, db: 'shop', desc: '商品表 · JOIN products.id' },
+    { id: 'u3', name: 'orders_staging', type: 'table' as const, db: 'orders', desc: '临时表 · ETL 来源' },
+  ].slice(0, depth.value) as Node[]
+  downstream.value = [
+    { id: 'd1', name: 'v_monthly_sales', type: 'view' as const, db: 'orders', desc: '视图 · 依赖 orders' },
+    { id: 'd2', name: 'v_user_orders', type: 'view' as const, db: 'orders', desc: '视图 · 关联 users' },
+    { id: 'd3', name: '月度销售趋势', type: 'report' as const, db: 'orders', desc: '报表 #1 · 订阅 12 人' },
+    { id: 'd4', name: '今日订单指标', type: 'report' as const, db: 'orders', desc: '报表 #3 · 大盘' },
+  ].slice(0, depth.value + 1) as Node[]
+  if (filter.value) {
+    const kw = filter.value.toLowerCase()
+    upstream.value = upstream.value.filter(n => n.name.toLowerCase().includes(kw))
+    downstream.value = downstream.value.filter(n => n.name.toLowerCase().includes(kw))
+  }
+}
+
+async function generate() {
+  loading.value = true
+  const ok = await fetchReal()
+  if (!ok) generateMock()
+  loading.value = false
 }
 
 const upstreamNodes = computed(() => upstream.value)

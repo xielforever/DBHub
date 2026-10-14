@@ -339,7 +339,7 @@
             <pre class="text-[11px] leading-relaxed font-mono text-white/70 bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ detail.snapshot.ddl_text || '—' }}</pre>
           </el-tab-pane>
           <el-tab-pane label="血缘" name="lineage">
-            <DataLineagePane :current-table="detail.snapshot.table_name" :current-db="detail.snapshot.database_name" :fallback-table="detail.snapshot.table_name" @select="onLineageSelect" @create-ticket="onLineageCreateTicket" />
+            <DataLineagePane :current-table="detail.snapshot.table_name" :current-db="detail.snapshot.database_name" :fallback-table="detail.snapshot.table_name" :connection-id="detail.snapshot.connection_id" :schema="detail.snapshot.schema_name" @select="onLineageSelect" @create-ticket="onLineageCreateTicket" />
           </el-tab-pane>
           <el-tab-pane label="数据预览" name="preview">
             <div class="space-y-3">
