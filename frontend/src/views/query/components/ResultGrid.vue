@@ -211,7 +211,7 @@
                       <span v-if="cell === null || cell === undefined" class="text-white/25 italic select-none">NULL</span>
                       <span v-else-if="isMysqlExplain && columns[ci]?.toLowerCase() === 'type'" class="px-1.5 py-0.5 rounded-full text-[10px]" :class="mysqlTypeBadge(cell as string)">{{ cell }}</span>
                       <span v-else class="flex items-center gap-1">
-                        <span class="truncate">{{ formatCell(cell) }}</span>
+                        <span class="truncate">{{ displayCell(ci, cell) }}</span>
                         <Copy class="w-3 h-3 opacity-0 group-hover/cell:opacity-60 text-white/40 ml-1 shrink-0" />
                       </span>
                     </td>
@@ -238,7 +238,7 @@
             <span class="text-xs text-white/50">{{ col }}</span>
             <button class="ghost-button !py-0.5 !px-1.5 text-[10px]" @click="copyCell(detailRow[idx])"><Copy class="w-3 h-3" /> 复制</button>
           </div>
-          <div class="text-sm font-mono break-all whitespace-pre-wrap" :class="cellClass(detailRow[idx], idx)">{{ formatCell(detailRow[idx]) || 'NULL' }}</div>
+          <div class="text-sm font-mono break-all whitespace-pre-wrap" :class="cellClass(detailRow[idx], idx)">{{ (props.maskEnabled && isSensitiveCol(col) ? maskCellValue(col, detailRow[idx]) : (formatCell(detailRow[idx]) || 'NULL')) }}</div>
         </div>
         <div class="flex gap-2">
           <button class="ghost-button !py-1.5 !px-3 text-xs flex-1" @click="copyRowAsJSON(detailIndex)"><Braces class="w-3 h-3" /> 复制为 JSON</button>
@@ -284,6 +284,7 @@ const props = withDefaults(
     sql?: string
     fullscreen?: boolean
     tableName?: string
+    maskEnabled?: boolean
   }>(),
   {
     truncated: false,
@@ -291,6 +292,7 @@ const props = withDefaults(
     sql: '',
     fullscreen: false,
     tableName: 'result_table',
+    maskEnabled: false,
   },
 )
 
@@ -526,6 +528,35 @@ function formatCell(cell: unknown): string {
     try { return JSON.stringify(cell) } catch { return String(cell) }
   }
   return String(cell)
+}
+function isSensitiveCol(col: string) {
+  return /(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(col)
+}
+function maskCellValue(col: string, val: unknown) {
+  const s = formatCell(val)
+  if (!s) return s
+  if (/email/i.test(col)) {
+    const parts = s.split('@')
+    if (parts.length===2) return parts[0]!.charAt(0) + '***@' + parts[1]
+    return '***'
+  }
+  if (/phone|mobile|tel/i.test(col)) {
+    if (s.length>=7) return s.slice(0,3) + '****' + s.slice(-4)
+    return s.slice(0,2) + '***'
+  }
+  if (/id_card|idcard|ssn/i.test(col)) {
+    if (s.length>6) return s.slice(0,4) + '*'.repeat(s.length-6) + s.slice(-2)
+    return '***'
+  }
+  if (/bank|credit|card/i.test(col)) return '**** **** **** ' + s.slice(-4)
+  if (/name/i.test(col) && s.length>=2) return s.charAt(0) + '*'.repeat(s.length-1)
+  return s.slice(0,1) + '***'
+}
+function displayCell(colIdx: number, cell: unknown): string {
+  const col = props.columns[colIdx] || ''
+  const s = formatCell(cell)
+  if (!props.maskEnabled || !isSensitiveCol(col)) return s
+  return maskCellValue(col, s)
 }
 function cellTitle(cell: unknown): string {
   if (cell === null || cell === undefined) return 'NULL'

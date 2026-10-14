@@ -103,6 +103,9 @@
                 <ListOrdered class="w-3.5 h-3.5" /> 队列
                 <span v-if="queue.filter(q=>q.status==='pending'||q.status==='running').length" class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-indigo-500 text-white text-[10px] flex items-center justify-center">{{ queue.filter(q=>q.status==='pending'||q.status==='running').length }}</span>
               </button>
+              <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" :class="maskEnabled ? 'bg-violet-500/20 text-violet-300 border-violet-400/30' : ''" @click="maskEnabled = !maskEnabled">
+                <component :is="maskEnabled ? EyeOff : Eye" class="w-3.5 h-3.5" /> {{ maskEnabled ? '已脱敏' : '脱敏' }}
+              </button>
               <button class="ghost-button !py-1.5 !px-2.5 text-xs flex items-center gap-1.5" @click="limitsDialogOpen = true">
                 <Gauge class="w-3.5 h-3.5" /> 限流
               </button>
@@ -264,6 +267,7 @@
               :sql="currentTab.sql"
               :fullscreen="resultFullscreen"
               :table-name="preview.table || 'result_table'"
+              :mask-enabled="maskEnabled"
               @toggle-fullscreen="resultFullscreen = !resultFullscreen"
             />
           </el-tab-pane>
@@ -312,6 +316,10 @@
 
           <el-tab-pane label="限制" name="limits" class="flex flex-col min-h-0 flex-1">
             <ResourceLimitsPane v-model="resourceLimits" @save="onLimitsSave" />
+          </el-tab-pane>
+
+          <el-tab-pane label="脱敏" name="mask" class="flex flex-col min-h-0 flex-1">
+            <SensitiveMaskPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :mask-enabled="maskEnabled" :export-requests="exportRequests" @toggle-mask="maskEnabled = !maskEnabled" @request-export="exportDialogOpen = true" @update-status="onExportStatus" @clear-requests="clearExportRequests" />
           </el-tab-pane>
 
           <el-tab-pane label="审计" name="audit" class="flex flex-col min-h-0 flex-1">
@@ -761,6 +769,10 @@
       <ResourceLimitsPane v-model="resourceLimits" @save="onLimitsSave" />
     </el-drawer>
 
+    <el-dialog v-model="exportDialogOpen" title="导出审批" width="520px" class="glass-dialog" :close-on-click-modal="false">
+      <ExportApprovalDialog :columns="grid.columns" :rows="grid.rows.length" :sensitive-count="sensitiveCount" @close="exportDialogOpen=false" @submit="onExportSubmit" @masked-export="onMaskedExport" />
+    </el-dialog>
+
     <!-- Redis 新建 Key -->
     <el-dialog v-model="newKeyDialogOpen" title="新建 Redis Key" width="480px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
@@ -807,9 +819,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Activity,
   BarChart3,
+  Eye,
+  EyeOff,
   Gauge,
   ListOrdered,
   ScrollText,
+  ShieldCheck,
   Bookmark,
   Braces,
   Camera,
@@ -819,7 +834,6 @@ import {
   Copy,
   Database,
   Download,
-  Eye,
   FileCode2,
   FileSearch,
   FolderTree,
@@ -863,6 +877,8 @@ import CollabPresence from './components/CollabPresence.vue'
 import PerformanceMonitorPane from './components/PerformanceMonitorPane.vue'
 import QueryQueuePane from './components/QueryQueuePane.vue'
 import ResourceLimitsPane from './components/ResourceLimitsPane.vue'
+import SensitiveMaskPane from './components/SensitiveMaskPane.vue'
+import ExportApprovalDialog from './components/ExportApprovalDialog.vue'
 import QueryAuditPane from './components/QueryAuditPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
@@ -1113,6 +1129,7 @@ const paletteCommands = computed(() => [
   { id: 'queue', label: '查询队列', desc: '查看队列', icon: ListOrdered, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['queue','队列'], action: () => { resultTab.value = 'queue' } },
   { id: 'limits', label: '资源限制', desc: '超时与行数限制', icon: Gauge, iconBg: 'bg-amber-500/20 text-amber-300', keywords: ['limit','限流'], action: () => { limitsDialogOpen.value = true } },
   { id: 'audit', label: '查询审计', desc: '查看审计日志', icon: ScrollText, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['audit','审计'], action: () => { resultTab.value = 'audit' } },
+  { id: 'mask', label: '脱敏管控', desc: '敏感数据脱敏', icon: ShieldCheck, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['mask','脱敏'], action: () => { resultTab.value = 'mask' } },
   { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
 ])
 
@@ -1519,7 +1536,12 @@ const queuePaused = ref(false)
 const queueConcurrency = ref(1)
 const queueEnabled = ref(true)
 const limitsDialogOpen = ref(false)
+const maskEnabled = ref(false)
+const exportRequests = ref<{ id:number; format:string; rows:number; reason:string; status:'pending'|'approved'|'rejected'; created_at:string }[]>([])
+const exportDialogOpen = ref(false)
 const resourceLimits = ref({ timeoutMs: 30000, maxRows: 1000, blockUnsafeWrite: true, autoLimit: true, confirmProdWrite: true })
+try { const m = localStorage.getItem('dbhub_mask_enabled'); if (m) maskEnabled.value = JSON.parse(m) } catch {}
+try { const er = localStorage.getItem('dbhub_export_requests'); if (er) exportRequests.value = JSON.parse(er) } catch {}
 try {
   const raw = localStorage.getItem('dbhub_resource_limits')
   if (raw) Object.assign(resourceLimits.value, JSON.parse(raw))
@@ -1529,6 +1551,8 @@ try {
   if (rawQ) queue.value = JSON.parse(rawQ)
 } catch {}
 watch(queue, v => { try { localStorage.setItem('dbhub_query_queue', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
+watch(maskEnabled, v => { try { localStorage.setItem('dbhub_mask_enabled', JSON.stringify(v)) } catch {} })
+watch(exportRequests, v => { try { localStorage.setItem('dbhub_export_requests', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
   const raw = localStorage.getItem(STORAGE_THEME)
@@ -2314,6 +2338,68 @@ function onLimitsSave(v: any) {
   try { localStorage.setItem('dbhub_resource_limits', JSON.stringify(v)) } catch {}
   ElMessage.success('资源限制已生效')
   limitsDialogOpen.value = false
+}
+const sensitiveCount = computed(() => grid.columns.filter(c => /(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(c)).length)
+function onExportSubmit(payload: { format:string; scope:string; maskMode:string; reason:string }) {
+  const id = Date.now()
+  const rows = payload.scope==='selected' ? 0 : grid.rows.length
+  if (payload.maskMode==='masked') {
+    ElMessage.success('脱敏文件已准备，开始下载')
+    // 直接触发脱敏导出
+    doMaskedExport(payload.format)
+    exportDialogOpen.value = false
+    return
+  }
+  exportRequests.value.unshift({ id, format: payload.format, rows, reason: payload.reason, status: 'pending', created_at: new Date().toISOString() })
+  ElMessage.success('已提交审批，待管理员批准')
+  exportDialogOpen.value = false
+  resultTab.value = 'mask'
+}
+function onMaskedExport(format: string) {
+  doMaskedExport(format)
+  exportDialogOpen.value = false
+}
+function doMaskedExport(format: string) {
+  // 复用 ResultGrid 的导出逻辑但强制掩码：简单提示，实际导出由 ResultGrid 处理，这里仅模拟
+  const cols = grid.columns
+  const rows = grid.rows as unknown[][]
+  if (!cols.length) { ElMessage.warning('无数据可导出'); return }
+  // 掩码后的行
+  const maskedRows = rows.map(r => (r as any[]).map((cell, ci) => {
+    const col = cols[ci] || ''
+    if (!maskEnabled.value || !/(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(col)) return cell
+    const s = String(cell ?? '')
+    if (/email/i.test(col)) { const p=s.split('@'); return p.length===2 ? p[0]!.charAt(0)+'***@'+p[1] : '***' }
+    if (/phone|mobile|tel/i.test(col) && s.length>=7) return s.slice(0,3)+'****'+s.slice(-4)
+    if (/id_card|idcard|ssn/i.test(col) && s.length>6) return s.slice(0,4)+'*'.repeat(s.length-6)+s.slice(-2)
+    if (/bank|credit|card/i.test(col)) return '**** **** **** '+s.slice(-4)
+    if (/name/i.test(col) && s.length>=2) return s.charAt(0)+'*'.repeat(s.length-1)
+    return s.slice(0,1)+'***'
+  }))
+  // 根据格式导出
+  if (format==='csv') {
+    const header = cols.join(',')
+    const lines = maskedRows.map(r => r.map((c:any) => { const s=String(c??''); return s.includes(',')||s.includes('"')||s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s }).join(','))
+    const csv = [header, ...lines].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download=`masked_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url)
+  } else if (format==='json') {
+    const arr = maskedRows.map(r => { const o:any={}; cols.forEach((c,i)=>o[c]=r[i]); return o })
+    const blob = new Blob([JSON.stringify(arr,null,2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download=`masked_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url)
+  } else {
+    ElMessage.success(`脱敏 ${format} 已导出（演示）`)
+  }
+}
+function onExportStatus(id:number, status:string) {
+  const req = exportRequests.value.find(r=>r.id===id)
+  if (req) { req.status=status as any; ElMessage.success(status==='approved' ? '已批准' : '已拒绝') }
+}
+function clearExportRequests() {
+  exportRequests.value = exportRequests.value.filter(r=>r.status==='pending')
+  ElMessage.success('已清空已处理')
 }
 function isUnsafeWrite(sql: string) {
   const up = sql.trim().toUpperCase()

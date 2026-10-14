@@ -121,7 +121,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.17.0', env: 'arena', note: 'Step17: 队列+限流+审计+分享协作+性能监控+火焰图+对比+Vim+主题' })
+    return ok(res, { status: 'ok', version: 'mock-0.18.0', env: 'arena', note: 'Step18: 脱敏+审批+队列+限流+审计+分享协作+性能监控' })
   }
 
   // 认证
@@ -1118,6 +1118,29 @@ const server = http.createServer(async (req, res) => {
     const pageSize = Number(query.page_size || 20)
     const start = (page-1)*pageSize
     return ok(res, { items: items.slice(start, start+pageSize), total: items.length, page, page_size: pageSize })
+  }
+  if (!globalThis.__exportApprovals) globalThis.__exportApprovals = []
+  if (pathname === '/api/v1/query/export/approvals' && method === 'GET') {
+    let items = [...globalThis.__exportApprovals]
+    const page = Number(query.page || 1)
+    const pageSize = Number(query.page_size || 20)
+    const start = (page-1)*pageSize
+    return ok(res, { items: items.slice(start, start+pageSize), total: items.length, page, page_size: pageSize })
+  }
+  if (pathname === '/api/v1/query/export/approval' && method === 'POST') {
+    const body = await readBody(req)
+    const id = Date.now()
+    const item = { id, connection_id: body.connection_id, format: body.format || 'csv', rows: body.rows || 0, reason: body.reason || '', status: 'pending', created_at: new Date().toISOString(), updated_at: new Date().toISOString() }
+    globalThis.__exportApprovals.unshift(item)
+    return ok(res, item)
+  }
+  if (pathname.match(/^\/api\/v1\/query\/export\/approval\/\d+\/(approve|reject)$/) && method === 'POST') {
+    const parts = pathname.split('/')
+    const id = Number(parts[6])
+    const action = parts[7]
+    const item = globalThis.__exportApprovals.find((x) => x.id === id)
+    if (item) { item.status = action === 'approve' ? 'approved' : 'rejected'; item.updated_at = new Date().toISOString() }
+    return ok(res, item || { id, status: action })
   }
   if (pathname.startsWith('/api/v1/')) {
     return ok(res, { items: [], total: 0 })
