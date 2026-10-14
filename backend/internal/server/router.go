@@ -18,6 +18,7 @@ import (
 	"github.com/user/dbhub/internal/proxyapi"
 	"github.com/user/dbhub/internal/queryapi"
 	"github.com/user/dbhub/internal/reportapi"
+	"github.com/user/dbhub/internal/ticketapi"
 )
 
 // Deps 路由装配所需的仓储与处理器依赖（接入 PostgreSQL 后非空）。
@@ -32,6 +33,7 @@ type Deps struct {
 	Reports    *db.ReportRepository
 	Dashboards *db.DashboardRepository
 	Shares     *db.ShareRepository
+	Tickets    *db.TicketRepository
 }
 
 // NewRouter 组装全部路由。
@@ -127,6 +129,19 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 				middleware.Chain(http.HandlerFunc(proxyH.Update), requireAuth, canWrite, auditMW))
 			mux.Handle("DELETE /api/v1/proxies/{id}",
 				middleware.Chain(http.HandlerFunc(proxyH.Delete), requireAuth, canWrite, auditMW))
+		}
+
+		// ---------- 工单中心（Step26 落库） ----------
+		if deps.Tickets != nil {
+			tH := ticketapi.NewHandler(deps.Tickets, log)
+			mux.Handle("POST /api/v1/tickets",
+				middleware.Chain(http.HandlerFunc(tH.Create), requireAuth, canWrite, auditMW))
+			mux.Handle("GET /api/v1/tickets",
+				middleware.Chain(http.HandlerFunc(tH.List), requireAuth))
+			mux.Handle("GET /api/v1/tickets/{id}",
+				middleware.Chain(http.HandlerFunc(tH.Get), requireAuth))
+			mux.Handle("POST /api/v1/tickets/{id}/status",
+				middleware.Chain(http.HandlerFunc(tH.UpdateStatus), requireAuth, canWrite, auditMW))
 		}
 
 		// ---------- 仪表盘汇总指标 ----------

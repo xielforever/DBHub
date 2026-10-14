@@ -49,6 +49,13 @@ const dashboards = [
   { id: 2, name: '运营监控', description: '核心监控', visibility: 'private', layout: [{ report_id: 2, x: 0, y: 0, w: 12, h: 4 }], owner_user_id: 1, owner_name: 'admin', starred_by: [], starred: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
 ]
 
+const tickets = [
+  { id: 1001, title: 'orders 添加索引 idx_amount', type: 'index', table_name: 'orders', table: 'orders', database_name: 'orders', connection_id: 1, sql_text: 'CREATE INDEX idx_amount ON orders(total_amount)', sql: 'CREATE INDEX idx_amount ON orders(total_amount)', risk: 'low', status: 'pending', requester_id: 1, requester: 'admin', reason: '加速金额范围查询', created_at: new Date(Date.now()-3600000*2).toISOString(), updated_at: new Date().toISOString() },
+  { id: 1002, title: 'customers 敏感列脱敏', type: 'ddl', table_name: 'customers', table: 'customers', database_name: 'orders', connection_id: 1, sql_text: 'ALTER TABLE customers ALTER COLUMN phone TYPE varchar(20)', sql: 'ALTER TABLE customers ALTER COLUMN phone TYPE varchar(20)', risk: 'medium', status: 'approved', requester_id: 1, requester: 'admin', reason: '合规脱敏', created_at: new Date(Date.now()-3600000*24).toISOString(), updated_at: new Date().toISOString() },
+  { id: 1003, title: 'order_items 清理过期数据', type: 'dml', table_name: 'order_items', table: 'order_items', database_name: 'orders', connection_id: 1, sql_text: "DELETE FROM order_items WHERE created_at < now() - interval '90 days'", sql: "DELETE FROM order_items WHERE created_at < now() - interval '90 days'", risk: 'high', status: 'executed', requester_id: 2, requester: 'dev1', reason: '归档清理', created_at: new Date(Date.now()-3600000*50).toISOString(), updated_at: new Date().toISOString() },
+]
+let ticketIdSeq = 1003
+
 const shares = []
 
 let snippetIdSeq = 5
@@ -121,7 +128,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.25.0', env: 'arena', note: 'Step25: 文档容器收口+生产镜像' })
+    return ok(res, { status: 'ok', version: 'mock-0.26.0', env: 'arena', note: 'Step26: 工单后端落库+Mock' })
   }
 
   // 认证
@@ -920,6 +927,68 @@ const server = http.createServer(async (req, res) => {
   }
 
   // 分享
+  // ---------- Tickets ----------
+  if (pathname === '/api/v1/tickets' && method === 'GET') {
+    let items = [...tickets]
+    const q = String(query.q || '').toLowerCase()
+    const status = String(query.status || '')
+    const type = String(query.type || '')
+    if (q) items = items.filter(t => t.title.toLowerCase().includes(q) || t.table.toLowerCase().includes(q) || t.sql.toLowerCase().includes(q))
+    if (status) items = items.filter(t => t.status === status)
+    if (type) items = items.filter(t => t.type === type)
+    const page = Math.max(1, Number(query.page || 1))
+    const pageSize = Math.max(1, Math.min(100, Number(query.page_size || 20)))
+    const total = items.length
+    const start = (page - 1) * pageSize
+    items = items.slice(start, start + pageSize)
+    return ok(res, { items, total, page, page_size: pageSize })
+  }
+  if (pathname === '/api/v1/tickets' && method === 'POST') {
+    const body = await readBody(req)
+    const title = String(body.title || '').trim()
+    const table = String(body.table || body.table_name || '').trim()
+    const sql = String(body.sql || body.sql_text || '').trim()
+    const type = String(body.type || 'ddl').trim()
+    const risk = String(body.risk || 'low').trim()
+    if (!title) return json(res, 40000, null, 400)
+    if (!table) return json(res, 40000, null, 400)
+    if (!sql) return json(res, 40000, null, 400)
+    ticketIdSeq += 1
+    const t = {
+      id: ticketIdSeq,
+      title, type, table, table_name: table,
+      database_name: String(body.database || body.database_name || ''),
+      connection_id: body.connection_id || null,
+      sql, sql_text: sql,
+      risk, status: 'pending',
+      requester_id: 1, requester: 'admin',
+      reason: String(body.reason || ''),
+      created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }
+    tickets.unshift(t)
+    return ok(res, t)
+  }
+  if (pathname.match(/^\/api\/v1\/tickets\/\d+\/status$/) && method === 'POST') {
+    const id = Number(pathname.split('/')[4])
+    const t = tickets.find(x => x.id === id)
+    if (!t) return json(res, 40400, null, 404)
+    const body = await readBody(req)
+    const status = String(body.status || '').trim()
+    if (!['pending','approved','rejected','executed'].includes(status)) return json(res, 40000, null, 400)
+    if (t.status === 'pending' && !['approved','rejected'].includes(status)) return json(res, 40000, null, 400)
+    if (t.status === 'approved' && status !== 'executed') return json(res, 40000, null, 400)
+    if (['rejected','executed'].includes(t.status)) return json(res, 40000, null, 400)
+    t.status = status
+    t.updated_at = new Date().toISOString()
+    return ok(res, { id, status })
+  }
+  if (pathname.match(/^\/api\/v1\/tickets\/\d+$/) && method === 'GET') {
+    const id = Number(pathname.split('/')[4])
+    const t = tickets.find(x => x.id === id)
+    if (!t) return json(res, 40400, null, 404)
+    return ok(res, t)
+  }
+
   if (pathname === '/api/v1/shares' && method === 'POST') {
     const body = await readBody(req)
     shareIdSeq += 1

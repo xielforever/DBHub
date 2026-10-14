@@ -86,6 +86,7 @@ func main() {
 			Reports:    db.NewReportRepository(pgPool),
 			Dashboards: db.NewDashboardRepository(pgPool),
 			Shares:     db.NewShareRepository(pgPool),
+			Tickets:    db.NewTicketRepository(pgPool),
 		}
 		log.Info("已接入 PostgreSQL 元数据库")
 	} else {
