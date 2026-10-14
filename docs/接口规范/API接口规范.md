@@ -703,3 +703,108 @@ Dashboard 响应示例：
 - `/dashboards` 仪表盘列表/查看/编辑/分享（M4，12 栅格、刷新全部、收藏）
 - `/s/:token` 公开只读分享页（M4，免登录，暗色玻璃卡片+ChartCard 只读）
 
+### 11.8 工作台一键另存为报表（Step23）
+
+> **前端**：`QueryView` 工具栏 `另存报表`（`BookmarkPlus`），禁用态 `!rows.length`，弹框完成 `POST /api/v1/reports`：
+```json
+{
+  "name": "报表 2026/10/14",
+  "description": "",
+  "connection_id": 1,
+  "database": "orders",
+  "sql": "SELECT ...",
+  "chart_type": "table",
+  "chart_config": { "dimension": "id", "metrics": ["total_amount"], "aggregation": "sum" },
+  "visibility": "private"
+}
+```
+`chart_config` 由结果首列为维度、次列为指标自动生成，前端可编辑；返回后提示“已另存为报表，可在报表中心查看”。
+`route.query.sql` 支持从仪表盘监控 `PerformanceMonitorPane` 一键回跳工作台重放。
+
+---
+
+## 12. 数据资产血缘（Lineage，M5，Step22）
+
+> **前端**：`AssetView` 详情抽屉 `血缘` Tab 复用 `DataLineagePane.vue`，传入 `current-table/current-db`，Mock 上下游；`@create-ticket` 一键跳转工单中心。
+
+### 12.1 规划后端（M5 预留）
+
+- **GET** `/api/v1/assets/lineage?connection_id=&database=&schema=&table=&depth=1|2|all`
+  - `depth` 1 为直接依赖，2 为二度，all 为全量；响应：
+```json
+{
+  "nodes": [
+    { "id":"postgres.orders.customers","name":"customers","db":"orders","type":"table" },
+    { "id":"postgres.orders.orders","name":"orders","db":"orders","type":"table" }
+  ],
+  "edges": [
+    { "from":"postgres.orders.customers","to":"postgres.orders.orders","kind":"fk" },
+    { "from":"postgres.orders.orders","to":"postgres.orders.order_items","kind":"sql" }
+  ],
+  "impact": { "upstream":2, "downstream":3, "downstream_reports":1, "downstream_dashboards":1 }
+}
+```
+  - `kind ∈ fk（外键实线）| sql（SQL 依赖虚线）| report（仪表盘引用点线）`
+  - 合并实时快照外键与 `sys_query_history` 解析（`pg_query_go` / `vitess/sqlparser`）+ 仪表盘引用，缓存表 `sys_meta_lineage`（见 DB 设计 2.10 规划）。
+
+### 12.2 前端 Mock（Step22 现状）
+
+`DataLineagePane` 内置 Mock 以 `orders` 为中心生成 `customers/products → orders → order_items → 报表/看板` 链路，含深度切换、影响清单、高亮当前表、创建工单快捷入口。
+
+---
+
+## 13. 仪表盘性能监控复用（Step23）
+
+> **前端**：`DashboardView` 新增 `查询性能监控` 板块（`h 520px` 玻璃卡片），复用 `PerformanceMonitorPane.vue`（非复制），与 SQL 工作台同源指标：
+- KPI：QPS、平均/ P95 耗时、慢查询数、连接池、缓存命中
+- 图：趋势、库排行、慢查询列表
+- 能力：`@reuse` → `router.push({ path:'/query', query:{ sql } })` 回跳工作台重放；`前往工作台` 快捷
+
+> 后端：复用 `GET /api/v1/metrics/overview?days=14` 与 `query/history`，无需新增接口。
+
+---
+
+## 14. 工单中心（Tickets，Step24 前端 Mock，后端规划 M6）
+
+> **前端**：独立页面 `/tickets`（`TicketView`），侧栏 `数据` 分组 `工单中心`（`Ticket`），`glass-card` + KPI 5 卡，`localStorage dbhub_tickets_v1` 持久化，`ChangeTicketPane` 复用。
+
+### 14.1 组件契约（现为前端 Mock）
+
+**ChangeTicketPane Props / Emits**
+```ts
+props: {
+  tickets: TicketItem[]      // { id, title, type:'ddl'|'dml'|'index', table, sql, risk:'low'|'medium'|'high', status:'pending'|'approved'|'rejected'|'executed', requester, reason, created_at }
+  prefill?: { title?, table?, sql?, risk?, reason?, type? } | null
+}
+emits: (e:'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_at'>) | (e:'updateStatus', id:number, status:string)
+```
+- `prefill` 变更时 watch 自动填充表单并 `showCreate=true`
+- 列表支持状态筛选（全部/待审批/已批准/已执行/已拒绝）+ 关键字（标题/表名/SQL）+ 复制 SQL
+
+**TicketView 交互**
+- `GET /tickets?table=&db=&title=&sql=&risk=`：资产血缘一键建单入口；`incoming` 横幅 + `一键建单` 预填 `ALTER TABLE {{table}}`
+- 头部操作：加载示例、清空已办（仅保留 pending/approved）
+
+### 14.2 规划后端（M6 预留，详见 DB 设计 2.10）
+
+- **GET** `/api/v1/tickets?status=&q=&page=&page_size=` → `{ items, total }`
+- **POST** `/api/v1/tickets` `{ title, type, table, sql, risk, reason }` → `{ id }`（记审计）
+- **POST** `/api/v1/tickets/{id}/status` `{ status:'approved'|'rejected'|'executed' }`（`admin/developer` 审批，`readonly` 403）
+- 审计：创建、审批、执行均记 `sys_audit_logs`，字段 `resource_type=ticket`
+
+### 14.3 关联链路
+
+- 资产血缘 `DataLineagePane @create-ticket` → `router.push /tickets?table=&db=&title=` → 工单中心预填
+- 未来：工单执行将联动 `sys_query_history` 与 `sys_meta_snapshots` 变更对比
+
+---
+
+## 15. SQL 工作台精简与复用（Step21-Step24）
+
+> **精简**：工作台保留 `结果 / 统计 / 快照 / AI 优化 / 计划对比 / 火焰图 / 对比 / 队列 / 限制 / 脱敏 / 权限 / 历史 / Redis / 消息` 13 Tab，剥离 `图表/监控/工单` 至归宿模块，保证导航与路由一一对应、无假链接。
+- 图表 → 报表中心 `另存报表`（11.8）
+- 监控 → 仪表盘 `查询性能监控`（13）
+- 工单 → 工单中心（14）
+- 血缘 → 数据资产详情 `血缘` Tab（12）
+
+
