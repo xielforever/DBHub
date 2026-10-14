@@ -258,18 +258,22 @@
                 class="flex-1 min-h-0"
               />
             </div>
-            <ResultGrid
-              v-else
-              :columns="grid.columns"
-              :rows="grid.rows as any"
-              :truncated="grid.truncated"
-              :base-index="viewMode === 'preview' ? (preview.page - 1) * preview.pageSize : 0"
-              :sql="currentTab.sql"
-              :fullscreen="resultFullscreen"
-              :table-name="preview.table || 'result_table'"
-              :mask-enabled="maskEnabled"
-              @toggle-fullscreen="resultFullscreen = !resultFullscreen"
-            />
+            <div v-else class="flex flex-col flex-1 min-h-0 relative">
+              <WatermarkOverlay :enabled="watermarkEnabled" :text="`${userStore.user?.username || 'user'} · ${new Date().toLocaleDateString()} · 机密`" />
+              <ResultGrid
+                :columns="grid.columns"
+                :rows="grid.rows as any"
+                :truncated="grid.truncated"
+                :base-index="viewMode === 'preview' ? (preview.page - 1) * preview.pageSize : 0"
+                :sql="currentTab.sql"
+                :fullscreen="resultFullscreen"
+                :table-name="preview.table || 'result_table'"
+                :mask-enabled="maskEnabled"
+                :column-perms="columnPerms"
+                :row-policy-enabled="rowPolicyEnabled"
+                @toggle-fullscreen="resultFullscreen = !resultFullscreen"
+              />
+            </div>
           </el-tab-pane>
 
           <el-tab-pane label="图表" name="chart" class="flex flex-col min-h-0 flex-1">
@@ -320,6 +324,10 @@
 
           <el-tab-pane label="脱敏" name="mask" class="flex flex-col min-h-0 flex-1">
             <SensitiveMaskPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :mask-enabled="maskEnabled" :export-requests="exportRequests" @toggle-mask="maskEnabled = !maskEnabled" @request-export="exportDialogOpen = true" @update-status="onExportStatus" @clear-requests="clearExportRequests" />
+          </el-tab-pane>
+
+          <el-tab-pane label="权限" name="auth" class="flex flex-col min-h-0 flex-1">
+            <ColumnAuthPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :role="authRole" :watermark-enabled="watermarkEnabled" :row-policy-enabled="rowPolicyEnabled" :row-policy-sql="rowPolicySql" :column-perms="columnPerms" @change-role="authRole = $event" @set-perm="onSetColumnPerm" @toggle-watermark="watermarkEnabled = !watermarkEnabled" @toggle-row-policy="rowPolicyEnabled = !rowPolicyEnabled" />
           </el-tab-pane>
 
           <el-tab-pane label="审计" name="audit" class="flex flex-col min-h-0 flex-1">
@@ -879,6 +887,8 @@ import QueryQueuePane from './components/QueryQueuePane.vue'
 import ResourceLimitsPane from './components/ResourceLimitsPane.vue'
 import SensitiveMaskPane from './components/SensitiveMaskPane.vue'
 import ExportApprovalDialog from './components/ExportApprovalDialog.vue'
+import ColumnAuthPane from './components/ColumnAuthPane.vue'
+import WatermarkOverlay from './components/WatermarkOverlay.vue'
 import QueryAuditPane from './components/QueryAuditPane.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import {
@@ -1130,6 +1140,7 @@ const paletteCommands = computed(() => [
   { id: 'limits', label: '资源限制', desc: '超时与行数限制', icon: Gauge, iconBg: 'bg-amber-500/20 text-amber-300', keywords: ['limit','限流'], action: () => { limitsDialogOpen.value = true } },
   { id: 'audit', label: '查询审计', desc: '查看审计日志', icon: ScrollText, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['audit','审计'], action: () => { resultTab.value = 'audit' } },
   { id: 'mask', label: '脱敏管控', desc: '敏感数据脱敏', icon: ShieldCheck, iconBg: 'bg-violet-500/20 text-violet-300', keywords: ['mask','脱敏'], action: () => { resultTab.value = 'mask' } },
+  { id: 'auth', label: '列级授权', desc: '权限与水印', icon: KeyRound, iconBg: 'bg-indigo-500/20 text-indigo-300', keywords: ['auth','权限'], action: () => { resultTab.value = 'auth' } },
   { id: 'shortcuts', label: '快捷键帮助', desc: '查看所有快捷键', icon: Keyboard, iconBg: 'bg-white/10 text-white/50', keywords: ['shortcut'], action: () => { shortcutsOpen.value = true } },
 ])
 
@@ -1539,9 +1550,17 @@ const limitsDialogOpen = ref(false)
 const maskEnabled = ref(false)
 const exportRequests = ref<{ id:number; format:string; rows:number; reason:string; status:'pending'|'approved'|'rejected'; created_at:string }[]>([])
 const exportDialogOpen = ref(false)
+const columnPerms = ref<Record<string, 'visible'|'masked'|'hidden'>>({})
+const watermarkEnabled = ref(true)
+const rowPolicyEnabled = ref(false)
+const rowPolicySql = ref("department = current_user_dept()")
+const authRole = ref(userStore.role || 'developer')
 const resourceLimits = ref({ timeoutMs: 30000, maxRows: 1000, blockUnsafeWrite: true, autoLimit: true, confirmProdWrite: true })
 try { const m = localStorage.getItem('dbhub_mask_enabled'); if (m) maskEnabled.value = JSON.parse(m) } catch {}
 try { const er = localStorage.getItem('dbhub_export_requests'); if (er) exportRequests.value = JSON.parse(er) } catch {}
+try { const cp = localStorage.getItem('dbhub_column_perms'); if (cp) columnPerms.value = JSON.parse(cp) } catch {}
+try { const wm = localStorage.getItem('dbhub_watermark'); if (wm) watermarkEnabled.value = JSON.parse(wm) } catch {}
+try { const rp = localStorage.getItem('dbhub_row_policy'); if (rp) rowPolicyEnabled.value = JSON.parse(rp) } catch {}
 try {
   const raw = localStorage.getItem('dbhub_resource_limits')
   if (raw) Object.assign(resourceLimits.value, JSON.parse(raw))
@@ -1553,6 +1572,9 @@ try {
 watch(queue, v => { try { localStorage.setItem('dbhub_query_queue', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
 watch(maskEnabled, v => { try { localStorage.setItem('dbhub_mask_enabled', JSON.stringify(v)) } catch {} })
 watch(exportRequests, v => { try { localStorage.setItem('dbhub_export_requests', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
+watch(columnPerms, v => { try { localStorage.setItem('dbhub_column_perms', JSON.stringify(v)) } catch {} }, { deep: true })
+watch(watermarkEnabled, v => { try { localStorage.setItem('dbhub_watermark', JSON.stringify(v)) } catch {} })
+watch(rowPolicyEnabled, v => { try { localStorage.setItem('dbhub_row_policy', JSON.stringify(v)) } catch {} })
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
   const raw = localStorage.getItem(STORAGE_THEME)
@@ -2400,6 +2422,10 @@ function onExportStatus(id:number, status:string) {
 function clearExportRequests() {
   exportRequests.value = exportRequests.value.filter(r=>r.status==='pending')
   ElMessage.success('已清空已处理')
+}
+function onSetColumnPerm(col: string, perm: 'visible'|'masked'|'hidden') {
+  columnPerms.value = { ...columnPerms.value, [col]: perm }
+  ElMessage.success(`${col} 已设为 ${perm==='visible' ? '可见' : perm==='masked' ? '掩码' : '隐藏'}`)
 }
 function isUnsafeWrite(sql: string) {
   const up = sql.trim().toUpperCase()

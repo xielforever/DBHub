@@ -285,6 +285,8 @@ const props = withDefaults(
     fullscreen?: boolean
     tableName?: string
     maskEnabled?: boolean
+    columnPerms?: Record<string, 'visible'|'masked'|'hidden'>
+    rowPolicyEnabled?: boolean
   }>(),
   {
     truncated: false,
@@ -293,6 +295,8 @@ const props = withDefaults(
     fullscreen: false,
     tableName: 'result_table',
     maskEnabled: false,
+    columnPerms: () => ({}),
+    rowPolicyEnabled: false,
   },
 )
 
@@ -362,6 +366,10 @@ const isExplain = computed(() => isPgExplain.value || isMysqlExplain.value)
 
 const filteredRows = computed(() => {
   let out = [...props.rows]
+  // 行级策略预览：启用时过滤掉约 30% 行（演示：索引 %3===0 的行）
+  if (props.rowPolicyEnabled) {
+    out = out.filter((_, i) => i % 3 !== 0)
+  }
   const gf = globalFilter.value.toLowerCase()
   if (gf) {
     out = out.filter((r) => (r as any[]).some((c) => String(c ?? '').toLowerCase().includes(gf)))
@@ -501,10 +509,24 @@ watch(() => props.rows, () => {
 
 watch(() => props.columns, () => {
   // 初始化列显隐
-  props.columns.forEach((_, idx) => {
+  props.columns.forEach((col, idx) => {
     if (columnVisible[idx] === undefined) columnVisible[idx] = true
+    // 若 columnPerms 为 hidden，强制隐藏
+    if (props.columnPerms && props.columnPerms[col] === 'hidden') {
+      columnVisible[idx] = false
+    }
   })
 }, { immediate: true })
+watch(() => props.columnPerms, () => {
+  // 权限变更时同步显隐
+  props.columns.forEach((col, idx) => {
+    if (props.columnPerms && props.columnPerms[col] === 'hidden') columnVisible[idx] = false
+    else if (props.columnPerms && props.columnPerms[col] && columnVisible[idx] === false) {
+      // 若从 hidden 切回 visible/masked，恢复可见
+      if (props.columnPerms[col] !== 'hidden') columnVisible[idx] = true
+    }
+  })
+}, { deep: true })
 
 function isNumericColumn(idx: number) {
   if (!filteredSortedRows.value.length) return false
@@ -555,7 +577,10 @@ function maskCellValue(col: string, val: unknown) {
 function displayCell(colIdx: number, cell: unknown): string {
   const col = props.columns[colIdx] || ''
   const s = formatCell(cell)
-  if (!props.maskEnabled || !isSensitiveCol(col)) return s
+  const perm = props.columnPerms ? props.columnPerms[col] : undefined
+  const shouldMask = (props.maskEnabled && isSensitiveCol(col)) || perm === 'masked'
+  if (!shouldMask) return s
+  if (perm === 'hidden') return '***'
   return maskCellValue(col, s)
 }
 function cellTitle(cell: unknown): string {
