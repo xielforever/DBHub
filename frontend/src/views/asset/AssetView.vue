@@ -338,6 +338,9 @@
           <el-tab-pane label="DDL" name="ddl">
             <pre class="text-[11px] leading-relaxed font-mono text-white/70 bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ detail.snapshot.ddl_text || '—' }}</pre>
           </el-tab-pane>
+          <el-tab-pane label="血缘" name="lineage">
+            <DataLineagePane :current-table="detail.snapshot.table_name" :current-db="detail.snapshot.database_name" :fallback-table="detail.snapshot.table_name" @select="onLineageSelect" @create-ticket="onLineageCreateTicket" />
+          </el-tab-pane>
           <el-tab-pane label="数据预览" name="preview">
             <div class="space-y-3">
               <div class="flex items-center justify-between">
@@ -507,6 +510,7 @@ import {
 import { workbenchApi } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
 import TreeView from './components/TreeView.vue'
+import DataLineagePane from '../query/components/DataLineagePane.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
@@ -846,6 +850,15 @@ watch(activeTab, (tab) => {
     loadPreview(1)
   }
 })
+
+function onLineageSelect(node: any) {
+  ElMessage.info(`已选择 ${node.name}（${node.db}），可跳转至该对象详情`)
+}
+
+function onLineageCreateTicket() {
+  ElMessage.success('已基于血缘影响创建变更工单（演示）')
+  // 若需可在此打开工单创建弹窗或跳转
+}
 
 // ---------- 同步 ----------
 const syncing = ref(false)
