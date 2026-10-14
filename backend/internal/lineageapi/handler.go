@@ -12,19 +12,24 @@ import (
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/lineage"
 )
 
-// Handler 血缘 handler（表级，上游/下游/影响面），Step27 后端落库 + 实时计算（FK + SQL + 报表）
+// Handler 血缘 handler（表级，上游/下游/影响面），Step28 后端解析落库 + 实时兜底
+// 优先读取 sys_meta_lineage（定时 pg_query_go/vitess 解析 sys_query_history 落库），
+// 缓存未命中或空时回退到 FK+历史+报表实时计算，保证可用性
 type Handler struct {
-	meta       *db.MetadataRepository
-	history    *db.HistoryRepository
-	reports    *db.ReportRepository
-	dashboards *db.DashboardRepository
-	log        *slog.Logger
+	meta     *db.MetadataRepository
+	history  *db.HistoryRepository
+	reports  *db.ReportRepository
+	dash     *db.DashboardRepository
+	lineage  *db.LineageRepository
+	svc      *lineage.Service
+	log      *slog.Logger
 }
 
-func NewHandler(meta *db.MetadataRepository, history *db.HistoryRepository, reports *db.ReportRepository, dashboards *db.DashboardRepository, log *slog.Logger) *Handler {
-	return &Handler{meta: meta, history: history, reports: reports, dashboards: dashboards, log: log}
+func NewHandler(meta *db.MetadataRepository, history *db.HistoryRepository, reports *db.ReportRepository, dashboards *db.DashboardRepository, lineageRepo *db.LineageRepository, svc *lineage.Service, log *slog.Logger) *Handler {
+	return &Handler{meta: meta, history: history, reports: reports, dash: dashboards, lineage: lineageRepo, svc: svc, log: log}
 }
 
 type lineageNode struct {
@@ -49,18 +54,17 @@ type lineageResp struct {
 	Downstream int `json:"downstream"`
 	// 新：影响面
 	Impact map[string]int `json:"impact"`
+	// 新增：是否来自缓存
+	Cached bool `json:"cached"`
 }
 
 // table key: connection_id.database.schema.table (lower)
 func tableKey(conn int64, dbName, schema, table string) string {
-	// 统一小写，便于去重
 	return strings.ToLower(strings.Join([]string{strconv.FormatInt(conn, 10), dbName, schema, table}, "."))
 }
 
 var (
-	// 粗略提取表名：FROM / JOIN / INTO / UPDATE / TABLE后跟标识
-	tableRe = regexp.MustCompile(`(?i)(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?\.)?("?[a-zA-Z_][a-zA-Z0-9_]*"?\.)?("?[a-zA-Z_][a-zA-Z0-9_]*"?)`)
-	// 额外：INSERT INTO 后
+	tableRe  = regexp.MustCompile(`(?i)(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?\.)?("?[a-zA-Z_][a-zA-Z0-9_]*"?\.)?("?[a-zA-Z_][a-zA-Z0-9_]*"?)`)
 	insertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+("?[a-zA-Z_][\w$]*"?)`)
 )
 
@@ -68,14 +72,12 @@ func extractTables(sql string) []string {
 	seen := map[string]struct{}{}
 	out := []string{}
 	for _, m := range tableRe.FindAllStringSubmatch(sql, -1) {
-		// m[3] 为表名（最末标识）
 		t := strings.Trim(m[3], `"`)
 		t = strings.TrimSpace(t)
 		if t == "" {
 			continue
 		}
 		low := strings.ToLower(t)
-		// 过滤关键字
 		if low == "select" || low == "where" || low == "values" || low == "set" {
 			continue
 		}
@@ -95,10 +97,10 @@ func extractTables(sql string) []string {
 	return out
 }
 
-// Lineage GET /api/v1/assets/lineage?connection_id=&database=&schema=&table=&depth=1|2|3|all
+// Lineage GET /api/v1/assets/lineage?connection_id=&database=&schema=&table=&depth=1|2|3
 func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
-	_ = claims // 仅鉴权，不按用户过滤（登录可见）
+	_ = claims
 
 	q := r.URL.Query()
 	connID, _ := strconv.ParseInt(q.Get("connection_id"), 10, 64)
@@ -115,17 +117,14 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 		depth = 1
 	} else if depthStr == "3" || depthStr == "all" {
 		depth = 3
-	} else if depthStr == "2" || depthStr == "" {
-		depth = 2
 	}
 
-	// 加载全部快照（按连接过滤时仍加载该连接全量，便于跨库 FK）
+	// 加载快照用于中心节点解析与报表下游
 	snaps, err := h.meta.ListSnapshots(r.Context(), 0)
 	if err != nil {
 		httpx.Fail(w, httpx.Internal("加载快照失败", err))
 		return
 	}
-	// 索引：table -> snap, 以及按小写表名聚合
 	snapByKey := map[string]*db.MetaSnapshot{}
 	snapByTable := map[string][]*db.MetaSnapshot{}
 	for i := range snaps {
@@ -135,18 +134,14 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 		low := strings.ToLower(s.TableName)
 		snapByTable[low] = append(snapByTable[low], s)
 	}
-
-	// 目标键：优先精确，若 connection/database 未指定则按表名模糊匹配第一个
 	targetKey := tableKey(connID, dbName, schema, table)
 	targetSnap, ok := snapByKey[targetKey]
 	if !ok {
-		// 回退：按表名匹配（不区分库）
 		cands := snapByTable[strings.ToLower(table)]
 		if len(cands) == 0 {
 			httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "目标表不存在或未同步"})
 			return
 		}
-		// 优先同 connection/database 的
 		for _, c := range cands {
 			if connID > 0 && c.ConnectionID != connID {
 				continue
@@ -164,37 +159,182 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 构建 FK 图
-	// raw_keys JSONB 已在 ListSnapshots 被置空（轻量），需按需重新取完整快照的 keys
-	// 为简化，直接用 ListSnapshots 的快照若 raw_keys 为空则跳过，需重新查询完整快照按需
-	// 这里改用遍历时若需要 keys，则通过 meta.GetSnapshot 补全（仅对涉及的表）
-	// 为性能，首次遍历先收集涉及的表对应的完整快照
-	type fk struct{ from, to string; fromSnap, toSnap *db.MetaSnapshot }
-	// 先收集所有完整快照的 keys（对当前连接的库）
-	fullSnaps := map[string]*db.MetaSnapshot{}
-	// 已有 targetSnap 的完整信息（GetSnapshot）
-	if targetSnap != nil {
-		// 需要完整 raw_keys，先取一次
-		if full, err := h.meta.GetSnapshot(r.Context(), targetSnap.ConnectionID, targetSnap.DatabaseName, targetSnap.SchemaName, targetSnap.TableName); err == nil {
-			fullSnaps[targetKey] = full
+	// 尝试缓存路径：sys_meta_lineage
+	if h.lineage != nil {
+		if cached, ok := h.lineageCached(r, targetSnap, targetKey, snapByKey, snapByTable, depth); ok && len(cached.Nodes) > 1 {
+			httpx.OK(w, cached)
+			return
 		}
 	}
 
-	// BFS 上下游
+	// 回退：实时计算
+	resp := h.lineageRealtime(r, targetSnap, targetKey, snapByKey, snapByTable, snaps, depth)
+	httpx.OK(w, resp)
+}
+
+// lineageCached 优先从 sys_meta_lineage 读取，利用 lineage.Service 定时解析的 pg_query_go/vitess 结果
+func (h *Handler) lineageCached(r *http.Request, targetSnap *db.MetaSnapshot, targetKey string, snapByKey map[string]*db.MetaSnapshot, snapByTable map[string][]*db.MetaSnapshot, depth int) (lineageResp, bool) {
+	// BFS 基于缓存表
+	upstream := map[string]lineageNode{}
+	downstream := map[string]lineageNode{}
+	edges := []lineageEdge{}
+	visited := map[string]bool{targetKey: true}
+	type qItem struct {
+		key  string
+		dep int
+		snap *db.MetaSnapshot
+	}
+	queue := []qItem{{key: targetKey, dep: 0, snap: targetSnap}}
+
+	// 为快速映射，预建 edge 缓存
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.dep >= depth {
+			continue
+		}
+		// 上游：cur 为下游
+		if h.lineage != nil {
+			ups, _ := h.lineage.ListDirectEdges(r.Context(), cur.snap.ConnectionID, cur.snap.DatabaseName, cur.snap.SchemaName, cur.snap.TableName, "upstream")
+			for _, e := range ups {
+				upKey := tableKey(e.UpstreamConnectionID, e.UpstreamDatabase, e.UpstreamSchema, e.UpstreamTable)
+				if !visited[upKey] {
+					visited[upKey] = true
+					// 尝试从快照取类型
+					typ := "table"
+					dbName := e.UpstreamDatabase
+					if snap, ok := snapByKey[upKey]; ok {
+						typ = snap.TableType
+						dbName = snap.DatabaseName
+					} else if cands := snapByTable[strings.ToLower(e.UpstreamTable)]; len(cands) > 0 {
+						typ = cands[0].TableType
+						dbName = cands[0].DatabaseName
+					}
+					desc := "SQL 血缘"
+					if e.EdgeKind == "fk" {
+						desc = "外键"
+					}
+					upstream[upKey] = lineageNode{ID: upKey, Name: e.UpstreamTable, Type: typ, DB: dbName, Desc: desc}
+					// 入队继续扩展
+					var upSnap *db.MetaSnapshot
+					if s, ok := snapByKey[upKey]; ok {
+						upSnap = s
+					} else if cands := snapByTable[strings.ToLower(e.UpstreamTable)]; len(cands) > 0 {
+						upSnap = cands[0]
+						upKey = tableKey(upSnap.ConnectionID, upSnap.DatabaseName, upSnap.SchemaName, upSnap.TableName)
+					} else {
+						// 虚拟节点
+						upSnap = &db.MetaSnapshot{ConnectionID: e.UpstreamConnectionID, DatabaseName: e.UpstreamDatabase, SchemaName: e.UpstreamSchema, TableName: e.UpstreamTable, TableType: typ}
+					}
+					queue = append(queue, qItem{key: upKey, dep: cur.dep + 1, snap: upSnap})
+				}
+				edges = append(edges, lineageEdge{From: upKey, To: cur.key, Kind: e.EdgeKind})
+			}
+			downs, _ := h.lineage.ListDirectEdges(r.Context(), cur.snap.ConnectionID, cur.snap.DatabaseName, cur.snap.SchemaName, cur.snap.TableName, "downstream")
+			for _, e := range downs {
+				downKey := tableKey(e.DownstreamConnectionID, e.DownstreamDatabase, e.DownstreamSchema, e.DownstreamTable)
+				if !visited[downKey] {
+					visited[downKey] = true
+					typ := "table"
+					dbName := e.DownstreamDatabase
+					if snap, ok := snapByKey[downKey]; ok {
+						typ = snap.TableType
+						dbName = snap.DatabaseName
+					} else if cands := snapByTable[strings.ToLower(e.DownstreamTable)]; len(cands) > 0 {
+						typ = cands[0].TableType
+						dbName = cands[0].DatabaseName
+					}
+					desc := "SQL 血缘"
+					if e.EdgeKind == "fk" {
+						desc = "外键"
+					}
+					downstream[downKey] = lineageNode{ID: downKey, Name: e.DownstreamTable, Type: typ, DB: dbName, Desc: desc}
+					var downSnap *db.MetaSnapshot
+					if s, ok := snapByKey[downKey]; ok {
+						downSnap = s
+					} else if cands := snapByTable[strings.ToLower(e.DownstreamTable)]; len(cands) > 0 {
+						downSnap = cands[0]
+						downKey = tableKey(downSnap.ConnectionID, downSnap.DatabaseName, downSnap.SchemaName, downSnap.TableName)
+					} else {
+						downSnap = &db.MetaSnapshot{ConnectionID: e.DownstreamConnectionID, DatabaseName: e.DownstreamDatabase, SchemaName: e.DownstreamSchema, TableName: e.DownstreamTable, TableType: typ}
+					}
+					queue = append(queue, qItem{key: downKey, dep: cur.dep + 1, snap: downSnap})
+				}
+				edges = append(edges, lineageEdge{From: cur.key, To: downKey, Kind: e.EdgeKind})
+			}
+		}
+	}
+
+	// 若缓存完全无边，返回 miss
+	if len(edges) == 0 && len(upstream) == 0 && len(downstream) == 0 {
+		return lineageResp{}, false
+	}
+
+	// 补充报表下游（动态，不入缓存）
+	if h.reports != nil {
+		if items, _, err := h.reports.List(r.Context(), db.ReportFilter{Limit: 100, Offset: 0}); err == nil {
+			for _, rep := range items {
+				lowSQL := strings.ToLower(rep.SQLText)
+				lowTable := strings.ToLower(targetSnap.TableName)
+				if strings.Contains(lowSQL, lowTable) {
+					id := "report." + strconv.FormatInt(rep.ID, 10)
+					if !visited[id] {
+						visited[id] = true
+						downstream[id] = lineageNode{ID: id, Name: rep.Name, Type: "report", DB: rep.DatabaseName, Desc: "报表 #" + strconv.FormatInt(rep.ID, 10)}
+						edges = append(edges, lineageEdge{From: targetKey, To: id, Kind: "report"})
+					}
+				}
+			}
+		}
+	}
+
+	upstreamNodes := make([]lineageNode, 0, len(upstream))
+	for _, n := range upstream {
+		upstreamNodes = append(upstreamNodes, n)
+	}
+	downstreamNodes := make([]lineageNode, 0, len(downstream))
+	for _, n := range downstream {
+		downstreamNodes = append(downstreamNodes, n)
+	}
+	nodes := []lineageNode{}
+	nodes = append(nodes, upstreamNodes...)
+	nodes = append(nodes, lineageNode{ID: targetKey, Name: targetSnap.TableName, Type: targetSnap.TableType, DB: targetSnap.DatabaseName, Desc: "当前"})
+	nodes = append(nodes, downstreamNodes...)
+	return lineageResp{
+		Nodes:      nodes,
+		Edges:      edges,
+		Upstream:   len(upstreamNodes),
+		Downstream: len(downstreamNodes),
+		Impact: map[string]int{
+			"upstream":           len(upstreamNodes),
+			"downstream":         len(downstreamNodes),
+			"downstream_reports": countType(downstreamNodes, "report"),
+			"downstream_tables":  countType(downstreamNodes, "table"),
+			"downstream_views":   countType(downstreamNodes, "view"),
+			"total":              len(nodes),
+		},
+		Cached: true,
+	}, true
+}
+
+// lineageRealtime 回退：实时 FK + SQL + 报表
+func (h *Handler) lineageRealtime(r *http.Request, targetSnap *db.MetaSnapshot, targetKey string, snapByKey map[string]*db.MetaSnapshot, snapByTable map[string][]*db.MetaSnapshot, snaps []db.MetaSnapshot, depth int) lineageResp {
+	fullSnaps := map[string]*db.MetaSnapshot{}
+	if full, err := h.meta.GetSnapshot(r.Context(), targetSnap.ConnectionID, targetSnap.DatabaseName, targetSnap.SchemaName, targetSnap.TableName); err == nil {
+		fullSnaps[targetKey] = full
+	}
 	upstream := map[string]lineageNode{}
 	downstream := map[string]lineageNode{}
 	edges := []lineageEdge{}
 	visited := map[string]bool{targetKey: true}
 	queue := []struct {
-		key   string
+		key  string
 		dep int
-		snap  *db.MetaSnapshot
-	}{ {key: targetKey, dep: 0, snap: targetSnap} }
+		snap *db.MetaSnapshot
+	}{{key: targetKey, dep: 0, snap: targetSnap}}
 
-	// 预加载所有报告（用于下游报表引用）
 	var reports []db.Report
 	if h.reports != nil {
-		// 取全部报表（限制 100）
 		if items, _, err := h.reports.List(r.Context(), db.ReportFilter{Limit: 100, Offset: 0}); err == nil {
 			reports = items
 		}
@@ -206,33 +346,21 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 		if cur.dep >= depth {
 			continue
 		}
-		// 确保当前节点的完整快照
 		full := fullSnaps[cur.key]
-		if full == nil {
-			if cur.snap != nil {
-				if f, err := h.meta.GetSnapshot(r.Context(), cur.snap.ConnectionID, cur.snap.DatabaseName, cur.snap.SchemaName, cur.snap.TableName); err == nil {
-					full = f
-					fullSnaps[cur.key] = f
-				}
+		if full == nil && cur.snap != nil {
+			if f, err := h.meta.GetSnapshot(r.Context(), cur.snap.ConnectionID, cur.snap.DatabaseName, cur.snap.SchemaName, cur.snap.TableName); err == nil {
+				full = f
+				fullSnaps[cur.key] = f
 			}
 		}
-		// 1) FK 上游：当前表的外键指向的表
 		if full != nil && len(full.RawKeys) > 0 {
-	
-			// 直接解析 RawKeys
-			// RawKeys 存储为 JSON 数组，需 Unmarshal
 			var rawKeys []metaKey
-			// MetaKey 结构与存储一致
-			// 但 RawKeys 是 json.RawMessage，需先 Unmarshal
-			// 这里尝试解析
 			if err := parseKeys(full.RawKeys, &rawKeys); err == nil {
 				for _, k := range rawKeys {
 					if k.Kind != "foreign_key" || k.RefTable == "" {
 						continue
 					}
-					// 上游表
 					upKey := ""
-					// 尝试在同库同连接中找上游
 					cands := snapByTable[strings.ToLower(k.RefTable)]
 					var upSnap *db.MetaSnapshot
 					for _, c := range cands {
@@ -251,25 +379,19 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 					}
 					if !visited[upKey] {
 						visited[upKey] = true
-						node := lineageNode{ID: upKey, Name: upSnap.TableName, Type: upSnap.TableType, DB: upSnap.DatabaseName, Desc: "外键 " + k.Name}
-						upstream[upKey] = node
+						upstream[upKey] = lineageNode{ID: upKey, Name: upSnap.TableName, Type: upSnap.TableType, DB: upSnap.DatabaseName, Desc: "外键 " + k.Name}
 						queue = append(queue, struct {
-							key   string
+							key  string
 							dep int
-							snap  *db.MetaSnapshot
+							snap *db.MetaSnapshot
 						}{key: upKey, dep: cur.dep + 1, snap: upSnap})
 					}
 					edges = append(edges, lineageEdge{From: upKey, To: cur.key, Kind: "fk"})
 				}
 			}
 		}
-		// 2) FK 下游：哪些表的外键指向当前表
 		for _, s := range snaps {
 			k := tableKey(s.ConnectionID, s.DatabaseName, s.SchemaName, s.TableName)
-			if visited[k] && k != cur.key {
-				// 已访问的下游也可能需要边，但 BFS 会处理
-			}
-			// 需要完整 keys
 			f := fullSnaps[k]
 			if f == nil {
 				if cand, err := h.meta.GetSnapshot(r.Context(), s.ConnectionID, s.DatabaseName, s.SchemaName, s.TableName); err == nil {
@@ -287,31 +409,25 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 				if kk.Kind != "foreign_key" || kk.RefTable == "" {
 					continue
 				}
-				// 若该表的外键指向 cur
 				if strings.EqualFold(kk.RefTable, cur.snap.TableName) {
-					// 且连接/库匹配（简化：同连接）
 					if f.ConnectionID != cur.snap.ConnectionID {
 						continue
 					}
 					downKey := k
 					if !visited[downKey] {
 						visited[downKey] = true
-						node := lineageNode{ID: downKey, Name: f.TableName, Type: f.TableType, DB: f.DatabaseName, Desc: "外键 " + kk.Name}
-						downstream[downKey] = node
+						downstream[downKey] = lineageNode{ID: downKey, Name: f.TableName, Type: f.TableType, DB: f.DatabaseName, Desc: "外键 " + kk.Name}
 						queue = append(queue, struct {
-							key   string
+							key  string
 							dep int
-							snap  *db.MetaSnapshot
+							snap *db.MetaSnapshot
 						}{key: downKey, dep: cur.dep + 1, snap: f})
 					}
 					edges = append(edges, lineageEdge{From: cur.key, To: downKey, Kind: "fk"})
 				}
 			}
 		}
-
-		// 3) SQL 上下游：扫描 query_history（近 100 条成功）
 		if h.history != nil && cur.dep < depth {
-			// 取近 100 条成功历史（不区分用户，取 admin 视角）
 			hists, _, _ := h.history.List(r.Context(), 0, true, 0, "success", 100, 0)
 			for _, he := range hists {
 				tables := extractTables(he.SQLText)
@@ -330,7 +446,6 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 					if t == lowCur {
 						continue
 					}
-					// 找到与当前表同 SQL 出现的其他表
 					cands := snapByTable[t]
 					var other *db.MetaSnapshot
 					var otherKey string
@@ -340,7 +455,6 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 						break
 					}
 					if other == nil {
-						// 未同步的表也作为节点（报告/外部）
 						otherKey = "ext." + t
 						if !visited[otherKey] {
 							visited[otherKey] = true
@@ -351,8 +465,6 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 					}
 					if !visited[otherKey] {
 						visited[otherKey] = true
-						// 方向：若 SQL 为 INSERT INTO cur ... SELECT ... FROM other，则 other 为上游
-						// 简化：统一视为下游（与 FK 区分用虚线）
 						downstream[otherKey] = lineageNode{ID: otherKey, Name: other.TableName, Type: other.TableType, DB: other.DatabaseName, Desc: "SQL 关联"}
 					}
 					edges = append(edges, lineageEdge{From: cur.key, To: otherKey, Kind: "sql"})
@@ -360,8 +472,6 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
-	// 4) 报表下游：sql_text 包含目标表名
 	for _, rep := range reports {
 		lowSQL := strings.ToLower(rep.SQLText)
 		lowTable := strings.ToLower(targetSnap.TableName)
@@ -374,7 +484,6 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-
 	upstreamNodes := make([]lineageNode, 0, len(upstream))
 	for _, n := range upstream {
 		upstreamNodes = append(upstreamNodes, n)
@@ -383,28 +492,41 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 	for _, n := range downstream {
 		downstreamNodes = append(downstreamNodes, n)
 	}
-	// 合并
 	nodes := []lineageNode{}
 	nodes = append(nodes, upstreamNodes...)
-	// 中心节点
 	nodes = append(nodes, lineageNode{ID: targetKey, Name: targetSnap.TableName, Type: targetSnap.TableType, DB: targetSnap.DatabaseName, Desc: "当前"})
 	nodes = append(nodes, downstreamNodes...)
-
-	resp := lineageResp{
+	return lineageResp{
 		Nodes:      nodes,
 		Edges:      edges,
 		Upstream:   len(upstreamNodes),
 		Downstream: len(downstreamNodes),
 		Impact: map[string]int{
-			"upstream":            len(upstreamNodes),
-			"downstream":          len(downstreamNodes),
-			"downstream_reports":  countType(downstreamNodes, "report"),
-			"downstream_tables":   countType(downstreamNodes, "table"),
-			"downstream_views":    countType(downstreamNodes, "view"),
-			"total":               len(nodes),
+			"upstream":           len(upstreamNodes),
+			"downstream":         len(downstreamNodes),
+			"downstream_reports": countType(downstreamNodes, "report"),
+			"downstream_tables":  countType(downstreamNodes, "table"),
+			"downstream_views":   countType(downstreamNodes, "view"),
+			"total":              len(nodes),
 		},
+		Cached: false,
 	}
-	httpx.OK(w, resp)
+}
+
+// Refresh POST /api/v1/assets/lineage/refresh 触发增量解析（admin/developer）
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil {
+		httpx.Fail(w, httpx.Internal("血缘解析服务未初始化", nil))
+		return
+	}
+	n, err := h.svc.ParseRecentHistory(r.Context(), 500)
+	if err != nil {
+		httpx.Fail(w, httpx.Internal("解析失败", err))
+		return
+	}
+	// 同步 FK 回填
+	fkN, _ := h.svc.BackfillFK(r.Context())
+	httpx.OK(w, map[string]any{"parsed_edges": n, "fk_edges": fkN, "total": n + fkN})
 }
 
 func countType(nodes []lineageNode, t string) int {

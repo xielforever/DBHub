@@ -128,7 +128,7 @@ const server = http.createServer(async (req, res) => {
 
   // 健康
   if (pathname === '/api/health' && method === 'GET') {
-    return ok(res, { status: 'ok', version: 'mock-0.27.0', env: 'arena', note: 'Step27: 血缘后端实时+Mock' })
+    return ok(res, { status: 'ok', version: 'mock-0.28.0', env: 'arena', note: 'Step28: 血缘解析 pg_query_go/vitess + 定时落库 + Mock' })
   }
 
   // 认证
@@ -1018,7 +1018,11 @@ const server = http.createServer(async (req, res) => {
     return ok(res, { id })
   }
 
-  // 血缘 - Step27 mock：根据 table/depth 返回上游/下游模拟
+  // 血缘 - Step28 mock：pg_query_go/vitess 解析缓存 + 定时落库
+  if (pathname === '/api/v1/assets/lineage/refresh' && method === 'POST') {
+    // 模拟触发定时解析：返回新增边数
+    return ok(res, { parsed_edges: 12, fk_edges: 4, total: 16, note: 'pg_query_go/vitess 定时解析已触发（mock）' })
+  }
   if (pathname === '/api/v1/assets/lineage' && method === 'GET') {
     const table = String(query.table || query.table_name || 'orders').trim() || 'orders'
     const db = String(query.database || query.db || 'orders').trim() || 'orders'
@@ -1050,7 +1054,7 @@ const server = http.createServer(async (req, res) => {
       edges.push({ from: `${cid}.users.public.user_profiles`.toLowerCase(), to: upstream[0].id, kind: 'fk' })
       nodes.push({ id: `${cid}.users.public.user_profiles`.toLowerCase(), name: 'user_profiles', type: 'table', db: 'users', desc: '二级上游 · users 的扩展' })
     }
-    return ok(res, { center: centerId, nodes, edges, upstream: upstream.length + (depth>1?1:0), downstream: downstream.length, impact: { tables: upstream.length, views: 2, reports: 2 } })
+    return ok(res, { center: centerId, nodes, edges, upstream: upstream.length + (depth>1?1:0), downstream: downstream.length, impact: { tables: upstream.length, views: 2, reports: 2 }, cached: true, parser: 'pg_query_go+vitess(mock)' })
   }
 
   // 公开分享
@@ -1254,5 +1258,5 @@ const server = http.createServer(async (req, res) => {
 })
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[mock-backend] listening on 0.0.0.0:${PORT} - datasource mock v0.5.0+lineage: ${connections.length} conns, ${proxies.length} proxies, ${tunnels.length} tunnels(deprecated)`)
+  console.log(`[mock-backend] listening on 0.0.0.0:${PORT} - datasource mock v0.5.0+lineage+parser: ${connections.length} conns, ${proxies.length} proxies, ${tunnels.length} tunnels(deprecated)`)
 })

@@ -273,6 +273,9 @@ export const assetApi = {
     return request.get<unknown, { items: BriefUser[] }>('/users/brief')
   },
   lineage(params: { connection_id: number; database: string; schema: string; table: string; depth?: number | string }) {
-    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number> }>('/assets/lineage', { params })
+    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number>; cached?:boolean; parser?:string }>('/assets/lineage', { params })
+  },
+  lineageRefresh() {
+    return request.post<unknown, { parsed_edges:number; fk_edges:number; total:number }>('/assets/lineage/refresh')
   },
 }

@@ -6,13 +6,14 @@
       </div>
       <div class="flex-1 min-w-0">
         <p class="text-xs font-medium text-white/80">数据血缘</p>
-        <p class="text-[10px] text-white/40">上游 · 当前 · 下游 · 影响面 <span v-if="isMock" class="text-amber-300">· 演示</span><span v-else class="text-emerald-300">· 实时</span></p>
+        <p class="text-[10px] text-white/40">上游 · 当前 · 下游 · 影响面 <span v-if="isMock" class="text-amber-300">· 演示</span><span v-else-if="cached" class="text-sky-300">· 缓存(pg_query_go/vitess)</span><span v-else class="text-emerald-300">· 实时</span></p>
       </div>
       <el-select v-model="depth" size="small" class="w-20" popper-class="glass-popper">
         <el-option label="1层" :value="1" />
         <el-option label="2层" :value="2" />
         <el-option label="3层" :value="3" />
       </el-select>
+      <button class="ghost-button !py-1 !px-2 text-[11px]" title="重新解析（pg_query_go/vitess 定时落库）" @click="triggerParse" :disabled="parsing"><RefreshCw class="w-3 h-3" :class="{ 'animate-spin': parsing }" /></button>
       <button class="ghost-button !py-1 !px-2 text-[11px]" @click="refresh"><RefreshCw class="w-3 h-3" :class="{ 'animate-spin': loading }" /></button>
     </div>
 
@@ -123,6 +124,8 @@ const direction = ref<'both'|'upstream'|'downstream'>('both')
 const filter = ref('')
 const loading = ref(false)
 const isMock = ref(false)
+const cached = ref(false)
+const parsing = ref(false)
 
 interface Node { id: string; name: string; type: 'table'|'view'|'report'|'dashboard'; db: string; desc: string }
 const upstream = ref<Node[]>([])
@@ -186,14 +189,25 @@ async function fetchReal(): Promise<boolean> {
     upstream.value = upsF.slice(0, depth.value)
     downstream.value = downsF.slice(0, depth.value + 1)
     isMock.value = false
+    cached.value = !!(resp as any).cached
     return true
   } catch (e) {
     return false
   }
 }
 
+async function triggerParse() {
+  parsing.value = true
+  try {
+    await assetApi.lineageRefresh()
+    await generate()
+  } catch {}
+  parsing.value = false
+}
+
 function generateMock() {
   isMock.value = true
+  cached.value = false
   upstream.value = [
     { id: 'u1', name: 'users', type: 'table' as const, db: 'users', desc: '用户主表 · 外键 users.id' },
     { id: 'u2', name: 'products', type: 'table' as const, db: 'shop', desc: '商品表 · JOIN products.id' },

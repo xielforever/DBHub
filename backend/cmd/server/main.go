@@ -17,6 +17,7 @@ import (
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/logx"
+	"github.com/user/dbhub/internal/lineage"
 	"github.com/user/dbhub/internal/server"
 	securecrypto "github.com/user/dbhub/pkg/crypto"
 )
@@ -87,6 +88,7 @@ func main() {
 			Dashboards: db.NewDashboardRepository(pgPool),
 			Shares:     db.NewShareRepository(pgPool),
 			Tickets:    db.NewTicketRepository(pgPool),
+			Lineage:    db.NewLineageRepository(pgPool),
 		}
 		log.Info("已接入 PostgreSQL 元数据库")
 	} else {
@@ -111,6 +113,13 @@ func main() {
 	// 优雅停机
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// 血缘定时解析：每 5 分钟增量扫描 sys_query_history（pg_query_go/vitess → sys_meta_lineage）
+	if deps != nil && deps.Lineage != nil {
+		lineageSvc := lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log)
+		lineageSvc.StartScheduler(ctx, 5*time.Minute)
+		log.Info("血缘定时解析已启动", "interval", "5m")
+	}
 
 	go func() {
 		log.Info("DBHub 后端启动", "env", cfg.Env, "port", cfg.Port)

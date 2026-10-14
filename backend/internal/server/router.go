@@ -18,6 +18,7 @@ import (
 	"github.com/user/dbhub/internal/proxyapi"
 	"github.com/user/dbhub/internal/queryapi"
 	"github.com/user/dbhub/internal/reportapi"
+	"github.com/user/dbhub/internal/lineage"
 	"github.com/user/dbhub/internal/lineageapi"
 	"github.com/user/dbhub/internal/ticketapi"
 )
@@ -35,6 +36,7 @@ type Deps struct {
 	Dashboards *db.DashboardRepository
 	Shares     *db.ShareRepository
 	Tickets    *db.TicketRepository
+	Lineage    *db.LineageRepository
 }
 
 // NewRouter 组装全部路由。
@@ -199,10 +201,16 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 				middleware.Chain(http.HandlerFunc(aH.Star), requireAuth))
 			mux.Handle("GET /api/v1/users/brief",
 				middleware.Chain(http.HandlerFunc(aH.BriefUsers), requireAuth))
-			// 血缘（M5，Step27 后端实时计算 + 缓存）
-			lH := lineageapi.NewHandler(deps.Meta, deps.History, deps.Reports, deps.Dashboards, log)
+			// 血缘（M5，Step27-28 缓存+实时：sys_meta_lineage 定时 pg_query_go/vitess 解析 sys_query_history）
+			var lineageSvc *lineage.Service
+			if deps.Lineage != nil {
+				lineageSvc = lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log)
+			}
+			lH := lineageapi.NewHandler(deps.Meta, deps.History, deps.Reports, deps.Dashboards, deps.Lineage, lineageSvc, log)
 			mux.Handle("GET /api/v1/assets/lineage",
 				middleware.Chain(http.HandlerFunc(lH.Lineage), requireAuth))
+			mux.Handle("POST /api/v1/assets/lineage/refresh",
+				middleware.Chain(http.HandlerFunc(lH.Refresh), requireAuth, canWrite, auditMW))
 		}
 
 		// ---------- 报表中心（M3/M4） ----------
