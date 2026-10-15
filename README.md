@@ -23,7 +23,7 @@
 | **前端工程** | Vue Router 4, Pinia 3, Axios | 路由、状态管理、请求封装 |
 | **可视化** | ECharts 6 | 数据图表渲染 |
 | **动画** | GSAP, CSS Transitions | 微交互 |
-| **后端** | Go 1.25（标准库，零第三方运行时依赖） | 高性能 API 服务 |
+| **后端** | Go 1.25（pgx / MySQL / Redis 驱动，libpg_query AST） | 高性能 API 服务 |
 | **数据库** | PostgreSQL 16 (元数据), Redis 7 (缓存) | 自身存储 |
 | **部署** | Docker, Docker Compose | 全生命周期容器化 |
 
@@ -104,3 +104,7 @@ dbhub/
 ## 📄 许可证
 
 [MIT](./LICENSE)
+
+## Cloud 完整后端
+
+使用 `./scripts/cloud/setup.sh` 安装、编译并执行真实 PostgreSQL/MySQL/Redis 集成测试，再用 `./scripts/cloud/start.sh` 启动。配置和服务命令见 [Cloud 开发环境](scripts/cloud/README.md)，实现与边界见 [补齐验收契约](docs/开发指南/云端后端补齐验收.md)。AI 服务可稍后配置，未配置时界面明确提示不可用。
