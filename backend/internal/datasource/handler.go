@@ -22,11 +22,12 @@ type Handler struct {
 	conns   *db.ConnectionRepository
 	tunnels *db.TunnelRepository
 	log     *slog.Logger
+	proxies *db.ProxyRepository
 }
 
 // NewHandler 创建处理器。
-func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, log *slog.Logger) *Handler {
-	return &Handler{conns: conns, tunnels: tunnels, log: log}
+func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, log *slog.Logger, proxies *db.ProxyRepository) *Handler {
+	return &Handler{conns: conns, tunnels: tunnels, log: log, proxies: proxies}
 }
 
 type connectionRequest struct {
@@ -38,6 +39,7 @@ type connectionRequest struct {
 	Username          string `json:"username"`
 	Password          string `json:"password"`
 	SSHTunnelID       *int64 `json:"ssh_tunnel_id"`
+	ProxyID           *int64 `json:"proxy_id"`
 	SSLMode           string `json:"ssl_mode"`
 	ConnectionTimeout int    `json:"connection_timeout"`
 	ColorLabel        string `json:"color_label"`
@@ -50,6 +52,7 @@ type tunnelRequest struct {
 	Port       int    `json:"port"`
 	Username   string `json:"username"`
 	AuthType   string `json:"auth_type"`
+	HostKey    string `json:"host_key"`
 	PrivateKey string `json:"private_key"`
 	Passphrase string `json:"passphrase"`
 	Password   string `json:"password"`
@@ -72,8 +75,17 @@ func validConnReq(in *connectionRequest) error {
 	if in.Port <= 0 || in.Port > 65535 {
 		return httpx.BadRequest("端口必须在 1-65535 之间")
 	}
+	if in.SSHTunnelID != nil && in.ProxyID != nil {
+		return httpx.BadRequest("代理和 SSH 隧道不能同时启用")
+	}
+	if in.SSLMode != "" && in.SSLMode != "disable" && in.SSLMode != "require" && in.SSLMode != "verify-full" {
+		return httpx.BadRequest("SSL 模式无效")
+	}
 	if in.SSLMode == "" {
-		in.SSLMode = "disable"
+		in.SSLMode = "verify-full"
+	}
+	if in.ProxyID != nil && in.SSHTunnelID != nil {
+		return httpx.BadRequest("代理与 SSH 隧道不能同时启用")
 	}
 	if in.ConnectionTimeout <= 0 {
 		in.ConnectionTimeout = 10
@@ -146,11 +158,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	conn := &db.Connection{
-		UserID: c.Subject, SSHTunnelID: in.SSHTunnelID,
+		UserID: c.Subject, SSHTunnelID: in.SSHTunnelID, ProxyID: in.ProxyID,
 		Name: in.Name, Type: in.Type, Host: in.Host, Port: in.Port,
 		Database: in.Database, Username: in.Username, Password: in.Password,
 		SSLMode: in.SSLMode, ConnectionTimeout: in.ConnectionTimeout, ColorLabel: in.ColorLabel,
 		Environment: in.Environment,
+	}
+	if conn.ProxyID != nil {
+		if _, e := h.proxyForUser(r.Context(), *conn.ProxyID, c); e != nil {
+			httpx.Fail(w, e)
+			return
+		}
 	}
 	if err := h.conns.Create(r.Context(), conn); err != nil {
 		httpx.Fail(w, httpx.Internal("创建连接失败", err))
@@ -214,11 +232,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	conn := &db.Connection{
-		ID: id, UserID: existing.UserID, SSHTunnelID: in.SSHTunnelID,
+		ID: id, UserID: existing.UserID, SSHTunnelID: in.SSHTunnelID, ProxyID: in.ProxyID,
 		Name: in.Name, Type: in.Type, Host: in.Host, Port: in.Port,
 		Database: in.Database, Username: in.Username, Password: in.Password,
 		SSLMode: in.SSLMode, ConnectionTimeout: in.ConnectionTimeout, ColorLabel: in.ColorLabel,
 		Environment: in.Environment,
+	}
+	if conn.ProxyID != nil {
+		if _, e := h.proxyForUser(r.Context(), *conn.ProxyID, c); e != nil {
+			httpx.Fail(w, e)
+			return
+		}
 	}
 	if err := h.conns.Update(r.Context(), conn); err != nil {
 		httpx.Fail(w, httpx.Internal("更新连接失败", err))
@@ -266,7 +290,7 @@ func (h *Handler) TestUnpersisted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn := &db.Connection{
-		UserID: c.Subject, SSHTunnelID: in.SSHTunnelID,
+		UserID: c.Subject, SSHTunnelID: in.SSHTunnelID, ProxyID: in.ProxyID,
 		Type: in.Type, Host: in.Host, Port: in.Port,
 		Database: in.Database, Username: in.Username,
 		SSLMode: in.SSLMode, ConnectionTimeout: in.ConnectionTimeout,
@@ -292,6 +316,14 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Connection, password string) {
 	c := claimsOf(r)
+	if conn.ProxyID != nil && conn.Proxy == nil {
+		p, e := h.proxyForUser(r.Context(), *conn.ProxyID, c)
+		if e != nil {
+			httpx.Fail(w, e)
+			return
+		}
+		conn.Proxy = p
+	}
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
 		t, err := h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)
@@ -371,7 +403,7 @@ func (h *Handler) CreateTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	t := &db.SSHTunnel{
 		UserID: c.Subject, Name: in.Name, Host: in.Host, Port: in.Port,
-		Username: in.Username, AuthType: in.AuthType,
+		Username: in.Username, AuthType: in.AuthType, HostKey: in.HostKey,
 		PrivateKey: in.PrivateKey, Passphrase: in.Passphrase, Password: in.Password,
 	}
 	if err := h.tunnels.Create(r.Context(), t); err != nil {
@@ -415,7 +447,7 @@ func (h *Handler) UpdateTunnel(w http.ResponseWriter, r *http.Request) {
 	}
 	t := &db.SSHTunnel{
 		ID: id, Name: in.Name, Host: in.Host, Port: in.Port,
-		Username: in.Username, AuthType: in.AuthType,
+		Username: in.Username, AuthType: in.AuthType, HostKey: in.HostKey,
 		PrivateKey: in.PrivateKey, Passphrase: in.Passphrase, Password: in.Password,
 	}
 	if err := h.tunnels.Update(r.Context(), t); err != nil {
@@ -462,7 +494,7 @@ func (h *Handler) TestTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := &db.SSHTunnel{
-		Host: in.Host, Port: in.Port, Username: in.Username, AuthType: in.AuthType,
+		Host: in.Host, Port: in.Port, Username: in.Username, AuthType: in.AuthType, HostKey: in.HostKey,
 		PrivateKey: in.PrivateKey, Passphrase: in.Passphrase, Password: in.Password,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -496,4 +528,18 @@ func safeErr(err error) string {
 		return msg[:max]
 	}
 	return msg
+}
+
+func (h *Handler) proxyForUser(ctx context.Context, id int64, c *auth.Claims) (*db.Proxy, error) {
+	if h.proxies == nil {
+		return nil, httpx.BadRequest("代理服务不可用")
+	}
+	p, e := h.proxies.GetSecrets(ctx, id)
+	if e != nil {
+		return nil, httpx.NotFound("代理不存在")
+	}
+	if p.UserID != c.Subject && !isAdmin(c) {
+		return nil, httpx.Forbidden("无权使用该代理")
+	}
+	return p, nil
 }

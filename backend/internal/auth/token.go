@@ -23,14 +23,15 @@ var tokenEncoding = base64.RawURLEncoding
 
 // Claims JWT 自定义声明。
 type Claims struct {
-	Issuer   string `json:"iss"`
-	Subject  int64  `json:"sub"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	Type     string `json:"typ"`
-	IssuedAt int64  `json:"iat"`
-	Expires  int64  `json:"exp"`
-	JWTID    string `json:"jti"`
+	Issuer    string `json:"iss"`
+	Subject   int64  `json:"sub"`
+	Username  string `json:"username"`
+	Role      string `json:"role"`
+	Type      string `json:"typ"`
+	IssuedAt  int64  `json:"iat"`
+	Expires   int64  `json:"exp"`
+	JWTID     string `json:"jti"`
+	SessionID string `json:"sid"`
 }
 
 type jwtHeader struct {
@@ -43,10 +44,15 @@ type TokenPair struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresAt    time.Time
+	SessionID    string
+	RefreshID    string
 }
 
 // IssueToken 签发一枚 HS256 JWT。
 func IssueToken(secret []byte, user *User, typ string, ttl time.Duration) (string, time.Time, error) {
+	return issueToken(secret, user, typ, ttl, "")
+}
+func issueToken(secret []byte, user *User, typ string, ttl time.Duration, sid string) (string, time.Time, error) {
 	now := time.Now()
 	expires := now.Add(ttl)
 	jti := make([]byte, 8)
@@ -56,14 +62,15 @@ func IssueToken(secret []byte, user *User, typ string, ttl time.Duration) (strin
 
 	header := jwtHeader{Algorithm: "HS256", Type: "JWT"}
 	claims := Claims{
-		Issuer:   issuerName,
-		Subject:  user.ID,
-		Username: user.Username,
-		Role:     user.Role,
-		Type:     typ,
-		IssuedAt: now.Unix(),
-		Expires:  expires.Unix(),
-		JWTID:    base64.RawURLEncoding.EncodeToString(jti),
+		Issuer:    issuerName,
+		Subject:   user.ID,
+		Username:  user.Username,
+		Role:      user.Role,
+		Type:      typ,
+		IssuedAt:  now.Unix(),
+		Expires:   expires.Unix(),
+		JWTID:     base64.RawURLEncoding.EncodeToString(jti),
+		SessionID: sid,
 	}
 
 	headerBytes, err := json.Marshal(header)
@@ -85,15 +92,26 @@ func IssueToken(secret []byte, user *User, typ string, ttl time.Duration) (strin
 
 // IssuePair 签发 access + refresh 令牌对。
 func IssuePair(secret []byte, user *User, accessTTL, refreshTTL time.Duration) (*TokenPair, error) {
-	access, exp, err := IssueToken(secret, user, TokenTypeAccess, accessTTL)
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return nil, err
+	}
+	return issuePairForSession(secret, user, accessTTL, refreshTTL, base64.RawURLEncoding.EncodeToString(b))
+}
+func issuePairForSession(secret []byte, user *User, accessTTL, refreshTTL time.Duration, sid string) (*TokenPair, error) {
+	access, exp, err := issueToken(secret, user, TokenTypeAccess, accessTTL, sid)
 	if err != nil {
 		return nil, err
 	}
-	refresh, _, err := IssueToken(secret, user, TokenTypeRefresh, refreshTTL)
+	refresh, _, err := issueToken(secret, user, TokenTypeRefresh, refreshTTL, sid)
 	if err != nil {
 		return nil, err
 	}
-	return &TokenPair{AccessToken: access, RefreshToken: refresh, ExpiresAt: exp}, nil
+	claims, err := ParseToken(secret, refresh, TokenTypeRefresh)
+	if err != nil {
+		return nil, err
+	}
+	return &TokenPair{AccessToken: access, RefreshToken: refresh, ExpiresAt: exp, SessionID: sid, RefreshID: claims.JWTID}, nil
 }
 
 // ParseToken 校验签名、有效期与令牌类型并返回 Claims。

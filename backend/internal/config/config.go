@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -33,7 +34,9 @@ type Config struct {
 	// MetaDBMaxConns 元数据库连接池上限（单会话线协议代理应设为 1）
 	MetaDBMaxConns int32
 	// RedisURL Redis 缓存 DSN
-	RedisURL string
+	RedisURL                  string
+	CORSOrigins               []string
+	AIBaseURL, AIKey, AIModel string
 }
 
 // AdminConfig 引导管理员账号配置。
@@ -51,6 +54,7 @@ func Load() (*Config, error) {
 		DatabaseURL:    os.Getenv("DATABASE_URL"),
 		MetaDBMaxConns: int32(getenvInt("META_DB_MAX_CONNS", 10)),
 		RedisURL:       os.Getenv("REDIS_URL"),
+		AIBaseURL:      getenv("DBHUB_AI_BASE_URL", "https://api.openai.com/v1"), AIKey: os.Getenv("DBHUB_AI_API_KEY"), AIModel: getenv("DBHUB_AI_MODEL", "gpt-4.1-mini"),
 		Admin: AdminConfig{
 			Username: getenv("APP_ADMIN_USERNAME", "admin"),
 			Password: getenv("APP_ADMIN_PASSWORD", "admin123"),
@@ -82,6 +86,17 @@ func Load() (*Config, error) {
 	cfg.AccessTTL = time.Duration(accessMinutes) * time.Minute
 	cfg.RefreshTTL = time.Duration(refreshHours) * time.Hour
 
+	if cfg.IsProduction() && cfg.DatabaseURL == "" {
+		return nil, errors.New("生产环境必须配置 DATABASE_URL")
+	}
+	if cfg.IsProduction() && cfg.RedisURL == "" {
+		return nil, errors.New("生产环境必须配置 REDIS_URL")
+	}
+	for _, origin := range strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",") {
+		if strings.TrimSpace(origin) != "" {
+			cfg.CORSOrigins = append(cfg.CORSOrigins, strings.TrimSpace(origin))
+		}
+	}
 	return cfg, nil
 }
 

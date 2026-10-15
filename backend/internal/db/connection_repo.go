@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/user/dbhub/pkg/crypto"
 )
 
@@ -18,13 +17,16 @@ type Connection struct {
 	ID                int64     `json:"id"`
 	UserID            int64     `json:"user_id"`
 	SSHTunnelID       *int64    `json:"ssh_tunnel_id"`
+	ProxyID           *int64    `json:"proxy_id"`
+	ProxyName         string    `json:"proxy_name"`
+	Proxy             *Proxy    `json:"-"`
 	Name              string    `json:"name"`
 	Type              string    `json:"type"` // mysql | postgres | redis | mongo
 	Host              string    `json:"host"`
 	Port              int       `json:"port"`
 	Database          string    `json:"database"`
 	Username          string    `json:"username"`
-	Password          string    `json:"password,omitempty"`
+	Password          string    `json:"-"`
 	SSLMode           string    `json:"ssl_mode"`
 	ConnectionTimeout int       `json:"connection_timeout"`
 	ColorLabel        string    `json:"color_label"`
@@ -64,13 +66,14 @@ const connSelectCols = `
 	c.password IS NOT NULL AND c.password <> '',
 	c.ssl_mode, c.connection_timeout, COALESCE(c.color_label, ''),
 	COALESCE(c.environment, 'dev'),
-	c.created_at, c.updated_at, COALESCE(t.name, '')`
+	c.created_at, c.updated_at, COALESCE(t.name, ''), c.proxy_id,
+	COALESCE((SELECT p.name FROM sys_proxies p WHERE p.id=c.proxy_id),'')`
 
 func scanConnection(row pgx.Row) (*Connection, error) {
 	c := &Connection{}
 	err := row.Scan(&c.ID, &c.UserID, &c.SSHTunnelID, &c.Name, &c.Type, &c.Host, &c.Port,
 		&c.Database, &c.Username, &c.HasPassword, &c.SSLMode, &c.ConnectionTimeout,
-		&c.ColorLabel, &c.Environment, &c.CreatedAt, &c.UpdatedAt, &c.TunnelName)
+		&c.ColorLabel, &c.Environment, &c.CreatedAt, &c.UpdatedAt, &c.TunnelName, &c.ProxyID, &c.ProxyName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -130,6 +133,12 @@ func (r *ConnectionRepository) GetSecrets(ctx context.Context, id int64) (*Conne
 	if err != nil {
 		return nil, "", err
 	}
+	if c.ProxyID != nil {
+		c.Proxy, err = NewProxyRepository(r.pool, r.cipher).GetSecrets(ctx, *c.ProxyID)
+		if err != nil {
+			return nil, "", err
+		}
+	}
 	return c, pwd, nil
 }
 
@@ -149,13 +158,13 @@ func (r *ConnectionRepository) Create(ctx context.Context, c *Connection) error 
 	return r.pool.QueryRow(ctx, `
 		INSERT INTO sys_connections
 			(user_id, ssh_tunnel_id, name, type, host, port, database, username,
-			 password, ssl_mode, connection_timeout, color_label, environment)
+			 password, ssl_mode, connection_timeout, color_label, environment, proxy_id)
 		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),
-		        NULLIF($9,''),$10,$11,NULLIF($12,''),$13)
+		        NULLIF($9,''),$10,$11,NULLIF($12,''),$13,$14)
 		RETURNING id, created_at, updated_at`,
 		c.UserID, c.SSHTunnelID, c.Name, c.Type, c.Host, c.Port, c.Database,
 		c.Username, enc, c.SSLMode, c.ConnectionTimeout, c.ColorLabel,
-		defaultEnv(c.Environment),
+		defaultEnv(c.Environment), c.ProxyID,
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 }
 
@@ -182,10 +191,10 @@ func (r *ConnectionRepository) Update(ctx context.Context, c *Connection) error 
 			ssh_tunnel_id = $2, name = $3, type = $4, host = $5, port = $6,
 			database = NULLIF($7,''), username = NULLIF($8,''),
 			ssl_mode = $9, connection_timeout = $10, color_label = NULLIF($11,''),
-			environment = $12
+			environment = $12, proxy_id = $13
 		WHERE id = $1`,
 		c.ID, c.SSHTunnelID, c.Name, c.Type, c.Host, c.Port, c.Database,
-		c.Username, c.SSLMode, c.ConnectionTimeout, c.ColorLabel, defaultEnv(c.Environment))
+		c.Username, c.SSLMode, c.ConnectionTimeout, c.ColorLabel, defaultEnv(c.Environment), c.ProxyID)
 	if err != nil {
 		return fmt.Errorf("更新连接失败: %w", err)
 	}

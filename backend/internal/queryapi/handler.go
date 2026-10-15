@@ -5,6 +5,7 @@ package queryapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -19,20 +20,27 @@ import (
 
 // Handler 查询工作台处理器。
 type Handler struct {
-	conns   *db.ConnectionRepository
-	tunnels *db.TunnelRepository
-	history *db.HistoryRepository
-	log     *slog.Logger
+	conns    *db.ConnectionRepository
+	tunnels  *db.TunnelRepository
+	history  *db.HistoryRepository
+	log      *slog.Logger
+	txs      *transactions
+	jobs     *jobs
+	controls *db.QueryControls
 }
 
-func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger) *Handler {
-	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log}
+func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger, controls *db.QueryControls) *Handler {
+	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls}
 }
 
 type executeRequest struct {
-	ConnectionID int64  `json:"connection_id"`
-	Database     string `json:"database"`
-	SQL          string `json:"sql"`
+	ConnectionID  int64          `json:"connection_id"`
+	Database      string         `json:"database"`
+	SQL           string         `json:"sql"`
+	TransactionID string         `json:"transaction_id"`
+	TimeoutMS     int            `json:"timeout_ms"`
+	MaxRows       int            `json:"max_rows"`
+	Params        map[string]any `json:"params"`
 }
 
 func claimsOf(r *http.Request) *auth.Claims {
@@ -84,68 +92,13 @@ func (h *Handler) openRelational(r *http.Request, connID int64, database string)
 	return handle, conn, handle.Close, nil
 }
 
-// Execute POST /api/v1/query/execute
-func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
-	var in executeRequest
-	if err := httpx.DecodeJSON(w, r, &in); err != nil {
-		httpx.Fail(w, err)
-		return
-	}
-	in.SQL = strings.TrimSpace(in.SQL)
-	if in.ConnectionID <= 0 {
-		httpx.Fail(w, httpx.BadRequest("connection_id 非法"))
-		return
-	}
-	if in.SQL == "" {
-		httpx.Fail(w, httpx.BadRequest("SQL 内容不能为空"))
-		return
-	}
-
-	conn, password, tunnel, err := h.loadOwnedConnection(r, in.ConnectionID)
-	if err != nil {
-		httpx.Fail(w, err)
-		return
-	}
-	if conn.Type == "redis" {
-		httpx.Fail(w, httpx.BadRequest("Redis 不支持 SQL，请使用键浏览功能"))
-		return
-	}
-	if in.Database != "" {
-		conn.Database = in.Database
-	}
-
-	openCtx, openCancel := context.WithTimeout(r.Context(), 20*time.Second)
-	handle, err := target.OpenRelational(openCtx, conn, password, tunnel)
-	openCancel()
-	if err != nil {
-		h.recordHistory(r.Context(), c, in, conn, 0, nil, err)
-		httpx.Fail(w, httpx.BadRequest("打开目标数据库失败: "+safeErr(err)))
-		return
-	}
-	defer handle.Close()
-
-	forceReadOnly := c.Role == "readonly"
-	result, execErr := target.Execute(r.Context(), handle, in.SQL, forceReadOnly)
-	if execErr != nil {
-		h.recordHistory(r.Context(), c, in, conn, 0, nil, execErr)
-		httpx.Fail(w, httpx.BadRequest(safeErr(execErr)))
-		return
-	}
-	var affected *int64
-	if result.Kind == "write" {
-		n := result.AffectedRows
-		affected = &n
-	}
-	h.recordHistory(r.Context(), c, in, conn, result.DurationMS, affected, nil)
-	httpx.OK(w, result)
-}
-
 func (h *Handler) recordHistory(ctx context.Context, c *auth.Claims, in executeRequest, conn *db.Connection, durationMS int64, affected *int64, execErr error) {
 	dbName := in.Database
 	if dbName == "" {
 		dbName = conn.Database
 	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	rec := &db.QueryHistory{
 		ConnectionID: in.ConnectionID,
 		UserID:       c.Subject,
@@ -272,8 +225,7 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	columns, rows, total, err := target.PreviewTable(r.Context(), handle,
-		q.Get("database"), q.Get("schema"), table, pageSize+1, (page-1)*pageSize)
+	columns, rows, total, err := h.previewWithPolicies(r, handle, q.Get("database"), q.Get("schema"), table, pageSize+1, (page-1)*pageSize)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -459,4 +411,41 @@ func firstN(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// previewWithPolicies applies the same server policy to preview and its count.
+func (h *Handler) previewWithPolicies(r *http.Request, handle *target.RelDB, database, schema, table string, limit, offset int) ([]string, [][]any, int64, error) {
+	name := quoted(table, handle.Conn.Type)
+	if handle.Conn.Type == "postgres" {
+		if schema == "" {
+			schema = "public"
+		}
+		name = quoted(schema, handle.Conn.Type) + "." + name
+	} else {
+		if database == "" {
+			database = handle.Conn.Database
+		}
+		name = quoted(database, handle.Conn.Type) + "." + name
+	}
+	c := claimsOf(r)
+	query, args, e := h.applyPolicies(r.Context(), handle, c.Subject, c.Role, "SELECT * FROM "+name, nil)
+	if e != nil {
+		return nil, nil, 0, e
+	}
+	count, e := target.ExecuteWithOptions(r.Context(), handle, "SELECT COUNT(*) FROM ("+query+") AS dbhub_visible", true, target.ExecuteOptions{Args: args})
+	if e != nil {
+		return nil, nil, 0, e
+	}
+	var total int64
+	if len(count.Rows) > 0 {
+		_, e = fmt.Sscan(fmt.Sprint(count.Rows[0][0]), &total)
+		if e != nil {
+			return nil, nil, 0, e
+		}
+	}
+	result, e := target.ExecuteWithOptions(r.Context(), handle, query+fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset), true, target.ExecuteOptions{Args: args, MaxRows: limit})
+	if e != nil {
+		return nil, nil, 0, e
+	}
+	return result.Columns, result.Rows, total, nil
 }

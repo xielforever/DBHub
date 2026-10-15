@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
 	"github.com/user/dbhub/internal/db"
+	"golang.org/x/crypto/ssh"
 )
 
 // DialClient 使用隧道配置建立 SSH 客户端（调用方负责 Close）。
@@ -38,39 +38,41 @@ func DialClient(ctx context.Context, t *db.SSHTunnel) (*ssh.Client, error) {
 		auth = append(auth, ssh.Password(t.Password))
 	}
 
-	// 注意：跳板机主机密钥校验在正式环境应基于 known_hosts；
-	// 当前版本由用户主动录入跳板地址，先以 InsecureSkipKey 建立连接并在日志审计。
+	if !strings.HasPrefix(t.HostKey, "SHA256:") {
+		return nil, fmt.Errorf("请配置跳板机 host_key（SHA256 主机公钥指纹）")
+	}
 	cfg := &ssh.ClientConfig{
-		User:            t.Username,
-		Auth:            auth,
-		Timeout:         10 * time.Second,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // #nosec G106 -- 跳板指纹管理在后续版本提供
+		User:    t.Username,
+		Auth:    auth,
+		Timeout: 10 * time.Second,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			if ssh.FingerprintSHA256(key) != t.HostKey {
+				return fmt.Errorf("SSH 主机公钥指纹不匹配")
+			}
+			return nil
+		},
 	}
 	addr := net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
 
-	type result struct {
-		c   *ssh.Client
-		err error
+	raw, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("SSH 跳板连接失败")
 	}
-	ch := make(chan result, 1)
-	go func() {
-		c, err := ssh.Dial("tcp", addr, cfg)
-		ch <- result{c, err}
-	}()
-	select {
-	case <-ctx.Done():
-		go func() {
-			if r := <-ch; r.c != nil {
-				_ = r.c.Close()
-			}
-		}()
-		return nil, ctx.Err()
-	case r := <-ch:
-		if r.err != nil {
-			return nil, fmt.Errorf("SSH 跳板连接失败: %w", r.err)
-		}
-		return r.c, nil
+	deadline := time.Now().Add(10 * time.Second)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
 	}
+	_ = raw.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = raw.Close() })
+	defer stop()
+	connection, channels, requests, err := ssh.NewClientConn(raw, addr, cfg)
+	if err != nil {
+		raw.Close()
+		return nil, fmt.Errorf("SSH 认证或主机密钥校验失败")
+	}
+	_ = raw.SetDeadline(time.Time{})
+	return ssh.NewClient(connection, channels, requests), nil
+
 }
 
 // DialContext 返回一个通过 SSH 隧道拨号到目标地址的 DialContext。

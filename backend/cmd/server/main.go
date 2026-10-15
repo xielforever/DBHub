@@ -12,12 +12,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-
+	"github.com/redis/go-redis/v9"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/db"
-	"github.com/user/dbhub/internal/logx"
 	"github.com/user/dbhub/internal/lineage"
+	"github.com/user/dbhub/internal/logx"
 	"github.com/user/dbhub/internal/server"
 	securecrypto "github.com/user/dbhub/pkg/crypto"
 )
@@ -41,6 +41,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	var sessionRedis *redis.Client
+	if cfg.RedisURL != "" {
+		options, e := redis.ParseURL(cfg.RedisURL)
+		if e != nil {
+			log.Error("Redis 配置无效")
+			os.Exit(1)
+		}
+		sessionRedis = redis.NewClient(options)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		e = sessionRedis.Ping(ctx).Err()
+		cancel()
+		if e != nil {
+			log.Error("Redis 会话服务连接失败")
+			os.Exit(1)
+		}
+		defer sessionRedis.Close()
+	}
+	sessions := auth.NewSessionStore(sessionRedis)
 	// 用户存储：配置 DATABASE_URL 时接入 PostgreSQL 元数据库，否则回退内存存储
 	var users auth.UserStore
 	var deps *server.Deps
@@ -89,6 +107,9 @@ func main() {
 			Shares:     db.NewShareRepository(pgPool),
 			Tickets:    db.NewTicketRepository(pgPool),
 			Lineage:    db.NewLineageRepository(pgPool),
+			Snippets:   db.NewSnippetRepository(pgPool),
+			Sessions:   sessions,
+			Redis:      sessionRedis, Controls: db.NewQueryControls(pgPool),
 		}
 		log.Info("已接入 PostgreSQL 元数据库")
 	} else {
@@ -99,7 +120,7 @@ func main() {
 		}
 		users = memoryUsers
 		log.Warn("未配置 DATABASE_URL，使用内存用户存储（仅适合本地快速调试）")
-		// TODO: 初始化 Redis 客户端（会话/黑名单/缓存）
+		deps = &server.Deps{Sessions: sessions}
 	}
 
 	router := server.NewRouter(cfg, log, users, deps)
@@ -131,6 +152,9 @@ func main() {
 
 	<-ctx.Done()
 	log.Info("收到关停信号，正在优雅停机...")
+	if deps != nil && deps.Queries != nil {
+		deps.Queries.Close()
+	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {

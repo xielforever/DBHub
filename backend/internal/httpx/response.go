@@ -4,6 +4,7 @@ package httpx
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 )
@@ -124,6 +125,9 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	if err := dec.Decode(dst); err != nil {
 		return BadRequest("请求参数格式错误: " + err.Error())
 	}
+	if err := dec.Decode(new(any)); err != io.EOF {
+		return BadRequest("只允许一个 JSON 对象")
+	}
 	return nil
 }
 
@@ -131,6 +135,8 @@ func httpStatusForCode(code int) int {
 	switch {
 	case code >= 50000:
 		return http.StatusInternalServerError
+	case code >= 42900 && code < 43000:
+		return http.StatusTooManyRequests
 	case code >= 40900 && code < 41000:
 		return http.StatusConflict
 	case code >= 40400 && code < 40500:

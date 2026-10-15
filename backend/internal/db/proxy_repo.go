@@ -90,9 +90,11 @@ func (r *ProxyRepository) GetSecrets(ctx context.Context, id int64) (*Proxy, err
 		return nil, err
 	}
 	if encPwd != "" && r.cipher != nil {
-		if dec, err := r.cipher.Decrypt(encPwd); err == nil {
-			p.Password = dec
+		dec, err := r.cipher.Decrypt(encPwd)
+		if err != nil {
+			return nil, fmt.Errorf("代理凭据解密失败")
 		}
+		p.Password = dec
 	}
 	return p, nil
 }
