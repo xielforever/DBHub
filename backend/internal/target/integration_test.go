@@ -98,6 +98,11 @@ func TestIntegrationRealSQLAndTransactions(t *testing.T) {
 				t.Fatal("multi-statement bypass accepted")
 			}
 			if dialect == "postgres" {
+				if _, e = Execute(ctx, r, "WITH changed AS (DELETE FROM dbhub_probe RETURNING *) SELECT * FROM changed", false); e == nil {
+					t.Fatal("unsafe write inside CTE bypassed guard")
+				}
+			}
+			if dialect == "postgres" {
 				if _, e = Execute(ctx, r, "WITH x AS (DELETE FROM dbhub_probe RETURNING id) SELECT * FROM x", true); e == nil {
 					t.Fatal("write CTE bypass accepted")
 				}

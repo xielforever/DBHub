@@ -288,7 +288,7 @@
           </el-tab-pane>
 
           <el-tab-pane label="AI 优化" name="ai-optimize" class="flex flex-col min-h-0 flex-1">
-            <AiOptimizePane :sql="currentTab.sql" :explain-columns="grid.columns" :explain-rows="(grid.rows as unknown[][])" :duration="lastDuration" :table-columns="grid.columns" @apply-rewrite="onApplyRewrite" @apply-index="onApplyIndex" />
+            <AiOptimizePane :has-explain="explainContext.sql === currentTab.sql.trim() && explainContext.columns.length > 0" :sql="currentTab.sql" :explain-columns="explainContext.columns" :explain-rows="explainContext.rows" :duration="lastDuration" :table-columns="grid.columns" @apply-rewrite="onApplyRewrite" @apply-index="onApplyIndex" />
           </el-tab-pane>
 
           <el-tab-pane label="计划对比" name="explain-compare" class="flex flex-col min-h-0 flex-1">
@@ -994,6 +994,7 @@ const grid = reactive<{ columns: string[]; rows: unknown[][]; truncated: boolean
   truncated: false,
 })
 const writeResult = ref<ExecResult | null>(null)
+const explainContext = reactive<{sql:string;columns:string[];rows:unknown[][]}>({sql:'',columns:[],rows:[]})
 const preview = reactive({
   schema: '',
   database: '',
@@ -1183,6 +1184,7 @@ function log(text: string, level: 'info' | 'success' | 'error' = 'info') {
 }
 
 function resetGrid() {
+  Object.assign(explainContext,{sql:'',columns:[],rows:[]})
   grid.columns = []
   grid.rows = []
   grid.truncated = false
@@ -1808,6 +1810,7 @@ async function explainQuery() {
   try {
     const res = await workbenchApi.execute(currentConn.value.id, `EXPLAIN ${sql}`, currentTab.value.database, abortController.value.signal, paramValues.value, executionOptions())
     lastDuration.value = res.duration_ms
+    Object.assign(explainContext,{sql,columns:[...(res.columns || [])],rows:structuredClone(res.rows || [])})
     grid.columns = res.columns ?? []
     grid.rows = res.rows ?? []
     grid.truncated = false

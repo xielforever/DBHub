@@ -45,3 +45,12 @@ func TestNamedParametersRespectLiteralsAndComments(t *testing.T) {
 		t.Fatal("missing parameter accepted")
 	}
 }
+
+func TestUnsafeWritesInsideCTEsAndExplain(t *testing.T) {
+	for _, query := range []string{"WITH changed AS (DELETE FROM example RETURNING *) SELECT * FROM changed", "EXPLAIN ANALYZE UPDATE example SET id=2"} {
+		s, e := Parse(query, "postgres")
+		if e != nil || !s.UnsafeWrite {
+			t.Fatalf("nested unsafe write not detected: %v", e)
+		}
+	}
+}

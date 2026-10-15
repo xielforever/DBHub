@@ -79,6 +79,9 @@ func Parse(sql, dialect string) (*Statement, error) {
 		}
 	})
 	Walk(tree, func(key string, value map[string]any) {
+		if (key == "UpdateStmt" || key == "DeleteStmt") && value["whereClause"] == nil {
+			s.UnsafeWrite = true
+		}
 		switch key {
 		case "InsertStmt", "UpdateStmt", "DeleteStmt", "MergeStmt", "CopyStmt", "CallStmt", "DoStmt", "TransactionStmt":
 			s.ReadOnly = false
