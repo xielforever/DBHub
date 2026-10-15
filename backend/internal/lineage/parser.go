@@ -46,15 +46,15 @@ func Fingerprint(sql string) string {
 // ExtractTables 兼容 pg_query_go（Postgres）与 vitess（MySQL）的表提取
 // 当前为纯 Go 正则实现，保持与 pg_query_go/vitess 语义一致，后续可无缝替换为：
 //
-//   //go:build pg_query
-//   import pg_query "github.com/pganalyze/pg_query_go/v5"
-//   tree, _ := pg_query.Parse(sql)
-//   // 遍历 tree 提取 RangeVar
+//	//go:build pg_query
+//	import pg_query "github.com/pganalyze/pg_query_go/v5"
+//	tree, _ := pg_query.Parse(sql)
+//	// 遍历 tree 提取 RangeVar
 //
-//   //go:build vitess
-//   import "vitess.io/vitess/go/vt/sqlparser"
-//   stmt, _ := sqlparser.Parse(sql)
-//   // Walk 提取 TableName
+//	//go:build vitess
+//	import "vitess.io/vitess/go/vt/sqlparser"
+//	stmt, _ := sqlparser.Parse(sql)
+//	// Walk 提取 TableName
 //
 // 为避免 CGO 与大体积 vitess 依赖，当前用正则近似，单测覆盖 95%+ 场景
 func ExtractTables(sql string, dbType string) ParseResult {
@@ -152,7 +152,7 @@ func parseTableRef(raw string) TableRef {
 	raw = strings.Trim(raw, "`")
 	parts := strings.Split(raw, ".")
 	for i := range parts {
-		parts[i] = strings.Trim(parts[i], ` "``)
+		parts[i] = strings.Trim(parts[i], " \"`")
 	}
 	switch len(parts) {
 	case 3:
@@ -179,7 +179,7 @@ func extractFromJoin(sql string) []TableRef {
 			// 寻找第一个非空的表名候选
 			for i := len(m) - 1; i >= 1; i-- {
 				if m[i] != "" {
-					clean := strings.Trim(m[i], ` "``.`)
+					clean := strings.Trim(m[i], " \"`.")
 					clean = strings.TrimSpace(clean)
 					// 过滤掉仅为别名的误捕获（长度>0 且非关键字）
 					low := strings.ToLower(clean)
