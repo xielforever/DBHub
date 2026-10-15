@@ -19,6 +19,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../views/auth/LoginView.vue'),
     meta: { title: '登录', public: true },
   },
+  { path: '/q/:token', name: 'public-query', component: () => import('../views/public/PublicQueryView.vue'), meta: {title: '查询分享', public: true} },
   {
     path: '/s/:token',
     name: 'public-share',

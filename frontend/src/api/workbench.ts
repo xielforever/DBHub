@@ -78,14 +78,16 @@ export interface RedisValue {
 }
 
 export const workbenchApi = {
-  execute(connectionId: number, sql: string, database?: string, signal?: AbortSignal, params?: Record<string, string>) {
+  execute(connectionId: number, sql: string, database?: string, signal?: AbortSignal, params?: Record<string, string>, options?: {transaction_id?: string; timeout_ms?: number; max_rows?: number}) {
     return request.post<unknown, ExecResult>('/query/execute', {
       connection_id: connectionId,
       sql,
       database: database || '',
       params: params || undefined,
+      ...options,
     }, {
       signal,
+      timeout:(options?.timeout_ms || 30000)+60000,
     } as any)
   },
   databases(connectionId: number) {

@@ -280,9 +280,7 @@ async function onUserCommand(command: string) {
     } catch {
       return
     }
-    userStore.logout()
-    ElMessage.success('已安全退出')
-    router.replace({ name: 'login' })
+    try {await userStore.logout();ElMessage.success('已退出，会话已撤销')} finally {router.replace({name:'login'})}
   } else if (command === 'settings') {
     router.push('/settings')
   }

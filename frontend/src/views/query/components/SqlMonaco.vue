@@ -9,6 +9,8 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+;(self as unknown as { MonacoEnvironment: {getWorker: () => Worker} }).MonacoEnvironment = { getWorker: () => new EditorWorker() }
 
 const props = withDefaults(
   defineProps<{

@@ -12,7 +12,7 @@ export interface TicketItem {
   connection_id?: number | null
   sql: string
   risk: 'low' | 'medium' | 'high'
-  status: 'pending' | 'approved' | 'rejected' | 'executed'
+  status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'failed'
   requester_id: number
   requester: string
   reason: string
@@ -84,6 +84,7 @@ export const ticketApi = {
     const raw = await request.get<unknown, RawTicket>(`/tickets/${id}`)
     return adapt(raw)
   },
+  execute(id: number) { return request.post<unknown, {status: string}>(`/tickets/${id}/execute`) },
   async updateStatus(id: number, status: TicketItem['status']) {
     return request.post<unknown, { id: number; status: string }>(`/tickets/${id}/status`, { status })
   },

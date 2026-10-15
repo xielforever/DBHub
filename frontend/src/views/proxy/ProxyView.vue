@@ -4,9 +4,9 @@
       <div>
         <h1 class="text-xl font-semibold flex items-center gap-2">
           代理管理
-          <span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-400/15 text-amber-300 border border-amber-400/20">占位 M5</span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-400/15 text-amber-300 border border-amber-400/20">已接通</span>
         </h1>
-        <p class="text-sm text-white/45 mt-1">替代 SSH 隧道的统一代理层，支持 HTTP / HTTPS / SOCKS5 / DB Proxy，当前为功能占位</p>
+        <p class="text-sm text-white/45 mt-1">替代 SSH 隧道的统一代理层，支持 HTTP / HTTPS / SOCKS5 / DB Proxy，数据源查询和测试均通过所选代理拨号</p>
       </div>
       <div class="flex items-center gap-2">
         <button class="ghost-button text-xs py-1.5 px-3 flex items-center gap-1" @click="reload">
@@ -26,11 +26,7 @@
         </div>
         <div class="space-y-2">
           <h3 class="font-medium text-sm">为什么从 SSH 隧道演进到 Proxy？</h3>
-          <ul class="text-xs text-white/55 leading-relaxed list-disc pl-4 space-y-1">
-            <li><b class="text-white/80">SSH 隧道</b> 仅解决跳板机场景，协议单一，无法覆盖企业 HTTP 代理、SOCKS5 全局代理、数据库网关（如 MySQL Proxy、PgBouncer、ProxySQL）等。</li>
-            <li><b class="text-white/80">Proxy 代理</b> 更合理：统一抽象 <code class="px-1 py-0.5 rounded bg-white/10 text-white/70">http/https/socks5/db_proxy/custom</code>，支持认证、状态、连接复用，未来可与数据源 <code class="px-1 py-0.5 rounded bg-white/10">proxy_id</code> 绑定，实现“数据源走代理”而非“数据源走隧道”。</li>
-            <li>当前 M4 为 <b class="text-amber-300">占位</b>：后端已建表 <code class="px-1 py-0.5 rounded bg-white/10">sys_proxies</code>、API <code class="px-1 py-0.5 rounded bg-white/10">/api/v1/proxies</code>、前端页面，拨号逻辑 M5 实现。</li>
-          </ul>
+          <ul class="space-y-2 mt-3 text-xs text-white/50"><li>HTTP 与 HTTPS 使用 CONNECT 隧道；SOCKS5 支持用户认证；数据库代理网关使用其实际入口。</li><li>HTTPS 代理验证证书。代理可在数据源管理中选择，保存的密码加密存储。</li><li>连接测试须指定可达的目标地址，以验证代理认证和转发权限。</li></ul>
         </div>
       </div>
     </div>
@@ -90,7 +86,7 @@
             <tr v-if="!loading && !items.length">
               <td colspan="7" class="px-4 py-12 text-center">
                 <Server class="w-8 h-8 text-white/20 mx-auto" />
-                <p class="text-white/40 text-sm mt-2">暂无代理，M5 前为占位，可先创建配置</p>
+                <p class="text-white/40 text-sm mt-2">暂无代理，可创建并测试连接</p>
               </td>
             </tr>
           </tbody>
@@ -99,7 +95,7 @@
     </div>
 
     <!-- 创建/编辑 -->
-    <el-dialog v-model="editOpen" :title="editingId ? '编辑代理（占位）' : '新建代理（占位）'" width="560px" class="glass-dialog" :close-on-click-modal="false">
+    <el-dialog v-model="editOpen" :title="editingId ? '编辑代理' : '新建代理'" width="560px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-4">
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -113,7 +109,7 @@
               <el-option label="HTTPS" value="https" />
               <el-option label="SOCKS5" value="socks5" />
               <el-option label="DB Proxy" value="db_proxy" />
-              <el-option label="Custom" value="custom" />
+
             </el-select>
           </div>
         </div>
@@ -142,7 +138,7 @@
           <el-input v-model="form.description" type="textarea" :rows="2" placeholder="用途、环境" maxlength="512" />
         </div>
         <div class="rounded-xl bg-white/5 border border-white/10 p-3 text-[11px] text-white/40 leading-relaxed">
-          占位说明：M5 将实现真实拨号（HTTP CONNECT / SOCKS5 握手 / DB Proxy 协议），当前仅保存配置与测试占位返回。
+          保存后可在数据源中选择此代理。测试会使用保存的认证信息连接指定目标。
         </div>
       </div>
       <template #footer>
@@ -169,10 +165,10 @@ const items = ref<ProxyItem[]>([])
 const loading = ref(false)
 
 const proxyTypes = [
-  { type: 'http', label: 'HTTP 代理', desc: '企业常见，支持 CONNECT 隧道，适合数据库走 HTTP 代理出网', icon: Globe, color: '#60a5fa', tint: 'rgba(96,165,250,0.15)', status: '占位' },
-  { type: 'https', label: 'HTTPS 代理', desc: 'TLS 加密代理，安全性更高', icon: ShieldCheck, color: '#34d399', tint: 'rgba(52,211,153,0.15)', status: '占位' },
-  { type: 'socks5', label: 'SOCKS5', desc: '通用代理，支持 TCP 全转发，适合任意数据库协议', icon: Waypoints, color: '#a78bfa', tint: 'rgba(167,139,250,0.15)', status: '占位' },
-  { type: 'db_proxy', label: 'DB Proxy', desc: 'PgBouncer / ProxySQL / MySQL Router 等数据库网关', icon: Server, color: '#fbbf24', tint: 'rgba(251,191,36,0.15)', status: '占位' },
+  { type: 'http', label: 'HTTP 代理', desc: '企业常见，支持 CONNECT 隧道，适合数据库走 HTTP 代理出网', icon: Globe, color: '#60a5fa', tint: 'rgba(96,165,250,0.15)', status: '已实现' },
+  { type: 'https', label: 'HTTPS 代理', desc: 'TLS 加密代理，安全性更高', icon: ShieldCheck, color: '#34d399', tint: 'rgba(52,211,153,0.15)', status: '已实现' },
+  { type: 'socks5', label: 'SOCKS5', desc: '通用代理，支持 TCP 全转发，适合任意数据库协议', icon: Waypoints, color: '#a78bfa', tint: 'rgba(167,139,250,0.15)', status: '已实现' },
+  { type: 'db_proxy', label: 'DB Proxy', desc: 'PgBouncer / ProxySQL / MySQL Router 等数据库网关', icon: Server, color: '#fbbf24', tint: 'rgba(251,191,36,0.15)', status: '已实现' },
 ]
 
 async function reload() {
@@ -215,10 +211,10 @@ async function save() {
   try {
     if (editingId.value) {
       await proxyApi.update(editingId.value, { name: form.name.trim(), type: form.type, host: form.host.trim(), port: Number(form.port), username: form.username.trim(), password: form.password || undefined, description: form.description.trim() })
-      ElMessage.success('已更新（占位）')
+      ElMessage.success('已更新')
     } else {
       await proxyApi.create({ name: form.name.trim(), type: form.type, host: form.host.trim(), port: Number(form.port), username: form.username.trim(), password: form.password || undefined, description: form.description.trim() })
-      ElMessage.success('已创建（占位）')
+      ElMessage.success('已创建')
     }
     editOpen.value = false
     reload()
@@ -236,8 +232,10 @@ async function remove(p: ProxyItem) {
 }
 async function testProxy(p: ProxyItem) {
   try {
-    const res = await proxyApi.test({ type: p.type, host: p.host, port: p.port, username: p.username, password: undefined })
-    ElMessage.success(res.ok ? `连通占位成功：${res.note || ''}` : '测试占位')
+    let target_host: string|undefined, target_port: number|undefined
+    if(p.type!=='db_proxy') {const input=await ElMessageBox.prompt('输入可通过该代理访问的目标，格式 host:port','测试代理',{inputPlaceholder:'database.internal:5432',inputValidator:(v:string)=>/^[^:]+:\d+$/.test(v)||'请输入 host:port'});const parts=input.value.split(':');target_host=parts[0];target_port=Number(parts[1])}
+    const res=await proxyApi.test({id:p.id,type:p.type,host:p.host,port:p.port,target_host,target_port})
+    ElMessage.success(`代理实际连接成功，耗时 ${res.latency_ms}ms`)
   } catch {
     /* 拦截器提示 */
   }

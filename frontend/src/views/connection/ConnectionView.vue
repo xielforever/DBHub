@@ -159,7 +159,7 @@
           <el-form-item label="SSL 模式">
             <el-select v-model="connForm.ssl_mode" class="w-full" popper-class="glass-popper">
               <el-option label="禁用（内网明文）" value="disable" />
-              <el-option label="要求加密（require）" value="require" />
+              <el-option label="加密并验证证书" value="verify-full" />
             </el-select>
           </el-form-item>
           <el-form-item label="连接超时（秒）">
@@ -173,12 +173,12 @@
             <el-option label="生产环境（prod）" value="prod" />
           </el-select>
         </el-form-item>
-        <el-form-item label="代理（可选，替代原 SSH 隧道，占位 M5）">
+        <el-form-item label="代理（可选）">
           <el-select v-model="connForm.proxy_id" class="w-full" popper-class="glass-popper" clearable placeholder="不使用代理">
             <el-option label="不使用代理" :value="null" />
             <el-option v-for="p in proxies" :key="p.id" :label="`${p.name}（${p.type} ${p.host}:${p.port}）`" :value="p.id" />
           </el-select>
-          <p class="text-[11px] text-white/30 mt-1">原 SSH 隧道已废弃，请在代理管理创建代理后在此选用。M5 实现真实代理拨号。</p>
+          <p class="text-[11px] text-white/30 mt-1">在代理管理创建代理后在此选用，连接测试和查询均使用该代理。</p>
         </el-form-item>
       </el-form>
 
@@ -289,7 +289,7 @@ const emptyConnForm = (): ConnForm => ({
   database: '',
   username: '',
   password: '',
-  ssl_mode: 'disable',
+  ssl_mode: 'verify-full',
   connection_timeout: 10,
   color_label: '',
   environment: 'dev',
@@ -318,7 +318,7 @@ function openEdit(c: ConnectionItem) {
     database: c.database,
     username: c.username,
     password: '',
-    ssl_mode: c.ssl_mode || 'disable',
+    ssl_mode: c.ssl_mode || 'verify-full',
     connection_timeout: c.connection_timeout || 10,
     color_label: c.color_label || '',
     environment: c.environment || 'dev',

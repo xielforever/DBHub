@@ -9,8 +9,6 @@
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <button class="ghost-button text-xs" @click="reload">刷新</button>
-        <button class="ghost-button text-xs" @click="loadDemo">加载示例</button>
-        <button class="ghost-button text-xs" @click="clearFinished">清空已办</button>
       </div>
     </header>
 
@@ -45,65 +43,27 @@
 
     <!-- 主体：复用工作台工单能力 -->
     <section class="glass-card p-0 overflow-hidden min-h-[540px] flex flex-col" v-loading="loading">
-      <ChangeTicketPane :tickets="tickets as any" :prefill="prefill" @create="onCreate" @update-status="onStatus" />
+      <ChangeTicketPane :tickets="tickets as any" :prefill="prefill" :create="onCreate" @update-status="onStatus" />
     </section>
 
-    <p class="text-[11px] text-white/25 text-center">
-      <span v-if="usingMock">当前为本地演示存储（Mock 未接通），已自动回退至 localStorage</span>
-      <span v-else>已接入服务端持久化，写操作进入审计</span>
-    </p>
+    <p class="text-[11px] text-white/25 text-center">工单保存到服务端，审批和执行均需管理员权限，失败结果会保留。</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Ticket, Clock3, CheckCircle2, XCircle, PlayCircle, GitBranch } from 'lucide-vue-next'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import ChangeTicketPane from '../query/components/ChangeTicketPane.vue'
-import { useUserStore } from '../../stores/user'
-import { ticketApi, type TicketItem } from '../../api/ticket'
+import { ticketApi, type TicketItem, type TicketPayload } from '../../api/ticket'
 
 const route = useRoute()
 const router = useRouter()
-const userStore = useUserStore()
 
-const LS_KEY = 'dbhub_tickets_v1'
 const tickets = ref<TicketItem[]>([])
 const loading = ref(false)
-const usingMock = ref(false)
-
-function loadMock(): TicketItem[] {
-  try {
-    const raw = localStorage.getItem(LS_KEY)
-    if (raw) {
-      const arr = JSON.parse(raw)
-      if (Array.isArray(arr) && arr.length) return arr
-    }
-  } catch {}
-  return [
-    { id: 1001, title: 'orders 添加索引 idx_amount', type: 'index', table: 'orders', database_name: 'orders', connection_id: null, sql: 'CREATE INDEX idx_amount ON orders(total_amount)', risk: 'low', status: 'pending', requester_id: 1, requester: 'dev01', reason: '加速金额范围查询', created_at: new Date(Date.now()-3600000*2).toISOString(), updated_at: new Date().toISOString() },
-    { id: 1002, title: 'customers 敏感列脱敏', type: 'ddl', table: 'customers', database_name: 'orders', connection_id: null, sql: 'ALTER TABLE customers ALTER COLUMN phone TYPE varchar(20)', risk: 'medium', status: 'approved', requester_id: 1, requester: 'admin', reason: '合规脱敏', created_at: new Date(Date.now()-3600000*24).toISOString(), updated_at: new Date().toISOString() },
-    { id: 1003, title: 'order_items 清理过期数据', type: 'dml', table: 'order_items', database_name: 'orders', connection_id: null, sql: "DELETE FROM order_items WHERE created_at < now() - interval '90 days'", risk: 'high', status: 'executed', requester_id: 1, requester: 'dev02', reason: '归档清理', created_at: new Date(Date.now()-3600000*50).toISOString(), updated_at: new Date().toISOString() },
-  ] as TicketItem[]
-}
-function persistMock() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(tickets.value)) } catch {}
-}
-watch(tickets, () => { if (usingMock.value) persistMock() }, { deep: true })
-
-async function reload() {
-  loading.value = true
-  try {
-    const data = await ticketApi.list({ page: 1, page_size: 100 })
-    tickets.value = data.items
-    usingMock.value = false
-  } catch (e) {
-    // 回退至本地 Mock（无后端或 404 时）
-    usingMock.value = true
-    tickets.value = loadMock()
-  } finally { loading.value = false }
-}
+async function reload() {loading.value=true;try {tickets.value=(await ticketApi.list({page:1,page_size:100})).items} catch(e:unknown) {ElMessage.error(e instanceof Error?e.message:'工单加载失败')} finally {loading.value=false}}
 
 const kpis = computed(() => [
   { label: '全部工单', value: tickets.value.length, icon: Ticket, color: '#a78bfa', tint: 'rgba(167,139,250,0.16)' },
@@ -116,62 +76,15 @@ const kpis = computed(() => [
 const prefill = ref<{ title?:string; table?:string; sql?:string; risk?:string; reason?:string } | null>(null)
 const incoming = ref<{ table:string; db:string; risk:string } | null>(null)
 
-async function onCreate(payload: Omit<TicketItem,'id'|'status'|'requester'|'requester_id'|'created_at'|'updated_at'|'database_name'|'connection_id'> & { reason: string }) {
-  // 兼容旧 ChangeTicketPane  payload：{ title, type, table, sql, risk, reason }
-  const title = (payload as any).title as string
-  const type = (payload as any).type as TicketItem['type']
-  const table = (payload as any).table as string
-  const sql = (payload as any).sql as string
-  const risk = (payload as any).risk as TicketItem['risk']
-  const reason = (payload as any).reason as string
-  try {
-    const created = await ticketApi.create({ title, type, table, database: incoming.value?.db || '', sql, risk, reason })
-    tickets.value.unshift(created)
-    ElMessage.success(`工单 #${created.id} 已创建`)
-    usingMock.value = false
-  } catch (e:any) {
-    // Mock 回退
-    const id = Date.now()
-    const mock: TicketItem = {
-      id, title, type, table, database_name: incoming.value?.db || '', connection_id: null,
-      sql, risk, status: 'pending', requester_id: 0, requester: userStore.user?.username || 'user',
-      reason, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }
-    tickets.value.unshift(mock)
-    usingMock.value = true
-    persistMock()
-    ElMessage.success(`工单 #${id} 已创建（本地演示）`)
-  }
-  incoming.value = null
-  if (route.query.table) router.replace({ query: { ...route.query, table: undefined, db: undefined, title: undefined, sql: undefined, reason: undefined } })
+async function onCreate(payload: TicketPayload):Promise<boolean> {
+ try {const created=await ticketApi.create({...payload,database:payload.database||incoming.value?.db||''});tickets.value.unshift(created);ElMessage.success(`工单 #${created.id} 已创建`);incoming.value=null;if(route.query.table)router.replace({query:{}});return true} catch(e:unknown) {ElMessage.error(e instanceof Error?e.message:'创建失败');return false}
 }
-
-async function onStatus(id:number, status:string) {
-  try {
-    await ticketApi.updateStatus(id, status as TicketItem['status'])
-    const t = tickets.value.find(x=>x.id===id)
-    if (t) t.status = status as any
-    ElMessage.success(`工单 #${id} 已 ${status==='approved'?'批准':status==='rejected'?'拒绝':status==='executed'?'执行':'更新'}`)
-    usingMock.value = false
-  } catch (e:any) {
-    const t = tickets.value.find(x=>x.id===id)
-    if (t) { t.status = status as any; persistMock(); ElMessage.success(`工单 #${id} 已 ${status==='approved'?'批准':status==='rejected'?'拒绝':status==='executed'?'执行':'更新'}（本地）`) }
-    else ElMessage.error(e?.message || '更新失败')
-  }
-}
-
-function loadDemo() {
-  tickets.value = loadMock()
-  usingMock.value = true
-  persistMock()
-  ElMessage.success('已加载示例（本地）')
-}
-function clearFinished() {
-  const before = tickets.value.length
-  tickets.value = tickets.value.filter(t=>t.status==='pending' || t.status==='approved')
-  if (usingMock.value) persistMock()
-  ElMessage.success(`已清理 ${before - tickets.value.length} 单（本地视图）`)
-  if (!usingMock.value) ElMessage.info('后端数据未删除，仅本地过滤；请在服务端实现批量清理')
+async function onStatus(id:number,status:string) {
+ try {
+  if(status==='executed') {await ElMessageBox.confirm('执行将修改目标数据库，确认执行已批准的 SQL？','执行工单',{type:'warning',confirmButtonText:'执行',cancelButtonText:'取消'});await ticketApi.execute(id)}
+  else await ticketApi.updateStatus(id,status as TicketItem['status'])
+  ElMessage.success(status==='executed'?'SQL 已实际执行':'审批已保存')
+ } catch(e:unknown) {if(e instanceof Error)ElMessage.error(e.message)} finally {await reload()}
 }
 
 function openPrefill() {
@@ -193,11 +106,11 @@ onMounted(async () => {
     incoming.value = { table: q.table, db: q.db || q.database || '', risk: (q.risk as string) || 'medium' }
     if (q.sql || q.title) {
       prefill.value = {
-        title: q.title ? decodeURIComponent(q.title) : `${q.table} 变更`,
+        title: q.title ? q.title : `${q.table} 变更`,
         table: q.table,
-        sql: q.sql ? decodeURIComponent(q.sql) : '',
+        sql: q.sql ? q.sql : '',
         risk: (q.risk as string) || 'medium',
-        reason: q.reason ? decodeURIComponent(q.reason) : '',
+        reason: q.reason ? q.reason : '',
       }
     }
   }

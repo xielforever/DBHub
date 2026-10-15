@@ -134,7 +134,7 @@
                 </template>
               </el-dropdown>
               <div class="hidden sm:block h-5 w-px bg-white/10" />
-              <CollabPresence v-if="currentConn" class="hidden md:flex" />
+              <CollabPresence v-if="currentConn" :connection-id="currentConn.id" class="hidden md:flex" />
               <span v-if="currentConn" class="flex items-center gap-1.5 text-xs text-white/65">
                 <component :is="currentConn.type === 'redis' ? KeyRound : Database" class="w-3.5 h-3.5" :style="{ color: connColor(currentConn.type) }" />
                 {{ currentConn.name }}
@@ -273,7 +273,7 @@
                 :table-name="preview.table || 'result_table'"
                 :mask-enabled="maskEnabled"
                 :column-perms="columnPerms"
-                :row-policy-enabled="rowPolicyEnabled"
+                :row-policy-enabled="false"
                 @toggle-fullscreen="resultFullscreen = !resultFullscreen"
               />
             </div>
@@ -296,7 +296,7 @@
           </el-tab-pane>
 
           <el-tab-pane label="火焰图" name="flame" class="flex flex-col min-h-0 flex-1">
-            <QueryFlameGraph :duration="lastDuration" :sql="currentTab.sql" />
+            <QueryFlameGraph :duration="lastDuration" :sql="currentTab.sql" :rows="grid.rows as unknown[][]" :columns="grid.columns" />
           </el-tab-pane>
 
           <el-tab-pane label="对比" name="compare" class="flex flex-col min-h-0 flex-1">
@@ -304,7 +304,7 @@
           </el-tab-pane>
 
           <el-tab-pane label="队列" name="queue" class="flex flex-col min-h-0 flex-1">
-            <QueryQueuePane :queue="queue" :concurrency="queueConcurrency" :paused="queuePaused" :queue-enabled="queueEnabled" @toggle-pause="queuePaused = !queuePaused" @toggle-enabled="queueEnabled = !queueEnabled" @clear="clearQueue" @cancel="cancelQueueItem" @remove="removeQueueItem" @requeue="requeueItem" @move-up="moveQueueItem($event, -1)" @move-down="moveQueueItem($event, 1)" @update-concurrency="queueConcurrency = $event" @add-demo="addDemoQueueItem" />
+            <QueryQueuePane :queue="queue" :concurrency="queueConcurrency" :paused="queuePaused" :queue-enabled="queueEnabled" @toggle-pause="queuePaused = !queuePaused" @toggle-enabled="queueEnabled = !queueEnabled" @clear="clearQueue" @cancel="cancelQueueItem" @remove="removeQueueItem" @requeue="requeueItem" @move-up="moveQueueItem($event, -1)" @move-down="moveQueueItem($event, 1)" @update-concurrency="queueConcurrency = $event"  />
           </el-tab-pane>
 
           <el-tab-pane label="限制" name="limits" class="flex flex-col min-h-0 flex-1">
@@ -312,11 +312,11 @@
           </el-tab-pane>
 
           <el-tab-pane label="脱敏" name="mask" class="flex flex-col min-h-0 flex-1">
-            <SensitiveMaskPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :mask-enabled="maskEnabled" :export-requests="exportRequests" @toggle-mask="maskEnabled = !maskEnabled" @request-export="exportDialogOpen = true" @update-status="onExportStatus" @clear-requests="clearExportRequests" />
+            <SensitiveMaskPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :mask-enabled="maskEnabled" :export-requests="exportRequests" @toggle-mask="maskEnabled = !maskEnabled" @request-export="exportDialogOpen = true" @update-status="onExportStatus" @clear-requests="loadExportRequests" @download="downloadApprovedExport" />
           </el-tab-pane>
 
           <el-tab-pane label="权限" name="auth" class="flex flex-col min-h-0 flex-1">
-            <ColumnAuthPane :columns="grid.columns" :rows="(grid.rows as unknown[][])" :role="authRole" :watermark-enabled="watermarkEnabled" :row-policy-enabled="rowPolicyEnabled" :row-policy-sql="rowPolicySql" :column-perms="columnPerms" @change-role="authRole = $event" @set-perm="onSetColumnPerm" @toggle-watermark="watermarkEnabled = !watermarkEnabled" @toggle-row-policy="rowPolicyEnabled = !rowPolicyEnabled" />
+            <ColumnAuthPane :connection-id="currentConn?.id || 0" :database="currentTab.database || currentConn?.database || ''" :schema="preview.schema" :table="preview.table" />
           </el-tab-pane>
 
           <!-- 历史增强 -->
@@ -911,6 +911,7 @@ import ColumnAuthPane from './components/ColumnAuthPane.vue'
 import WatermarkOverlay from './components/WatermarkOverlay.vue'
 import type { ConnectionItem, DbType } from '../../api/datasource'
 import { reportApi } from '../../api/report'
+import { advancedApi, type ExportRequest } from '../../api/advanced'
 import {
   workbenchApi,
   type ExecResult,
@@ -1189,7 +1190,9 @@ function resetGrid() {
 }
 
 function onSelectConnection(conn: ConnectionItem) {
+  const changed=currentConn.value?.id!==conn.id
   currentConn.value = conn
+  if(changed) currentTab.value.database=conn.database || ''
   viewMode.value = conn.type === 'redis' ? 'redis' : 'sql'
   if (conn.type === 'redis') {
     resultTab.value = 'redis'
@@ -1198,7 +1201,7 @@ function onSelectConnection(conn: ConnectionItem) {
     return
   }
   resultTab.value = 'result'
-  databaseOptions.value = []
+  databaseOptions.value = conn.database ? [{name:conn.database}] : []
   allTableNames.value = []
   loadTransactionStatus()
 }
@@ -1328,7 +1331,7 @@ async function runQuery() {
   resultTab.value = 'result'
   log(`${autoLimited ? '[自动 LIMIT 1000] ' : ''}开始执行：${sql.replace(/\s+/g, ' ').slice(0, 80)}`)
   try {
-    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal)
+    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal, paramValues.value, executionOptions())
     lastDuration.value = res.duration_ms
     if (res.kind === 'query') {
       grid.columns = res.columns ?? []
@@ -1348,7 +1351,7 @@ async function runQuery() {
     }
   } finally {
     if (timeoutId) clearTimeout(timeoutId)
-    if (transactionActive.value) transactionQueries.value++
+    await loadTransactionStatus()
     running.value = false
     abortController.value = null
     if (resultTab.value === 'history') loadHistory()
@@ -1565,7 +1568,7 @@ const queueConcurrency = ref(1)
 const queueEnabled = ref(true)
 const limitsDialogOpen = ref(false)
 const maskEnabled = ref(false)
-const exportRequests = ref<{ id:number; format:string; rows:number; reason:string; status:'pending'|'approved'|'rejected'; created_at:string }[]>([])
+const exportRequests = ref<ExportRequest[]>([])
 const exportDialogOpen = ref(false)
 const saveReportOpen = ref(false)
 const savingReport = ref(false)
@@ -1573,29 +1576,23 @@ const saveReportForm = reactive({ name: '', description: '', visibility: 'privat
 
 const columnPerms = ref<Record<string, 'visible'|'masked'|'hidden'>>({})
 const watermarkEnabled = ref(true)
-const rowPolicyEnabled = ref(false)
-const rowPolicySql = ref("department = current_user_dept()")
-const authRole = ref(userStore.role || 'developer')
 const resourceLimits = ref({ timeoutMs: 30000, maxRows: 1000, blockUnsafeWrite: true, autoLimit: true, confirmProdWrite: true })
 try { const m = localStorage.getItem('dbhub_mask_enabled'); if (m) maskEnabled.value = JSON.parse(m) } catch {}
-try { const er = localStorage.getItem('dbhub_export_requests'); if (er) exportRequests.value = JSON.parse(er) } catch {}
-try { const cp = localStorage.getItem('dbhub_column_perms'); if (cp) columnPerms.value = JSON.parse(cp) } catch {}
+
+
 try { const wm = localStorage.getItem('dbhub_watermark'); if (wm) watermarkEnabled.value = JSON.parse(wm) } catch {}
-try { const rp = localStorage.getItem('dbhub_row_policy'); if (rp) rowPolicyEnabled.value = JSON.parse(rp) } catch {}
-try {
-  const raw = localStorage.getItem('dbhub_resource_limits')
-  if (raw) Object.assign(resourceLimits.value, JSON.parse(raw))
-} catch {}
+
+
 try {
   const rawQ = localStorage.getItem('dbhub_query_queue')
   if (rawQ) queue.value = JSON.parse(rawQ)
 } catch {}
 watch(queue, v => { try { localStorage.setItem('dbhub_query_queue', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
 watch(maskEnabled, v => { try { localStorage.setItem('dbhub_mask_enabled', JSON.stringify(v)) } catch {} })
-watch(exportRequests, v => { try { localStorage.setItem('dbhub_export_requests', JSON.stringify(v.slice(0, 50))) } catch {} }, { deep: true })
-watch(columnPerms, v => { try { localStorage.setItem('dbhub_column_perms', JSON.stringify(v)) } catch {} }, { deep: true })
+
+
 watch(watermarkEnabled, v => { try { localStorage.setItem('dbhub_watermark', JSON.stringify(v)) } catch {} })
-watch(rowPolicyEnabled, v => { try { localStorage.setItem('dbhub_row_policy', JSON.stringify(v)) } catch {} })
+
 const STORAGE_THEME = 'dbhub_editor_theme'
 try {
   const raw = localStorage.getItem(STORAGE_THEME)
@@ -1709,37 +1706,25 @@ async function saveSnippet() {
     ElMessage.warning('名称与 SQL 必填')
     return
   }
-  const s: Snippet = {
-    id: Date.now(),
-    name: snippetForm.name.trim(),
-    sql: snippetForm.sql.trim(),
-    database: currentTab.value.database,
-    connection_id: currentConn.value?.id,
-    created_at: new Date().toISOString(),
-  }
-  snippets.value.unshift(s)
-  try {
-    localStorage.setItem(STORAGE_SNIPPETS, JSON.stringify(snippets.value.slice(0, 100)))
-  } catch {}
   try {
     const { snippetApi } = await import('../../api/snippet')
-    await snippetApi.create({
+    const saved = await snippetApi.create({
       name: snippetForm.name.trim(),
       sql_text: snippetForm.sql.trim(),
       database_name: currentTab.value.database || undefined,
       connection_id: currentConn.value?.id,
       visibility: snippetForm.visibility,
     })
+    snippets.value.unshift({id:saved.id,name:saved.name,sql:saved.sql_text,database:saved.database_name,connection_id:saved.connection_id || undefined,created_at:saved.created_at})
+    try {localStorage.setItem(STORAGE_SNIPPETS,JSON.stringify(snippets.value.slice(0,100)))}catch{}
     if (snippetForm.visibility === 'shared') {
       ElMessage.success('已收藏并共享到团队')
       loadTeamSnippets()
     } else {
       ElMessage.success('已收藏（私有）')
     }
-  } catch {
-    ElMessage.success('已收藏到本地')
-  }
-  snippetDialogOpen.value = false
+    snippetDialogOpen.value=false
+  } catch { /* 服务端失败时保留表单，拦截器显示错误。 */ }
 }
 function insertSnippet(s: Snippet) {
   const tab = currentTab.value
@@ -1821,7 +1806,7 @@ async function explainQuery() {
   resultTab.value = 'result'
   log(`EXPLAIN: ${sql.replace(/\s+/g, ' ').slice(0, 80)}`)
   try {
-    const res = await workbenchApi.execute(currentConn.value.id, `EXPLAIN ${sql}`, currentTab.value.database, abortController.value.signal)
+    const res = await workbenchApi.execute(currentConn.value.id, `EXPLAIN ${sql}`, currentTab.value.database, abortController.value.signal, paramValues.value, executionOptions())
     lastDuration.value = res.duration_ms
     grid.columns = res.columns ?? []
     grid.rows = res.rows ?? []
@@ -2256,7 +2241,7 @@ async function beginTransaction() {
   try {
     const res = await workbenchApi.beginTransaction(currentConn.value.id, currentTab.value.database) as any
     transactionActive.value = true
-    transactionId.value = res.transaction_id || `tx_${Date.now()}`
+    transactionId.value = res.transaction_id
     transactionStartedAt.value = new Date().toISOString()
     transactionQueries.value = 0
     ElMessage.success(`事务已开启：${transactionId.value}`)
@@ -2302,13 +2287,13 @@ async function loadTransactionStatus() {
 function onParamValuesUpdate(v: Record<string, string>) {
   paramValues.value = v
 }
-function onParamApply(values: Record<string, string>, finalSql: string) {
+function onParamApply(values: Record<string, string>, _finalSql: string) {
   paramValues.value = values
   paramDrawerOpen.value = false
   // 直接执行替换后 SQL
   // 临时替换执行，执行完恢复？我们直接用 finalSql 执行，不改原 SQL
   // 为了让用户看到替换结果，我们把 finalSql 存到一个临时变量并调用 runQueryWithSql
-  runQueryWithSql(finalSql)
+  runQueryWithSql(currentTab.value.sql)
 }
 async function runQueryWithSql(sqlOverride: string) {
   if (!currentConn.value) { ElMessage.warning('请先在左侧选择数据源'); return }
@@ -2340,7 +2325,7 @@ async function runQueryWithSql(sqlOverride: string) {
   resultTab.value = 'result'
   log(`开始执行（参数化）：${sql.replace(/\s+/g,' ').slice(0,80)}`)
   try {
-    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal, paramValues.value)
+    const res = await workbenchApi.execute(currentConn.value.id, sql, currentTab.value.database, abortController.value.signal, paramValues.value, executionOptions())
     lastDuration.value = res.duration_ms
     if (res.kind === 'query') {
       grid.columns = res.columns ?? []
@@ -2358,7 +2343,7 @@ async function runQueryWithSql(sqlOverride: string) {
     if (wqsTimeout) clearTimeout(wqsTimeout)
     running.value = false
     abortController.value = null
-    if (transactionActive.value) transactionQueries.value++
+    await loadTransactionStatus()
     if (resultTab.value === 'history') loadHistory()
     if (queueEnabled.value && !queuePaused.value) setTimeout(() => processQueue(), 150)
   }
@@ -2375,42 +2360,40 @@ function onShared(link: string) {
   ElMessage.success('分享链接已复制到剪贴板')
   try { navigator.clipboard.writeText(link) } catch {}
 }
-function onLimitsSave(v: any) {
-  resourceLimits.value = v
-  autoLimitEnabled.value = v.autoLimit
-  try { localStorage.setItem('dbhub_resource_limits', JSON.stringify(v)) } catch {}
-  ElMessage.success('资源限制已生效')
-  limitsDialogOpen.value = false
+async function onLimitsSave(v: typeof resourceLimits.value) {
+ try { const saved = await advancedApi.saveSettings({timeout_ms:v.timeoutMs,max_rows:v.maxRows,block_unsafe_write:v.blockUnsafeWrite}); Object.assign(resourceLimits.value,{...v,timeoutMs:saved.timeout_ms,maxRows:saved.max_rows,blockUnsafeWrite:saved.block_unsafe_write});autoLimitEnabled.value=v.autoLimit;ElMessage.success('资源限制已在服务端生效');limitsDialogOpen.value=false } catch {}
 }
+onMounted(async()=>{try{const saved=await advancedApi.settings();Object.assign(resourceLimits.value,{timeoutMs:saved.timeout_ms,maxRows:saved.max_rows,blockUnsafeWrite:saved.block_unsafe_write})}catch{}})
+function executionOptions(){return {transaction_id:transactionActive.value?transactionId.value:undefined,timeout_ms:resourceLimits.value.timeoutMs,max_rows:resourceLimits.value.maxRows}}
+
 const sensitiveCount = computed(() => grid.columns.filter(c => /(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(c)).length)
-function onExportSubmit(payload: { format:string; scope:string; maskMode:string; reason:string }) {
-  const id = Date.now()
-  const rows = payload.scope==='selected' ? 0 : grid.rows.length
-  if (payload.maskMode==='masked') {
-    ElMessage.success('脱敏文件已准备，开始下载')
-    // 直接触发脱敏导出
-    doMaskedExport(payload.format)
-    exportDialogOpen.value = false
-    return
-  }
-  exportRequests.value.unshift({ id, format: payload.format, rows, reason: payload.reason, status: 'pending', created_at: new Date().toISOString() })
-  ElMessage.success('已提交审批，待管理员批准')
-  exportDialogOpen.value = false
-  resultTab.value = 'mask'
+async function loadExportRequests(){try{exportRequests.value=(await advancedApi.exports()).items}catch{}}
+onMounted(loadExportRequests)
+watch(resultTab,tab=>{if(tab==='mask')loadExportRequests()})
+async function onExportSubmit(payload: {format:string;scope:string;maskMode:string;reason:string}) {
+ if(payload.maskMode==='masked'){doMaskedExport(payload.format);exportDialogOpen.value=false;return}
+ if(!currentConn.value){ElMessage.warning('请先选择数据源');return}
+ try{await advancedApi.createExport({connection_id:currentConn.value.id,database:currentTab.value.database,sql:currentTab.value.sql,params:paramValues.value,format:payload.format,reason:payload.reason});await loadExportRequests();ElMessage.success('导出申请已保存，待管理员审批');exportDialogOpen.value=false;resultTab.value='mask'}catch{}
 }
+function saveExportFile(format:string,columns:string[],rows:unknown[][]){
+ const csvCell=(v:unknown)=>{let text=String(v??'');if(/^[=+@-]/.test(text))text="'"+text;return '"'+text.replace(/"/g,'""')+'"'}
+ const contents=format==='csv'?[columns.map(csvCell).join(','),...rows.map(r=>r.map(csvCell).join(','))].join('\n'):JSON.stringify(rows.map(r=>Object.fromEntries(columns.map((c,i)=>[c,r[i]]))),null,2)
+ const url=URL.createObjectURL(new Blob([contents],{type:format==='csv'?'text/csv;charset=utf-8':'application/json'}));const a=document.createElement('a');a.href=url;a.download=`dbhub_export_${Date.now()}.${format}`;a.click();URL.revokeObjectURL(url)
+}
+async function downloadApprovedExport(id:number){try{const data=await advancedApi.downloadExport(id);saveExportFile(data.format,data.result.columns,data.result.rows)}catch{}}
+
 function onMaskedExport(format: string) {
   doMaskedExport(format)
   exportDialogOpen.value = false
 }
 function doMaskedExport(format: string) {
-  // 复用 ResultGrid 的导出逻辑但强制掩码：简单提示，实际导出由 ResultGrid 处理，这里仅模拟
   const cols = grid.columns
   const rows = grid.rows as unknown[][]
   if (!cols.length) { ElMessage.warning('无数据可导出'); return }
   // 掩码后的行
   const maskedRows = rows.map(r => (r as any[]).map((cell, ci) => {
     const col = cols[ci] || ''
-    if (!maskEnabled.value || !/(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(col)) return cell
+    if (!/(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i.test(col)) return cell
     const s = String(cell ?? '')
     if (/email/i.test(col)) { const p=s.split('@'); return p.length===2 ? p[0]!.charAt(0)+'***@'+p[1] : '***' }
     if (/phone|mobile|tel/i.test(col) && s.length>=7) return s.slice(0,3)+'****'+s.slice(-4)
@@ -2419,31 +2402,12 @@ function doMaskedExport(format: string) {
     if (/name/i.test(col) && s.length>=2) return s.charAt(0)+'*'.repeat(s.length-1)
     return s.slice(0,1)+'***'
   }))
-  // 根据格式导出
-  if (format==='csv') {
-    const header = cols.join(',')
-    const lines = maskedRows.map(r => r.map((c:any) => { const s=String(c??''); return s.includes(',')||s.includes('"')||s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s }).join(','))
-    const csv = [header, ...lines].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href=url; a.download=`masked_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url)
-  } else if (format==='json') {
-    const arr = maskedRows.map(r => { const o:any={}; cols.forEach((c,i)=>o[c]=r[i]); return o })
-    const blob = new Blob([JSON.stringify(arr,null,2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href=url; a.download=`masked_${Date.now()}.json`; a.click(); URL.revokeObjectURL(url)
-  } else {
-    ElMessage.success(`脱敏 ${format} 已导出（演示）`)
-  }
+  saveExportFile(format,cols,maskedRows)
+  ElMessage.success('脱敏文件已下载')
 }
-function onExportStatus(id:number, status:string) {
-  const req = exportRequests.value.find(r=>r.id===id)
-  if (req) { req.status=status as any; ElMessage.success(status==='approved' ? '已批准' : '已拒绝') }
-}
-function clearExportRequests() {
-  exportRequests.value = exportRequests.value.filter(r=>r.status==='pending')
-  ElMessage.success('已清空已处理')
-}
+
+async function onExportStatus(id:number,status:string){try{await advancedApi.reviewExport(id,status);await loadExportRequests();ElMessage.success('审批已保存')}catch{}}
+
 function openSaveReport() {
   if (!grid.rows.length) { ElMessage.warning('暂无结果可保存'); return }
   if (!currentConn.value) { ElMessage.warning('请先选择数据源'); return }
@@ -2472,10 +2436,7 @@ async function doSaveReport() {
     saveReportOpen.value = false
   } catch (e:any) { ElMessage.error(e?.message || '保存失败') } finally { savingReport.value = false }
 }
-function onSetColumnPerm(col: string, perm: 'visible'|'masked'|'hidden') {
-  columnPerms.value = { ...columnPerms.value, [col]: perm }
-  ElMessage.success(`${col} 已设为 ${perm==='visible' ? '可见' : perm==='masked' ? '掩码' : '隐藏'}`)
-}
+
 function isUnsafeWrite(sql: string) {
   const up = sql.trim().toUpperCase()
   if (/^(UPDATE|DELETE)/.test(up) && !/WHERE/.test(up)) return true
@@ -2515,7 +2476,7 @@ async function processQueue() {
   const timeoutMs = resourceLimits.value.timeoutMs
   timeoutId = setTimeout(() => ac.abort(), timeoutMs)
   try {
-    const res = await workbenchApi.execute(next.connectionId, next.sql, next.database, ac.signal)
+    const res = await workbenchApi.execute(next.connectionId, next.sql, next.database, ac.signal, undefined, executionOptions())
     clearTimeout(timeoutId)
     next.finishedAt = new Date().toISOString()
     next.duration = res.duration_ms
@@ -2598,15 +2559,7 @@ function clearQueue() {
   queue.value = queue.value.filter(q => q.status === 'running')
   ElMessage.success('已清空队列')
 }
-function addDemoQueueItem() {
-  const demos = [
-    'SELECT * FROM orders WHERE status = 1 LIMIT 100',
-    'SELECT COUNT(*) FROM users WHERE created_at >= NOW() - INTERVAL 7 DAY',
-    'SELECT DATE(created_at) as day, SUM(total_amount) FROM orders GROUP BY 1 ORDER BY 1',
-  ]
-  const sql = demos[Math.floor(Math.random()*demos.length)]!
-  enqueueQuery(sql)
-}
+
 function onApplyRewrite(newSql: string) {
   const tab = currentTab.value
   const monaco = monacoRefs[tab.id]
@@ -2638,8 +2591,9 @@ function closeTab(id: number) {
 }
 
 function onGenerateSelect(payload: { conn: ConnectionItem; database: string; schema: string; table: TableInfo }) {
-  const sch = payload.schema ? `${payload.schema}.` : ''
-  const qualified = payload.conn.type === 'postgres' ? `${payload.database}.${sch}${payload.table.name}` : `${payload.database}.${payload.table.name}`
+
+  const quote = (v: string) => payload.conn.type === 'postgres' ? `"${v.split('"').join('""')}"` : '`' + v.split('`').join('``') + '`'
+  const qualified = payload.conn.type === 'postgres' ? `${quote(payload.schema || 'public')}.${quote(payload.table.name)}` : `${quote(payload.database)}.${quote(payload.table.name)}`
   const sql = `SELECT * FROM ${qualified} LIMIT 100;`
   const tab = currentTab.value
   const monaco = monacoRefs[tab.id]
@@ -2687,7 +2641,7 @@ onMounted(async () => {
   const initSql = route.query.sql as string | undefined
   if (initSql) {
     const tab = currentTab.value
-    tab.sql = decodeURIComponent(initSql)
+    tab.sql = initSql
     resultTab.value = 'result'
   }
 })

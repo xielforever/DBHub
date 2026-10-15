@@ -18,6 +18,8 @@
         <el-option label="已批准" value="approved" />
         <el-option label="已执行" value="executed" />
         <el-option label="已拒绝" value="rejected" />
+        <el-option label="执行失败" value="failed" />
+        <el-option label="执行中" value="executing" />
       </el-select>
       <div class="relative flex-1">
         <Search class="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
@@ -39,9 +41,9 @@
           <span>表 {{ t.table }}</span><span>·</span><span>申请人 {{ t.requester }}</span><span class="hidden sm:inline">· 风险 {{ riskBadge(t.risk) }}</span>
         </p>
         <div class="flex gap-1 mt-2">
-          <button v-if="t.status==='pending'" class="ghost-button !py-0.5 !px-2 text-[11px] text-emerald-300" @click="updateStatus(t.id,'approved')">批准</button>
-          <button v-if="t.status==='pending'" class="ghost-button !py-0.5 !px-2 text-[11px] text-rose-300" @click="updateStatus(t.id,'rejected')">拒绝</button>
-          <button v-if="t.status==='approved'" class="ghost-button !py-0.5 !px-2 text-[11px] text-indigo-300" @click="updateStatus(t.id,'executed')">标记已执行</button>
+          <button v-if="t.status==='pending' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[11px] text-emerald-300" @click="updateStatus(t.id,'approved')">批准</button>
+          <button v-if="t.status==='pending' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[11px] text-rose-300" @click="updateStatus(t.id,'rejected')">拒绝</button>
+          <button v-if="t.status==='approved' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[11px] text-indigo-300" @click="updateStatus(t.id,'executed')">执行 SQL</button>
           <button class="ghost-button !py-0.5 !px-2 text-[11px]" @click="copySql(t.sql)">复制 SQL</button>
           <div class="flex-1" />
           <span class="text-[10px] text-white/20">#{{ t.id }}</span>
@@ -53,6 +55,8 @@
     <!-- 新建弹窗 -->
     <el-dialog v-model="showCreate" title="新建变更工单" width="520px" class="glass-dialog" :close-on-click-modal="false">
       <div class="space-y-3">
+        <div><p class="text-xs text-white/50 mb-1">目标数据源</p><el-select v-model="form.connection_id" class="w-full" placeholder="选择执行目标"><el-option v-for="c in connections" :key="c.id" :label="c.name" :value="c.id" /></el-select></div>
+        <div><p class="text-xs text-white/50 mb-1">数据库（留空使用连接默认值）</p><el-input v-model="form.database" /></div>
         <div>
           <p class="text-xs text-white/50 mb-1">标题</p>
           <el-input v-model="form.title" placeholder="例如：orders 添加索引 idx_amount" />
@@ -99,14 +103,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive, watch, onMounted } from 'vue'
+import { connectionApi, type ConnectionItem } from '../../../api/datasource'
+import type { TicketItem, TicketPayload } from '../../../api/ticket'
+import { useUserStore } from '../../../stores/user'
 import { ElMessage } from 'element-plus'
 import { Plus, Search, Ticket } from 'lucide-vue-next'
 
-interface TicketItem { id: number; title: string; type: 'ddl'|'dml'|'index'; table: string; sql: string; risk: 'low'|'medium'|'high'; status: 'pending'|'approved'|'rejected'|'executed'; requester: string; reason: string; created_at: string }
 
 const props = defineProps<{
   tickets: TicketItem[]
+  create: (payload: TicketPayload) => Promise<boolean>
   prefill?: { title?: string; table?: string; sql?: string; risk?: string; reason?: string; type?: string } | null
 }>()
 const emit = defineEmits<{
@@ -115,10 +122,13 @@ const emit = defineEmits<{
 }>()
 
 const loading = ref(false)
+const connections=ref<ConnectionItem[]>([])
+const isAdmin=computed(()=>useUserStore().role==='admin')
+onMounted(async()=>{try{connections.value=(await connectionApi.list()).items.filter(c=>c.type!=='redis')}catch{}})
 const statusFilter = ref('')
 const keyword = ref('')
 const showCreate = ref(false)
-const form = reactive({ title: '', type: 'ddl', table: 'orders', sql: '', risk: 'low', reason: '' })
+const form = reactive({ title: '', type: 'ddl', table: '', sql: '', risk: 'low', reason: '', connection_id: undefined as number|undefined, database: '' })
 watch(() => props.prefill, (v) => {
   if (!v) return
   if (v.title) form.title = v.title
@@ -145,7 +155,7 @@ function statusBadge(s: string) {
   return s==='pending' ? 'bg-amber-500/15 text-amber-300' : s==='approved' ? 'bg-emerald-500/15 text-emerald-300' : s==='executed' ? 'bg-indigo-500/15 text-indigo-300' : 'bg-rose-500/15 text-rose-300'
 }
 function statusLabel(s: string) {
-  return s==='pending' ? '待审批' : s==='approved' ? '已批准' : s==='executed' ? '已执行' : '已拒绝'
+  return s==='pending' ? '待审批' : s==='approved' ? '已批准' : s==='executed' ? '已执行' : s==='failed' ? '执行失败' : s==='executing' ? '执行中' : '已拒绝'
 }
 function typeLabel(t: string) {
   return t==='ddl' ? 'DDL' : t==='dml' ? 'DML' : '索引'
@@ -159,13 +169,12 @@ function formatTime(s: string) {
 function updateStatus(id:number, status:string) {
   emit('updateStatus', id, status)
 }
-function createTicket() {
-  if (!form.title.trim() || !form.sql.trim()) { ElMessage.warning('标题与 SQL 必填'); return }
-  emit('create', { title: form.title.trim(), type: form.type as any, table: form.table.trim()||'orders', sql: form.sql.trim(), risk: form.risk as any, reason: form.reason.trim() })
-  ElMessage.success('工单已创建')
-  showCreate.value = false
-  form.title=''; form.sql=''; form.reason=''
+async function createTicket() {
+ if(!form.title.trim()||!form.sql.trim()||!form.connection_id||!form.table.trim()){ElMessage.warning('标题、SQL、表名和数据源必填');return}
+ const ok=await props.create({...form,type:form.type as TicketPayload['type'],risk:form.risk as TicketPayload['risk']})
+ if(ok){showCreate.value=false;form.title='';form.sql='';form.reason=''}
 }
+
 function copySql(sql: string) {
   navigator.clipboard.writeText(sql).then(()=> ElMessage.success('已复制'))
 }

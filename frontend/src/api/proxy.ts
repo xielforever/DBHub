@@ -4,7 +4,7 @@ export interface ProxyItem {
   id: number
   user_id: number
   name: string
-  type: 'http' | 'https' | 'socks5' | 'db_proxy' | 'custom'
+  type: 'http' | 'https' | 'socks5' | 'db_proxy'
   host: string
   port: number
   username?: string
@@ -28,7 +28,7 @@ export const proxyApi = {
   remove(id: number) {
     return request.delete<unknown, { id: number }>(`/proxies/${id}`)
   },
-  test(payload: { type: string; host: string; port: number; username?: string; password?: string }) {
-    return request.post<unknown, { ok: boolean; note?: string }>('/proxies/test', payload)
+  test(payload: { id?: number; target_host?: string; target_port?: number; type: string; host: string; port: number; username?: string; password?: string }) {
+    return request.post<unknown, { ok: boolean; latency_ms: number }>('/proxies/test', payload)
   },
 }

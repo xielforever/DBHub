@@ -366,10 +366,6 @@ const isExplain = computed(() => isPgExplain.value || isMysqlExplain.value)
 
 const filteredRows = computed(() => {
   let out = [...props.rows]
-  // 行级策略预览：启用时过滤掉约 30% 行（演示：索引 %3===0 的行）
-  if (props.rowPolicyEnabled) {
-    out = out.filter((_, i) => i % 3 !== 0)
-  }
   const gf = globalFilter.value.toLowerCase()
   if (gf) {
     out = out.filter((r) => (r as any[]).some((c) => String(c ?? '').toLowerCase().includes(gf)))

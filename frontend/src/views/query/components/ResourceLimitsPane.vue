@@ -15,7 +15,7 @@
     <div class="flex-1 overflow-auto p-4 space-y-4">
       <div class="rounded-xl bg-amber-500/10 border border-amber-400/20 p-2.5 flex gap-2">
         <ShieldAlert class="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
-        <p class="text-[11px] text-amber-200/70 leading-relaxed">限制仅作用于当前浏览器会话，超时将自动取消查询，避免长查询拖垮数据库</p>
+        <p class="text-[11px] text-amber-200/70 leading-relaxed">限制保存到服务端，适用于当前用户的查询。非管理员始终启用无 WHERE 写入保护。</p>
       </div>
 
       <div class="space-y-3">
@@ -29,7 +29,7 @@
         <div class="flex gap-1.5">
           <button v-for="v in [10000,30000,60000,120000]" :key="v" class="ghost-button !py-1 !px-2 text-[11px]" :class="form.timeoutMs===v ? 'bg-white/10 text-white' : ''" @click="form.timeoutMs=v">{{ v/1000 }}s</button>
         </div>
-        <p class="text-[11px] text-white/30">超时后前端自动 abort，后端若支持将被取消</p>
+        <p class="text-[11px] text-white/30">超时会取消目标数据库查询；服务端同时限制并发和队列长度。</p>
       </div>
 
       <div class="space-y-3 pt-3 border-t border-white/10">
@@ -75,7 +75,6 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import { Gauge, ShieldAlert } from 'lucide-vue-next'
-import { ElMessage } from 'element-plus'
 
 export interface Limits {
   timeoutMs: number
@@ -85,7 +84,6 @@ export interface Limits {
   confirmProdWrite: boolean
 }
 
-const STORAGE = 'dbhub_resource_limits'
 
 const props = defineProps<{
   modelValue: Limits
@@ -100,10 +98,8 @@ const form = reactive<Limits>({ ...props.modelValue })
 watch(() => props.modelValue, v => Object.assign(form, v), { deep: true })
 
 function save() {
-  emit('update:modelValue', { ...form })
   emit('save', { ...form })
-  try { localStorage.setItem(STORAGE, JSON.stringify(form)) } catch {}
-  ElMessage.success('资源限制已保存')
+
 }
 function reset() {
   Object.assign(form, { timeoutMs: 30000, maxRows: 1000, blockUnsafeWrite: true, autoLimit: true, confirmProdWrite: true })
