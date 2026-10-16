@@ -68,3 +68,39 @@ func (r *QueryControls) FinishExecution(ctx context.Context, user int64, e *Quer
 	}
 	return err
 }
+
+// ExecutionReceiptCounts 是近 24 小时创建的回执状态；不等价于用户待办数量。
+type ExecutionReceiptCounts struct {
+	Queued  int64 `json:"queued"`
+	Running int64 `json:"running"`
+	Unknown int64 `json:"unknown"`
+	Stale   int64 `json:"stale"`
+}
+
+type MetadataPoolMetrics struct {
+	MaxConnections          int32   `json:"max_connections"`
+	TotalConnections        int32   `json:"total_connections"`
+	AcquiredConnections     int32   `json:"acquired_connections"`
+	IdleConnections         int32   `json:"idle_connections"`
+	AcquireCount            int64   `json:"acquire_total"`
+	AcquireDurationSeconds  float64 `json:"acquire_duration_seconds_total"`
+	EmptyAcquireCount       int64   `json:"empty_acquire_total"`
+	EmptyAcquireWaitSeconds float64 `json:"empty_acquire_wait_seconds_total"`
+	CanceledAcquireCount    int64   `json:"canceled_acquire_total"`
+}
+
+func (r *QueryControls) MetadataPoolMetrics() MetadataPoolMetrics {
+	s := r.pool.Stat()
+	return MetadataPoolMetrics{s.MaxConns(), s.TotalConns(), s.AcquiredConns(), s.IdleConns(), s.AcquireCount(), s.AcquireDuration().Seconds(), s.EmptyAcquireCount(), s.EmptyAcquireWaitTime().Seconds(), s.CanceledAcquireCount()}
+}
+
+func (r *QueryControls) ExecutionReceiptCounts(ctx context.Context) (ExecutionReceiptCounts, error) {
+	var c ExecutionReceiptCounts
+	err := r.pool.QueryRow(ctx, `SELECT
+		COUNT(*) FILTER(WHERE status='queued' AND updated_at>=NOW()-INTERVAL '5 minutes'),
+		COUNT(*) FILTER(WHERE status='running' AND updated_at>=NOW()-INTERVAL '5 minutes'),
+		COUNT(*) FILTER(WHERE status='unknown' OR (status IN ('queued','running') AND updated_at<NOW()-INTERVAL '5 minutes')),
+		COUNT(*) FILTER(WHERE status IN ('queued','running') AND updated_at<NOW()-INTERVAL '5 minutes')
+		FROM sys_query_executions WHERE status IN ('queued','running','unknown') AND created_at>=NOW()-INTERVAL '24 hours'`).Scan(&c.Queued, &c.Running, &c.Unknown, &c.Stale)
+	return c, err
+}

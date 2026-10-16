@@ -50,6 +50,9 @@ func assertReleased(t *testing.T, m *jobs) {
 	if len(m.global) != 0 || len(m.users) != 0 {
 		t.Fatalf("permits or user state leaked: %d, %d", len(m.global), len(m.users))
 	}
+	if m.telemetry.running != 0 || m.telemetry.waiting != 0 || m.telemetry.peakRunning > m.limits.global || m.telemetry.wait.count != m.telemetry.admitted {
+		t.Fatal("queue telemetry does not match released permits")
+	}
 }
 
 func TestJobsUserAndGlobalLimits(t *testing.T) {
@@ -139,6 +142,9 @@ func TestJobsWaitTimeoutReleasesPartialAdmission(t *testing.T) {
 	}
 	a.finish(nil)
 	assertReleased(t, m)
+	if m.metricsSnapshot().Timeouts != 2 {
+		t.Fatal("queue timeouts were not observed")
+	}
 	b := receive(t, enqueue(m, context.Background(), 2))
 	if b.err != nil {
 		t.Fatal("timed-out waiter retained its permit")

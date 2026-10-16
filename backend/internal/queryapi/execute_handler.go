@@ -23,6 +23,18 @@ var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 // Execute uses an independent connection unless the request explicitly names a transaction.
 func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
+	h.metrics.beginRequest()
+	observed := &metricsResponseWriter{ResponseWriter: w}
+	w = observed
+	var outcome string
+	var reason error
+	defer func() {
+		if outcome == "" {
+			outcome = requestOutcome(observed.status)
+		}
+		h.metrics.finishRequest(outcome, time.Since(started), errors.Is(reason, context.DeadlineExceeded), errors.Is(reason, context.Canceled))
+	}()
 	w.Header().Set("Cache-Control", "no-store")
 	c := claimsOf(r)
 	var in executeRequest
@@ -73,6 +85,8 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	claimed, e := h.controls.ClaimExecution(r.Context(), c.Subject, in.RequestID, requestHash, conn.ID, conn.Database, in.TransactionID != "")
 	if e != nil {
 		h.log.Error("登记执行请求失败，未发送用户 SQL", "error", e)
+		reason = e
+		h.metrics.registrationError()
 		httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "执行登记暂不可用，未发送 SQL；请先核实请求状态。"})
 		return
 	}
@@ -81,8 +95,10 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			httpx.Fail(w, httpx.Internal("读取执行状态失败", err))
 		} else if receipt.RequestHash != requestHash {
+			outcome = "conflict"
 			httpx.Fail(w, httpx.Conflict("同一 request_id 不能用于不同的 SQL、参数、执行选项或角色"))
 		} else {
+			outcome = "duplicate"
 			httpx.JSON(w, 409, httpx.Envelope{Code: 40901, Message: "该请求已登记，不会重复执行，请查看执行回执。", Data: receipt})
 		}
 		return
@@ -92,12 +108,15 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
 		defer cancel()
 		if err := h.controls.FinishExecution(cleanup, c.Subject, receipt); err != nil {
+			h.metrics.receiptWriteError()
+			outcome = "unknown"
 			h.log.Error("保存执行回执失败", "request_id", in.RequestID, "error", err)
 			receipt.Status = "unknown"
 			receipt.Message = "执行回执暂不可用，请核实目标数据库；不要直接重跑写操作。"
 			httpx.JSON(w, 503, httpx.Envelope{Code: 50301, Message: receipt.Message, Data: receipt})
 			return
 		}
+		outcome = receipt.Status
 		if status == 200 {
 			httpx.OK(w, data)
 		} else {
@@ -106,6 +125,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, finish, e := h.jobs.admit(r.Context(), c.Subject, conn.ID, in.SQL)
 	if e != nil {
+		reason = e
 		receipt.Status = "rejected"
 		receipt.Message = "查询排队已拒绝、超时或取消，未发送 SQL。"
 		respond(429, receipt.Message, nil)
@@ -116,6 +136,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	settings, settingErr := h.controls.Settings(ctx, c.Subject)
 	if settingErr != nil {
 		execErr = settingErr
+		reason = settingErr
 		receipt.Status, receipt.Message = "rejected", "读取查询限制失败，未发送 SQL。"
 		respond(503, receipt.Message, nil)
 		return
@@ -128,6 +149,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 	opt := target.ExecuteOptions{Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
 	sent := false
+	var executionStarted time.Time
 	opt.BeforeExecute = func() error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -136,9 +158,23 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("无法登记执行状态，未发送 SQL")
 		}
 		sent = true
+		executionStarted = time.Now()
+		h.metrics.beginExecution()
 		return nil
 	}
-	run := func(handle *target.RelDB) (*target.ExecResult, error) {
+	run := func(handle *target.RelDB) (result *target.ExecResult, runErr error) {
+		defer func() {
+			if !sent {
+				return
+			}
+			executionOutcome := "unknown"
+			if runErr == nil && result != nil {
+				executionOutcome = "succeeded"
+			} else if runErr != nil && (c.Role == "readonly" || definiteStatementError(runErr)) {
+				executionOutcome = "failed"
+			}
+			h.metrics.finishExecution(executionOutcome, time.Since(executionStarted))
+		}()
 		rewritten, values, e := h.applyPolicies(ctx, handle, c.Subject, c.Role, query, args)
 		if e != nil {
 			return nil, e
@@ -176,6 +212,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		tx.mu.Unlock()
 	}
 	if execErr != nil {
+		reason = execErr
 		receipt.Status, receipt.Message = "unknown", "执行结果待确认；取消、超时或连接中断不代表写入已回滚，请先核实目标数据库。"
 		if !sent {
 			receipt.Status, receipt.Message = "rejected", "执行前检查未通过，未发送 SQL。"

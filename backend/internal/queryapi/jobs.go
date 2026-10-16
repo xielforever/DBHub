@@ -2,6 +2,7 @@ package queryapi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -23,12 +24,13 @@ type Job struct {
 	cancel       context.CancelFunc
 }
 type jobs struct {
-	mu     sync.Mutex
-	items  []*Job
-	global chan struct{}
-	users  map[int64]*userJobs
-	limits jobLimits
-	closed bool
+	mu        sync.Mutex
+	items     []*Job
+	global    chan struct{}
+	users     map[int64]*userJobs
+	limits    jobLimits
+	closed    bool
+	telemetry queueTelemetry
 }
 
 type userJobs struct {
@@ -62,6 +64,11 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 		}
 	}
 	if m.closed || pending >= m.limits.pending || userPending >= m.limits.userPending {
+		if m.closed {
+			m.telemetry.shutdown++
+		} else {
+			m.telemetry.overload++
+		}
 		m.mu.Unlock()
 		cancel()
 		return nil, nil, fmt.Errorf("查询队列已满，请稍后重试")
@@ -73,6 +80,11 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 	userState.refs++
 	sem := userState.slots
 	m.items = append(m.items, job)
+	m.telemetry.admitted++
+	m.telemetry.waiting++
+	if m.telemetry.waiting > m.telemetry.peakWaiting {
+		m.telemetry.peakWaiting = m.telemetry.waiting
+	}
 	m.mu.Unlock()
 	waitTimer := time.NewTimer(m.limits.wait)
 	defer waitTimer.Stop()
@@ -82,14 +94,27 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 		finished.Do(func() {
 			wasCancelled := ctx.Err() != nil
 			cancel()
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			if job.Started == nil {
+				m.telemetry.waiting--
+				m.telemetry.wait.observe(time.Since(job.Created))
+				if errors.Is(err, context.DeadlineExceeded) {
+					m.telemetry.timeouts++
+				}
+				if errors.Is(err, context.Canceled) {
+					m.telemetry.canceled++
+				}
+			} else {
+				m.telemetry.running--
+			}
+			// 槽位状态与归还在同一个锁内更新，避免新任务启动时出现虚假的并发峰值。
 			if acquiredGlobal {
 				<-m.global
 			}
 			if acquiredUser {
 				<-sem
 			}
-			m.mu.Lock()
-			defer m.mu.Unlock()
 			userState.refs--
 			if userState.refs == 0 {
 				delete(m.users, user)
@@ -154,6 +179,12 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 	now := time.Now()
 	job.Started = &now
 	job.Status = "running"
+	m.telemetry.waiting--
+	m.telemetry.running++
+	m.telemetry.wait.observe(time.Since(job.Created))
+	if m.telemetry.running > m.telemetry.peakRunning {
+		m.telemetry.peakRunning = m.telemetry.running
+	}
 	m.mu.Unlock()
 	return ctx, finish, nil
 }

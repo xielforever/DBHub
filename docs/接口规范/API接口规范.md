@@ -354,6 +354,8 @@ curl http://localhost:8080/api/health
 
 ## 9. 仪表盘指标（Metrics）
 
+### 9.1 仪表盘汇总
+
 **GET** `/api/v1/metrics/overview?days=14`
 
 登录用户均可访问；`days` 取 1~90，缺省/越界均回落到 14。管理员可见全平台数据，
@@ -398,6 +400,30 @@ curl http://localhost:8080/api/health
   失败量、慢查询量。
 - `rank`：时间窗口内各数据源查询量降序，最多 8 条。
 - `recent`：最近查询记录，最多 8 条，结构同查询历史列表项。
+
+### 9.2 SQL 执行运行指标（管理员）
+
+**GET** `/api/v1/metrics/query`，或 `/api/v1/metrics/query?format=prometheus`。
+
+仅管理员可访问：未登录返回 401，其他角色返回 403。默认返回标准 JSON 信封；
+`format=json` 等同默认，`format=prometheus` 返回 Prometheus 0.0.4 文本，其他格式返回 400。
+两种格式均设置 `Cache-Control: no-store`，不包含 SQL、参数、用户、连接或请求编号标签。
+
+JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`requests`、
+`executions`、`counters`、`queue`、`process`、`metadata_pool` 和 `receipt_store_available`：
+
+- `requests` 统计进入执行处理器的请求，包含重复、冲突及拒绝；`executions` 仅统计实际开始的用户 SQL。
+  两者分别提供 `total`、`in_flight` 和按固定结果分类的 `completed` 耗时直方图，单位为秒。
+- `counters` 统计超时、取消、登记失败和回执写入失败。超时/取消是原因计数，可与请求结果重叠。
+- `queue` 提供运行/等待数量、进程峰值、接纳/拒绝/等待超时计数、等待耗时和当前执行限额；
+  `process` 提供 Go 堆、goroutine，Linux 另提供累计进程 CPU 秒和 RSS；`metadata_pool` 提供元数据库连接池占用与等待。
+- 数据库可读时附 `receipts_last_24h`，汇总近 24 小时创建的 queued/running/unknown，
+  超过 5 分钟未完成的记录计入 unknown，`stale` 是其子集。此处 unknown 是历史回执数量，不等于用户当前待办数。
+  汇总不可读时仍返回 200 及本进程指标，`receipt_store_available=false` 并省略持久化数量。
+
+进程计数和峰值在重启后清零，以 `started_at` 识别实例；多实例各自统计。
+详细口径、Prometheus 名称和可重复的 PostgreSQL/MySQL 压测步骤见
+[SQL 工作台运行指标与压测](../开发指南/SQL工作台运行指标与压测.md)。
 
 ---
 

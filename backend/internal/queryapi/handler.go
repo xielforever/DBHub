@@ -27,10 +27,11 @@ type Handler struct {
 	txs      *transactions
 	jobs     *jobs
 	controls *db.QueryControls
+	metrics  *queryMetrics
 }
 
 func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger, controls *db.QueryControls) *Handler {
-	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls}
+	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls, metrics: newQueryMetrics()}
 }
 
 type executeRequest struct {

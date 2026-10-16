@@ -173,6 +173,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("DELETE /api/v1/snippets/{id}", middleware.Chain(http.HandlerFunc(snippetH.Delete), requireAuth, auditMW))
 		// ---------- SQL 工作台 ----------
 		qH := queryapi.NewHandler(deps.Conns, deps.Tunnels, deps.History, log, deps.Controls)
+		mux.Handle("GET /api/v1/metrics/query", middleware.Chain(http.HandlerFunc(qH.QueryMetrics), requireAuth, requireAdmin))
 		aiH := aiapi.New(cfg.AIBaseURL, cfg.AIKey, cfg.AIModel)
 		mux.Handle("GET /api/v1/ai/status", middleware.Chain(http.HandlerFunc(aiH.Status), requireAuth))
 		mux.Handle("POST /api/v1/ai/complete", middleware.Chain(http.HandlerFunc(aiH.Complete), requireAuth))

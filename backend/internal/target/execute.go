@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -71,7 +72,7 @@ func Execute(ctx context.Context, handle *RelDB, query string, readOnly bool) (*
 	return ExecuteWithOptions(ctx, handle, query, readOnly, ExecuteOptions{})
 }
 
-func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bool, opt ExecuteOptions) (*ExecResult, error) {
+func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bool, opt ExecuteOptions) (out *ExecResult, err error) {
 	if r == nil || r.Conn == nil {
 		return nil, fmt.Errorf("目标连接为空")
 	}
@@ -119,6 +120,12 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 		}
 	}
 	start := time.Now()
+	// 保留驱动错误，同时携带真实超时/取消原因；成功响应不会因后续取消被改写。
+	defer func() {
+		if err != nil && ctx.Err() != nil {
+			err = errors.Join(err, ctx.Err())
+		}
+	}()
 	result := &ExecResult{Kind: "query", Columns: []string{}, Rows: [][]any{}}
 	if r.pgConn != nil {
 		var rows pgx.Rows

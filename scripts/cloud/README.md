@@ -22,6 +22,9 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 # 第一阶段工作台的执行状态回归测试与前端构建
 ./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm run test:query; npm run build'
 
+# 单实例执行容量基线：独立容器、随机测试对象，结束后清理
+./scripts/cloud/benchmark.sh
+
 # 查看服务状态和日志；停止进程但保留数据库卷
 ./scripts/cloud/dev.sh ps
 ./scripts/cloud/dev.sh logs --tail 40 backend frontend
