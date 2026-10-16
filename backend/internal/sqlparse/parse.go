@@ -54,11 +54,11 @@ func Parse(sql, dialect string) (*Statement, error) {
 			s.Targets = append(s.Targets, pgTable(object(body["relation"])))
 		case "UpdateStmt":
 			s.Kind = "update"
-			s.UnsafeWrite = body["whereClause"] == nil
+			s.UnsafeWrite = unsafePGWhere(body["whereClause"])
 			s.Targets = append(s.Targets, pgTable(object(body["relation"])))
 		case "DeleteStmt":
 			s.Kind = "delete"
-			s.UnsafeWrite = body["whereClause"] == nil
+			s.UnsafeWrite = unsafePGWhere(body["whereClause"])
 			s.Targets = append(s.Targets, pgTable(object(body["relation"])))
 		case "CreateTableAsStmt":
 			s.Kind = "create"
@@ -79,7 +79,7 @@ func Parse(sql, dialect string) (*Statement, error) {
 		}
 	})
 	Walk(tree, func(key string, value map[string]any) {
-		if (key == "UpdateStmt" || key == "DeleteStmt") && value["whereClause"] == nil {
+		if (key == "UpdateStmt" || key == "DeleteStmt") && unsafePGWhere(value["whereClause"]) {
 			s.UnsafeWrite = true
 		}
 		switch key {
@@ -129,10 +129,10 @@ func parseMySQL(sql string) (*Statement, error) {
 		s.Targets = append(s.Targets, myTable(n.Table))
 	case *mysqlparser.Update:
 		s.Kind = "update"
-		s.UnsafeWrite = n.Where == nil
+		s.UnsafeWrite = unsafeMyWhere(n.Where)
 	case *mysqlparser.Delete:
 		s.Kind = "delete"
-		s.UnsafeWrite = n.Where == nil
+		s.UnsafeWrite = unsafeMyWhere(n.Where)
 	case *mysqlparser.DDL:
 		s.Kind = "create"
 		s.Targets = append(s.Targets, myTable(n.NewName))

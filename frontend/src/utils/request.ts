@@ -5,6 +5,26 @@ import { useUserStore } from '../stores/user'
 import { setAuthCookie } from './auth-cookie'
 import router from '../router'
 
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** 调用方自行展示错误和恢复操作时，避免重复弹窗。 */
+    silentError?: boolean
+  }
+}
+
+export class ApiRequestError extends Error {
+  status: number | undefined
+  code: number | undefined
+  data: unknown
+
+  constructor(message: string, status?: number, code?: number, data?: unknown) {
+    super(message)
+    this.status = status
+    this.code = code
+    this.data = data
+  }
+}
+
 /**
  * 全局 Axios 实例
  * - baseURL 走 Vite 代理（/api → 后端服务）
@@ -79,8 +99,8 @@ request.interceptors.response.use(
     if (body.code === 0) {
       return body.data as never
     }
-    ElMessage.error(body.message || '请求失败')
-    return Promise.reject(new Error(body.message || '请求失败'))
+    if (!response.config.silentError) ElMessage.error(body.message || '请求失败')
+    return Promise.reject(new ApiRequestError(body.message || '请求失败', response.status, body.code, body.data))
   },
   async (error: AxiosError<ApiResponse>) => {
     if (axios.isCancel(error)) return Promise.reject(error)
@@ -107,7 +127,9 @@ request.interceptors.response.use(
       redirectToLogin()
     } else {
       const message = error.response?.data?.message
-      if (message) {
+      if (original?.silentError) {
+        // SQL 工作台自行解释执行结果，通信异常不能提示直接重试写操作。
+      } else if (message) {
         ElMessage.error(message)
       } else if (error.code === 'ECONNABORTED') {
         ElMessage.error('请求超时，请稍后重试')
@@ -118,7 +140,7 @@ request.interceptors.response.use(
       // axios 原始英文 "Request failed with status code xxx"
       const cn = error.response?.data?.message
         || (error.code === 'ECONNABORTED' ? '请求超时，请稍后重试' : '网络异常，请检查后端服务状态')
-      return Promise.reject(new Error(cn))
+      return Promise.reject(new ApiRequestError(cn, status, error.response?.data?.code, error.response?.data?.data))
     }
     return Promise.reject(error)
   },

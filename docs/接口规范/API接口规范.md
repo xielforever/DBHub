@@ -237,7 +237,7 @@ curl http://localhost:8080/api/health
 ### 6.1 执行 SQL
 **POST** `/api/v1/query/execute`
 ```json
-{ "connection_id": 1, "database": "orders", "sql": "SELECT id, name FROM users LIMIT 100" }
+{ "request_id": "d504b64a-cd47-42f9-8714-bde634f013ea", "connection_id": 1, "database": "orders", "sql": "SELECT id, name FROM users LIMIT 100" }
 ```
 查询类（SELECT / WITH / SHOW / DESC / EXPLAIN / TABLE / VALUES）返回：
 ```json
@@ -252,15 +252,32 @@ curl http://localhost:8080/api/health
 写入/DDL 类返回：`{ "kind": "write", "affected_rows": 2, "duration_ms": 5 }`。
 
 约束：
+- `request_id` 必填，使用非空 UUID。同一次请求的网络重放须沿用原编号；用户主动发起新的执行时生成新编号。工作台客户端已自动生成；直接调用 API 的客户端必须同步升级。
+- 以用户和请求编号为唯一键，在 PostgreSQL 元数据库中原子登记。已登记编号再次提交返回 HTTP 409，`data` 为原执行回执；不同 SQL、参数、目标、选项或角色不得复用同一编号。失败、超时、进程退出均不释放编号，服务端不会自动重跑。
 - 一次只允许执行一条语句（多语句返回 `40000`，防止批量注入）；
-- 单次结果最多返回 **1000 行**，超出 `truncated=true`；
-- 语句执行超时 30 秒；
-- `readonly` 角色由执行引擎按首关键字拦截：仅放行
-  SELECT/WITH/SHOW/DESC/EXPLAIN/TABLE/VALUES 等查询类语句，
-  INSERT/UPDATE/DELETE/DDL 等一律返回
-  `40000 只读角色禁止执行非查询语句: <KEYWORD>`（在平台引擎层拦截，
-  不依赖数据库侧只读事务，MySQL/PostgreSQL/代理连接池环境行为一致）；
-- 无论成功失败均写入查询历史（失败含 `error_message`）。
+- 默认最多返回 **1000 行**，超出 `truncated=true`；默认超时 30 秒。`max_rows`、`timeout_ms` 服从用户保存的更严格限制；硬上限分别为 10000 行、120 秒。返回行数限制不限制更新或删除的影响行数。
+- `readonly` 角色同时使用 SQL AST 检查和数据库只读事务。默认禁止没有 WHERE、或 WHERE 明显恒真的 UPDATE/DELETE；支持识别 `TRUE`、`1=1`、`OR 1=1` 等字面量条件，不证明任意条件的影响范围。
+- 普通执行使用独立连接；仅显式传入 `transaction_id` 时使用已有事务。事务内语句成功不表示事务已提交。
+- 执行完成后记录历史；请求登记和执行回执不保存 SQL、参数或查询结果行，不提供结果缓存。
+
+**GET** `/api/v1/query/executions/{request_id}`：查询本人执行回执，其他用户（含管理员）不能跨用户读取。示例 `data`：
+
+```json
+{
+  "request_id": "d504b64a-cd47-42f9-8714-bde634f013ea",
+  "connection_id": 1,
+  "database": "orders",
+  "status": "succeeded",
+  "transactional": false,
+  "kind": "write",
+  "affected_rows": 1,
+  "duration_ms": 5
+}
+```
+
+`status` 为 `queued`、`running`、`succeeded`、`failed`、`rejected` 或 `unknown`。`rejected` 表示未发送用户 SQL；`unknown` 表示结果不确定，不得解释为写入回滚。执行错误响应也可能携带回执，客户端应优先使用回执状态。元数据库暂时不可用时返回 503；重复编号返回 409；排队过载返回 429。未找到回执的 404 也不能单独证明原请求未执行。
+
+取消、超时、断网后只查询回执，不自动重新提交 SQL。超过 5 分钟未完成的排队/执行记录展示为 `unknown`，保持编号占用。回执不保存查询行，确认查询完成后只显示完成摘要。完整一致性与部署边界见 [执行可靠性](../开发指南/SQL工作台执行可靠性.md)。
 
 ### 6.2 对象浏览（均为 GET）
 | 接口 | 说明 |

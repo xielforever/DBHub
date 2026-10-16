@@ -4,6 +4,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 from playwright.sync_api import expect, sync_playwright
@@ -13,6 +14,8 @@ values = dict(line.split('=', 1) for line in (state/'runtime.env').read_text().s
 api, frontend, token = 'http://backend:8080/api/v1', 'http://frontend:5173', ''
 
 def request(method, path, body=None, expected=(200,)):
+    if method == 'POST' and path == '/query/execute' and body is not None:
+        body = {'request_id':str(uuid.uuid4()), **body}
     headers = {'Content-Type': 'application/json'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
@@ -53,7 +56,8 @@ def passed(name):
     print('PASS '+name, flush=True)
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path='/usr/bin/chromium', proxy={'server':os.environ.get('HTTPS_PROXY') or 'http://proxy:8080', 'bypass':'frontend;backend;localhost;127.0.0.1'}, args=['--no-sandbox','--disable-dev-shm-usage'])
+    # 使用逗号分隔，同时适用于 Chromium 与故障模拟中的 Playwright API 请求。
+    browser = p.chromium.launch(executable_path='/usr/bin/chromium', proxy={'server':os.environ.get('HTTPS_PROXY') or 'http://proxy:8080', 'bypass':'frontend,backend,localhost,127.0.0.1'}, args=['--no-sandbox','--disable-dev-shm-usage'])
     context = browser.new_context(viewport={'width':1600,'height':1000}, locale='zh-CN', reduced_motion='reduce')
     page = context.new_page()
     page.set_default_timeout(20000)
@@ -91,6 +95,7 @@ with sync_playwright() as p:
     response, payload, body = execute()
     assert response.status == 200 and payload['data']['rows'][0][1] == 'Cloud alpha'
     assert body['sql'] == sql and not body.get('params') and not body.get('transaction_id')
+    assert uuid.UUID(body['request_id'])
     expect(page.get_by_role('cell', name='Cloud alpha', exact=True)).to_be_visible()
     buttons = [button.inner_text().strip() for button in workbench.get_by_role('button').all() if button.is_visible()]
     assert buttons == ['运行','格式化'], buttons
@@ -156,7 +161,8 @@ with sync_playwright() as p:
     assert job and job['status']=='running'
     assert sum(method=='POST' and path.endswith('/query/execute') for method,path in calls)==before+1
     page.get_by_role('button', name='取消', exact=True).click()
-    expect(page.get_by_text('请求已取消', exact=True)).to_be_visible()
+    expect(page.get_by_text('执行结果待确认', exact=True)).to_be_visible()
+    expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
     canceled = False
     try:
         for _ in range(40):
@@ -169,11 +175,46 @@ with sync_playwright() as p:
         if not canceled:
             request('POST',f"/query/jobs/{job['id']}/cancel")
     assert canceled, 'browser cancellation did not reach the server query'
-    passed('duplicate shortcuts make one request and cancel stops the real server query')
+    passed('duplicate shortcuts make one request; canceled server query reports uncertain outcome')
+
+    saved_id = page.evaluate("Object.entries(sessionStorage).find(([key]) => key.startsWith('dbhub:pending-execution:'))?.[1]")
+    assert saved_id and str(uuid.UUID(saved_id)) == saved_id
+    page.reload(wait_until='networkidle')
+    expect(page.get_by_text('执行结果待确认', exact=True)).to_be_visible()
+    expect(page.get_by_test_id('query-result')).to_contain_text(saved_id)
+    expect(page.get_by_test_id('query-result')).to_contain_text('Cloud PostgreSQL / '+values['POSTGRES_DB'])
+    expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
+    page.screenshot(path=str(out/'phase1-sql-unknown.png'), animations='disabled')
+    page.get_by_role('button', name='核实状态', exact=True).click()
+    expect(page.get_by_text('执行结果待确认', exact=True)).to_be_visible()
+    page.get_by_role('button', name='已核实，继续', exact=True).click()
+    page.get_by_role('button', name='我已核实，继续', exact=True).click()
+    expect(page.get_by_role('button', name='运行', exact=True)).to_be_enabled()
+    assert page.evaluate("Object.entries(sessionStorage).every(([key,value]) => !key.startsWith('dbhub:pending-execution:'))")
+    passed('refresh restores only the pending execution ID and requires verification before a new run')
 
     response, payload, _ = execute('SELECT 7 AS after_cancel')
     assert response.status==200 and payload['data']['rows']==[[7]]
     passed('fresh execution succeeds after cancellation')
+
+    request('POST', '/query/execute', {'connection_id':ids['postgres'], 'sql':"UPDATE dbhub_cloud_demo SET name='Cloud beta' WHERE id=2"})
+    lost_writes = []
+    def lose_write_response(route):
+        lost_writes.append(route.request.post_data_json['request_id'])
+        upstream = route.fetch()
+        assert upstream.status == 200, f'write-response simulator received HTTP {upstream.status}: {upstream.text()[:200]}'
+        route.abort('connectionreset')
+    page.route('**/api/v1/query/execute', lose_write_response)
+    set_sql("UPDATE dbhub_cloud_demo SET name=name || '-receipt' WHERE id=2")
+    page.get_by_role('button', name='运行', exact=True).click()
+    expect(page.get_by_text('执行成功，影响 1 行', exact=True)).to_be_visible()
+    page.unroute('**/api/v1/query/execute', lose_write_response)
+    assert len(lost_writes) == 1
+    recovered = request('GET', '/query/executions/'+lost_writes[0])
+    assert recovered['status'] == 'succeeded' and recovered['affected_rows'] == 1 and recovered['database'] == values['POSTGRES_DB']
+    actual = request('POST', '/query/execute', {'connection_id':ids['postgres'], 'sql':'SELECT name FROM dbhub_cloud_demo WHERE id=2'})
+    assert actual['rows'] == [['Cloud beta-receipt']]
+    passed('lost committed-write response is recovered from a receipt without repeating the write')
 
     page.get_by_role('combobox', name='选择连接').focus()
     page.keyboard.press('ArrowDown')

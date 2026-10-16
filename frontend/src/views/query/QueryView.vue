@@ -56,7 +56,7 @@
         <span class="ml-2 hidden text-xs text-white/40 lg:inline">选中执行 · Ctrl / ⌘ + Enter</span>
         <div class="flex-1" />
         <button
-          v-if="busy"
+          v-if="busy && state.status !== 'checking'"
           class="ghost-button flex items-center gap-1.5 !px-3 !py-2 text-xs disabled:opacity-50"
           :disabled="state.status === 'canceling'"
           @click="cancel"
@@ -105,8 +105,8 @@
       <header class="flex shrink-0 items-center gap-3 border-b border-white/10 px-4 py-3">
         <Table2 class="h-4 w-4 shrink-0 text-indigo-300" aria-hidden="true" />
         <h2 id="sql-result-title" class="shrink-0 text-sm text-white/85">结果</h2>
-        <span v-if="state.context" class="min-w-0 truncate text-xs text-white/50" :title="state.context.connectionName + ' / ' + state.context.database">
-          {{ state.context.connectionName }} / {{ state.context.database }}
+        <span v-if="executionTarget" class="min-w-0 truncate text-xs text-white/50" :title="executionTarget">
+          {{ executionTarget }}
         </span>
         <span class="flex-1" />
         <span class="shrink-0 text-xs" :class="statusClass" role="status">{{ statusText }}</span>
@@ -114,6 +114,9 @@
       <div v-if="state.context" class="shrink-0 truncate border-b border-white/5 bg-white/[0.02] px-4 py-1.5 font-mono text-[11px] text-white/45" :title="state.context.sql">
         {{ state.context.selected ? '选中执行' : '执行 SQL' }}：{{ state.context.sql.replace(/\s+/g, ' ') }}
       </div>
+      <p v-if="state.requestId && ['unknown', 'checking', 'completed'].includes(state.status)" class="shrink-0 break-all border-b border-white/5 px-4 py-1.5 text-[11px] text-white/50">
+        执行编号：<span class="select-text font-mono">{{ state.requestId }}</span>
+      </p>
 
       <ResultGrid
         v-if="state.status === 'success' && state.result?.kind === 'query'"
@@ -131,12 +134,26 @@
         </template>
         <template v-else-if="busy">
           <LoaderCircle class="h-6 w-6 animate-spin text-indigo-300" aria-hidden="true" />
-          <p class="text-sm text-white/65">{{ state.status === 'canceling' ? '正在取消请求…' : '正在执行 SQL…' }}</p>
+          <p class="text-sm text-white/65">{{ state.status === 'checking' ? '正在核实执行状态…' : state.status === 'canceling' ? '正在取消请求…' : '正在执行 SQL…' }}</p>
+        </template>
+        <template v-else-if="state.status === 'unknown'">
+          <CircleAlert class="h-7 w-7 shrink-0 text-amber-200" aria-hidden="true" />
+          <p class="text-sm text-amber-200" role="status">执行结果待确认</p>
+          <p class="max-w-xl text-xs leading-5 text-white/65">{{ state.error }}</p>
+          <div class="flex flex-wrap justify-center gap-2">
+            <button class="ghost-button !px-3 !py-2 text-xs" @click="check">核实状态</button>
+            <button class="ghost-button !px-3 !py-2 text-xs" @click="acknowledgeOutcome">已核实，继续</button>
+          </div>
+        </template>
+        <template v-else-if="state.status === 'completed'">
+          <CheckCircle2 class="h-7 w-7 text-emerald-300" aria-hidden="true" />
+          <p class="text-sm text-white/80">服务端已确认执行完成</p>
+          <p class="max-w-xl text-xs leading-5 text-white/55">{{ state.error }}</p>
         </template>
         <template v-else-if="state.status === 'canceled'">
           <Square class="h-6 w-6 text-amber-200/80" aria-hidden="true" />
           <p class="text-sm text-white/70">请求已取消</p>
-          <p class="text-xs text-white/45">本次请求未接收执行结果。</p>
+          <p class="text-xs text-white/45">{{ state.error }}</p>
         </template>
         <template v-else>
           <Table2 class="h-7 w-7 text-white/25" aria-hidden="true" />
@@ -186,20 +203,35 @@ const connection = computed(() => connections.value.find(item => item.id === con
 let disposed = false
 let metadataRequest: AbortController | null = null
 
-const { state, busy, run, cancel } = useSqlExecution((context, signal) =>
+const recoveryKey = `dbhub:pending-execution:${userStore.user?.id ?? 'anonymous'}`
+const { state, busy, needsReview, run, cancel, check, acknowledge } = useSqlExecution((context, signal) =>
   workbenchApi.execute(context.connectionId, context.sql, context.database, signal, undefined, {
-    timeout_ms: 30000, max_rows: 1000,
+    request_id: context.requestId, timeout_ms: 30000, max_rows: 1000,
   }),
+  (id, signal) => workbenchApi.execution(id, signal),
+  {
+    read: () => sessionStorage.getItem(recoveryKey),
+    write: id => sessionStorage.setItem(recoveryKey, id),
+    clear: () => sessionStorage.removeItem(recoveryKey),
+  },
 )
 const canRun = computed(() => !!connection.value && !!database.value && !!sql.value.trim()
-  && !busy.value && !confirming.value && !connectionsLoading.value && !databasesLoading.value && !formatting.value && !sourceError.value)
+  && !busy.value && !needsReview.value && !confirming.value && !connectionsLoading.value && !databasesLoading.value && !formatting.value && !sourceError.value)
+
+const executionTarget = computed(() => {
+  if (state.value.context) return `${state.value.context.connectionName} / ${state.value.context.database}`
+  const receipt = state.value.receipt
+  if (!receipt) return ''
+  const name = connections.value.find(item => item.id === receipt.connection_id)?.name ?? `连接 ${receipt.connection_id}`
+  return `${name} / ${receipt.database || '数据库名称未记录'}`
+})
 
 const statusText = computed(() => ({
-  idle: '就绪', running: '执行中', canceling: '取消中', success: '成功', error: '失败', canceled: '已取消',
+  idle: '就绪', running: '执行中', canceling: '取消中', checking: '核实中', success: '成功', completed: '已完成', error: '失败', canceled: '已取消', unknown: '待确认',
 })[state.value.status])
 const statusClass = computed(() => ({
   idle: 'text-white/45', running: 'text-indigo-200', canceling: 'text-amber-200',
-  success: 'text-emerald-300', error: 'text-rose-300', canceled: 'text-amber-200',
+  checking: 'text-amber-200', success: 'text-emerald-300', completed: 'text-emerald-300', error: 'text-rose-300', canceled: 'text-amber-200', unknown: 'text-amber-200',
 })[state.value.status])
 
 /** 后来的数据库请求可覆盖前一个；过时响应不改变当前连接的数据库。 */
@@ -254,6 +286,19 @@ async function runQuery() {
   if (!disposed) void run(context)
 }
 
+async function acknowledgeOutcome() {
+  if (!needsReview.value || confirming.value) return
+  confirming.value = true
+  try {
+    await ElMessageBox.confirm(
+      '请先通过目标数据库或审计记录核实上次执行结果。继续后可以发起新的执行，重复运行已提交的写操作可能再次修改数据。',
+      '确认已核实执行结果',
+      { type: 'warning', confirmButtonText: '我已核实，继续', cancelButtonText: '返回核实' },
+    )
+    if (!disposed) acknowledge()
+  } catch { /* 保持待确认状态 */ } finally { confirming.value = false }
+}
+
 async function formatCurrent() {
   if (!sql.value.trim() || busy.value || confirming.value || formatting.value) return
   const original = sql.value
@@ -274,6 +319,7 @@ async function formatCurrent() {
 watch(sql, () => { formatError.value = '' })
 
 onMounted(async () => {
+  if (needsReview.value) void check()
   try {
     const result = await connectionApi.list()
     if (disposed) return

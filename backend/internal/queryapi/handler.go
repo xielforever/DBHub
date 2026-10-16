@@ -34,6 +34,7 @@ func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, hi
 }
 
 type executeRequest struct {
+	RequestID     string         `json:"request_id"`
 	ConnectionID  int64          `json:"connection_id"`
 	Database      string         `json:"database"`
 	SQL           string         `json:"sql"`

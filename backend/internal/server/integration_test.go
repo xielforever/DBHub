@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -135,6 +136,13 @@ func setupAPI(t *testing.T) *apiTest {
 }
 func (a *apiTest) call(method, path, token string, body any, want int) map[string]any {
 	a.t.Helper()
+	if method == "POST" && path == "/query/execute" {
+		if payload, ok := body.(map[string]any); ok {
+			if _, exists := payload["request_id"]; !exists {
+				payload["request_id"] = testRequestID()
+			}
+		}
+	}
 	var reader io.Reader
 	if body != nil {
 		raw, _ := json.Marshal(body)
@@ -169,6 +177,13 @@ func (a *apiTest) call(method, path, token string, body any, want int) map[strin
 		_ = json.Unmarshal(out.Data, &data)
 	}
 	return data
+}
+func testRequestID() string {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf("%x-%x-%x-%x-%x", value[:4], value[4:6], value[6:8], value[8:10], value[10:])
 }
 func (a *apiTest) exec(token, sql string, want int) map[string]any {
 	return a.call("POST", "/query/execute", token, map[string]any{"connection_id": a.connID, "sql": sql}, want)
@@ -249,6 +264,17 @@ func TestRealHTTPBackend(t *testing.T) {
 		a.call("POST", "/query/transaction/rollback", a.admin, map[string]any{"connection_id": conn.ID, "transaction_id": begin["transaction_id"]}, 200)
 		if len(run("SELECT * FROM "+a.table, a.admin, 200)["rows"].([]any)) != 1 {
 			t.Fatal("MySQL rollback failed")
+		}
+		requestID := testRequestID()
+		write := map[string]any{"request_id": requestID, "connection_id": conn.ID, "sql": "UPDATE " + a.table + " SET id=id+10 WHERE id=1"}
+		a.call("POST", "/query/execute", a.admin, write, 200)
+		a.call("POST", "/query/execute", a.admin, write, 409)
+		if receipt := a.call("GET", "/query/executions/"+requestID, a.admin, nil, 200); receipt["status"] != "succeeded" || receipt["affected_rows"] != float64(1) {
+			t.Fatal("MySQL write receipt was not preserved")
+		}
+		run("DELETE FROM "+a.table+" WHERE 1=1", a.admin, 400)
+		if rows := run("SELECT * FROM "+a.table, a.admin, 200)["rows"].([]any); len(rows) != 1 || rows[0].([]any)[0] != float64(11) {
+			t.Fatalf("MySQL duplicate or unsafe write modified data: %v", rows)
 		}
 	})
 	t.Run("snippets-ownership", func(t *testing.T) {

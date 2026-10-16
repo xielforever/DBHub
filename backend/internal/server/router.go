@@ -202,6 +202,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("POST /api/v1/query/jobs/{id}/cancel", middleware.Chain(http.HandlerFunc(qH.CancelJob), requireAuth))
 		mux.Handle("POST /api/v1/query/execute",
 			middleware.Chain(http.HandlerFunc(qH.Execute), requireAuth, auditMW))
+		mux.Handle("GET /api/v1/query/executions/{id}",
+			middleware.Chain(http.HandlerFunc(qH.Execution), requireAuth))
 		mux.Handle("GET /api/v1/metadata/databases",
 			middleware.Chain(http.HandlerFunc(qH.Databases), requireAuth))
 		mux.Handle("GET /api/v1/metadata/schemas",

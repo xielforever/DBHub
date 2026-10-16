@@ -15,6 +15,8 @@ type ExecuteOptions struct {
 	Timeout          time.Duration
 	Args             []any
 	AllowUnsafeWrite bool
+	// BeforeExecute 必须在首次发送用户 SQL 前成功，登记失败时禁止执行。
+	BeforeExecute func() error
 }
 
 func (r *RelDB) Begin(ctx context.Context, readOnly bool) error {
@@ -84,7 +86,7 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 		return nil, fmt.Errorf("只读角色禁止写操作和有副作用的语句")
 	}
 	if ast.UnsafeWrite && !opt.AllowUnsafeWrite {
-		return nil, fmt.Errorf("禁止执行没有 WHERE 条件的 UPDATE/DELETE")
+		return nil, fmt.Errorf("禁止执行没有 WHERE 条件或条件明显恒真的 UPDATE/DELETE")
 	}
 	if opt.MaxRows <= 0 || opt.MaxRows > 10000 {
 		opt.MaxRows = 1000
@@ -107,6 +109,14 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 			defer c()
 			_ = r.Rollback(cleanup)
 		}()
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+	if opt.BeforeExecute != nil {
+		if err = opt.BeforeExecute(); err != nil {
+			return nil, err
+		}
 	}
 	start := time.Now()
 	result := &ExecResult{Kind: "query", Columns: []string{}, Rows: [][]any{}}
@@ -139,6 +149,9 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 			return nil, err
 		}
 		rows.Close()
+		if err = rows.Err(); err != nil {
+			return nil, err
+		}
 		if len(result.Columns) == 0 {
 			result.Kind = "write"
 			result.AffectedRows = rows.CommandTag().RowsAffected()

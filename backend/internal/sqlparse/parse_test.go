@@ -54,3 +54,28 @@ func TestUnsafeWritesInsideCTEsAndExplain(t *testing.T) {
 		}
 	}
 }
+
+func TestObviousAlwaysTrueWriteConditions(t *testing.T) {
+	for _, dialect := range []string{"postgres", "mysql"} {
+		for _, condition := range []string{"TRUE", "1=1", "2>1", "id=1 OR 1=1", "NOT (1=2)", "(1=1 AND 2=2)"} {
+			for _, statement := range []string{"DELETE FROM example WHERE ", "UPDATE example SET id=2 WHERE "} {
+				ast, err := Parse(statement+condition, dialect)
+				if err != nil || !ast.UnsafeWrite {
+					t.Errorf("%s failed to guard %s: %v", dialect, statement+condition, err)
+				}
+			}
+		}
+		for _, condition := range []string{"id=1", "FALSE", "1=2", "id=1 AND 1=1", "id>0", "id=1 OR 1=2", "id IS NULL"} {
+			ast, err := Parse("DELETE FROM example WHERE "+condition, dialect)
+			if err != nil || ast.UnsafeWrite {
+				t.Errorf("%s incorrectly blocked predicate %s: %v", dialect, condition, err)
+			}
+		}
+	}
+	for _, query := range []string{"WITH changed AS (DELETE FROM example WHERE 1=1 RETURNING *) SELECT * FROM changed", "EXPLAIN ANALYZE UPDATE example SET id=2 WHERE TRUE"} {
+		ast, err := Parse(query, "postgres")
+		if err != nil || !ast.UnsafeWrite {
+			t.Errorf("nested always-true write accepted: %v", err)
+		}
+	}
+}

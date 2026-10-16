@@ -26,11 +26,28 @@ type jobs struct {
 	mu     sync.Mutex
 	items  []*Job
 	global chan struct{}
-	users  map[int64]chan struct{}
+	users  map[int64]*userJobs
+	limits jobLimits
+	closed bool
 }
 
-func newJobs() *jobs { return &jobs{global: make(chan struct{}, 8), users: map[int64]chan struct{}{}} }
+type userJobs struct {
+	slots chan struct{}
+	refs  int
+}
+type jobLimits struct {
+	global, user, pending, userPending int
+	wait                               time.Duration
+}
+
+func newJobs() *jobs { return newJobsWithLimits(jobLimits{8, 2, 100, 10, 30 * time.Second}) }
+func newJobsWithLimits(limits jobLimits) *jobs {
+	return &jobs{global: make(chan struct{}, limits.global), users: map[int64]*userJobs{}, limits: limits}
+}
 func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (context.Context, func(error), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	job := &Job{ID: randomID(), UserID: user, ConnectionID: connection, SQL: sql, Status: "pending", Created: time.Now(), cancel: cancel}
 	m.mu.Lock()
@@ -44,60 +61,69 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 			}
 		}
 	}
-	if pending >= 100 || userPending >= 10 {
+	if m.closed || pending >= m.limits.pending || userPending >= m.limits.userPending {
 		m.mu.Unlock()
 		cancel()
 		return nil, nil, fmt.Errorf("查询队列已满，请稍后重试")
 	}
 	if m.users[user] == nil {
-		m.users[user] = make(chan struct{}, 2)
+		m.users[user] = &userJobs{slots: make(chan struct{}, m.limits.user)}
 	}
-	sem := m.users[user]
+	userState := m.users[user]
+	userState.refs++
+	sem := userState.slots
 	m.items = append(m.items, job)
 	m.mu.Unlock()
-	waitTimer := time.NewTimer(30 * time.Second)
+	waitTimer := time.NewTimer(m.limits.wait)
 	defer waitTimer.Stop()
 	acquiredUser, acquiredGlobal := false, false
+	var finished sync.Once
 	finish := func(err error) {
-		wasCancelled := ctx.Err() != nil
-		cancel()
-		if acquiredGlobal {
-			<-m.global
-		}
-		if acquiredUser {
-			<-sem
-		}
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		now := time.Now()
-		job.Finished = &now
-		job.Status = "success"
-		if err != nil {
-			job.Status = "failed"
-			job.Error = "查询执行失败"
-			if wasCancelled {
-				job.Status = "cancelled"
-				job.Error = "查询已取消或超时"
+		finished.Do(func() {
+			wasCancelled := ctx.Err() != nil
+			cancel()
+			if acquiredGlobal {
+				<-m.global
 			}
-		}
-		if len(m.items) > 300 {
-			kept := []*Job{}
-			finishedKept := 0
-			for i := len(m.items) - 1; i >= 0; i-- {
-				j := m.items[i]
-				if j.Finished == nil || finishedKept < 200 {
-					kept = append(kept, j)
-					if j.Finished != nil {
-						finishedKept++
-					}
+			if acquiredUser {
+				<-sem
+			}
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			userState.refs--
+			if userState.refs == 0 {
+				delete(m.users, user)
+			}
+			now := time.Now()
+			job.Finished = &now
+			job.Status = "success"
+			if err != nil {
+				job.Status = "failed"
+				job.Error = "查询执行失败"
+				if wasCancelled {
+					job.Status = "cancelled"
+					job.Error = "查询已取消或超时"
 				}
 			}
-			for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
-				kept[i], kept[j] = kept[j], kept[i]
+			if len(m.items) > 300 {
+				kept := []*Job{}
+				finishedKept := 0
+				for i := len(m.items) - 1; i >= 0; i-- {
+					j := m.items[i]
+					if j.Finished == nil || finishedKept < 200 {
+						kept = append(kept, j)
+						if j.Finished != nil {
+							finishedKept++
+						}
+					}
+				}
+				for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+					kept[i], kept[j] = kept[j], kept[i]
+				}
+				m.items = kept
 			}
-			m.items = kept
-		}
 
+		})
 	}
 	select {
 	case sem <- struct{}{}:
@@ -119,6 +145,11 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 		finish(ctx.Err())
 		return nil, nil, ctx.Err()
 	}
+	// 取消和可用槽位可能同时就绪，取得槽位后必须再次检查。
+	if err := ctx.Err(); err != nil {
+		finish(err)
+		return nil, nil, err
+	}
 	m.mu.Lock()
 	now := time.Now()
 	job.Started = &now
@@ -129,6 +160,7 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 func (m *jobs) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.closed = true
 	for _, j := range m.items {
 		if j.Finished == nil {
 			j.cancel()
