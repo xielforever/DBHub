@@ -37,4 +37,4 @@ PY
 )"
 export DBHUB_PROXY_HOST="${dbhub_proxy%%:*}" DBHUB_PROXY_IP="${dbhub_proxy#*:}"
 export DBHUB_NO_PROXY="localhost,127.0.0.1,frontend,backend,postgres,mysql,redis${NO_PROXY:+,$NO_PROXY}"
-exec docker compose --project-name dbhub-cloud --project-directory "$dbhub_root" --env-file "$DBHUB_STATE_DIR/runtime.env" -f "$dbhub_root/scripts/cloud/compose.yaml" "$@"
+exec docker compose --project-name "${DBHUB_COMPOSE_PROJECT:-dbhub-cloud}" --project-directory "$dbhub_root" --env-file "$DBHUB_STATE_DIR/runtime.env" -f "${DBHUB_COMPOSE_FILE:-$dbhub_root/scripts/cloud/compose.yaml}" "$@"

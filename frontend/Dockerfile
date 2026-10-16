@@ -1,25 +1,19 @@
 # syntax=docker/dockerfile:1
-# DBHub 前端生产镜像：多阶段构建（node:24 构建 → nginx:alpine 运行时）
-ARG IMAGE_VERSION=node:24.12.0-bullseye
+# DBHub 前端生产镜像：依赖按锁文件安装，构建工具不进入运行镜像。
+ARG IMAGE_VERSION=node:24.12.0-bullseye-slim@sha256:553730a6761d1aea8d3dc858cc9c62e51880a96f6c2a9bbce0577f53d87bb923
 FROM ${IMAGE_VERSION} AS builder
 WORKDIR /app
-COPY package.json package-lock.json* pnpm-lock.yaml* yarn.lock* ./
-RUN npm ci || npm install
 COPY . .
-# 构建时注入 API 代理（运行时也可通过 env.js 覆盖）
-ARG VITE_API_PROXY_TARGET=http://backend:8080
-ENV VITE_API_PROXY_TARGET=${VITE_API_PROXY_TARGET}
-RUN npm run build
+# Cloud 代理 CA 可选挂载；不将会话证书或 node_modules 写进镜像层。
+RUN --mount=type=secret,id=proxy_ca \
+    --mount=type=cache,id=dbhub-frontend-npm,target=/root/.npm \
+    --mount=type=tmpfs,target=/app/node_modules \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    npm ci --strict-ssl=true --no-audit --no-fund && npm run build
 
-FROM nginx:1.27-alpine AS runtime
+FROM nginx:1.30.6-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5 AS runtime
 COPY --from=builder /app/dist /usr/share/nginx/html
-# 单页应用回退 + API 代理示例（按需覆盖）
-RUN printf 'server {\\n\
-  listen 80;\\n\
-  root /usr/share/nginx/html;\\n\
-  index index.html;\\n\
-  location / { try_files $uri $uri/ /index.html; }\\n\
-  location /api/ { proxy_pass http://backend:8080; proxy_set_header Host $host; }\\n\
-}\\n' > /etc/nginx/conf.d/default.conf
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
+HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD wget -Y off -q -O /dev/null http://127.0.0.1/healthz || exit 1
 CMD ["nginx", "-g", "daemon off;"]

@@ -1,6 +1,7 @@
 """Check the basic workbench against local real services; never print credentials."""
 import json
 import os
+import secrets
 import time
 import urllib.error
 import urllib.request
@@ -11,17 +12,26 @@ from playwright.sync_api import expect, sync_playwright
 
 state = Path('/runtime')
 values = dict(line.split('=', 1) for line in (state/'runtime.env').read_text().splitlines() if '=' in line)
-api, frontend, token = 'http://backend:8080/api/v1', 'http://frontend:5173', ''
+api = os.environ.get('DBHUB_BROWSER_API_URL', 'http://backend:8080/api/v1').rstrip('/')
+frontend = os.environ.get('DBHUB_BROWSER_FRONTEND_URL', 'http://frontend:5173').rstrip('/')
+prefix = os.environ.get('DBHUB_BROWSER_ARTIFACT_PREFIX', 'phase1')
+token = ''
 
-def request(method, path, body=None, expected=(200,)):
+# 先核对真实后端环境，防止把开发服务误认为生产镜像验收。
+with urllib.request.urlopen(api.removesuffix('/api/v1')+'/api/health', timeout=10) as response:
+    health = json.load(response)['data']
+assert health['env'] == os.environ.get('DBHUB_BROWSER_EXPECT_ENV', 'development'), 'unexpected backend environment'
+
+def request(method, path, body=None, expected=(200,), token_override=None, timeout=35):
     if method == 'POST' and path == '/query/execute' and body is not None:
         body = {'request_id':str(uuid.uuid4()), **body}
     headers = {'Content-Type': 'application/json'}
-    if token:
-        headers['Authorization'] = 'Bearer ' + token
+    bearer = token if token_override is None else token_override
+    if bearer:
+        headers['Authorization'] = 'Bearer ' + bearer
     req = urllib.request.Request(api+path, data=json.dumps(body).encode() if body is not None else None, headers=headers, method=method)
     try:
-        response = urllib.request.urlopen(req, timeout=35)
+        response = urllib.request.urlopen(req, timeout=timeout)
     except urllib.error.HTTPError as error:
         response = error
     with response:
@@ -55,6 +65,10 @@ def passed(name):
     checks.append(name)
     print('PASS '+name, flush=True)
 
+request('GET', '/connections', expected=(401,), token_override='')
+request('GET', '/metrics/query', expected=(401,), token_override='')
+passed('anonymous API access requires authentication')
+
 with sync_playwright() as p:
     # 使用逗号分隔，同时适用于 Chromium 与故障模拟中的 Playwright API 请求。
     browser = p.chromium.launch(executable_path='/usr/bin/chromium', proxy={'server':os.environ.get('HTTPS_PROXY') or 'http://proxy:8080', 'bypass':'frontend,backend,localhost,127.0.0.1'}, args=['--no-sandbox','--disable-dev-shm-usage'])
@@ -70,8 +84,8 @@ with sync_playwright() as p:
     page.locator('button[type=submit]').click()
     page.wait_for_url('**/dashboard')
 
-    def open_sql(kind, sql):
-        page.goto(frontend+f"/query?connection={ids[kind]}&sql={quote(sql)}", wait_until='networkidle')
+    def open_sql(kind, sql, connection=None):
+        page.goto(frontend+f"/query?connection={connection or ids[kind]}&sql={quote(sql)}", wait_until='networkidle')
         page.wait_for_selector('.monaco-editor .view-lines')
         expect(page.get_by_role('button', name='运行', exact=True)).to_be_enabled()
         return page.get_by_test_id('sql-workbench')
@@ -100,14 +114,14 @@ with sync_playwright() as p:
     buttons = [button.inner_text().strip() for button in workbench.get_by_role('button').all() if button.is_visible()]
     assert buttons == ['运行','格式化'], buttons
     assert workbench.get_by_role('tab').count() == 0
-    page.screenshot(path=str(out/'phase1-sql-desktop.png'), animations='disabled')
+    page.screenshot(path=str(out/f'{prefix}-sql-desktop.png'), animations='disabled')
     passed('real PostgreSQL, two actions, unchanged SQL and no implicit transaction')
 
     page.set_viewport_size({'width':390,'height':844})
     expect(page.get_by_role('cell', name='Cloud alpha', exact=True)).to_be_visible()
     assert page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
     assert page.get_by_role('cell', name='Cloud alpha', exact=True).bounding_box()['y'] < 844
-    page.screenshot(path=str(out/'phase1-sql-mobile.png'), animations='disabled', full_page=True)
+    page.screenshot(path=str(out/f'{prefix}-sql-mobile.png'), animations='disabled', full_page=True)
     page.set_viewport_size({'width':1600,'height':1000})
     passed('mobile SQL and result visible without page overflow')
 
@@ -184,7 +198,7 @@ with sync_playwright() as p:
     expect(page.get_by_test_id('query-result')).to_contain_text(saved_id)
     expect(page.get_by_test_id('query-result')).to_contain_text('Cloud PostgreSQL / '+values['POSTGRES_DB'])
     expect(page.get_by_role('button', name='运行', exact=True)).to_be_disabled()
-    page.screenshot(path=str(out/'phase1-sql-unknown.png'), animations='disabled')
+    page.screenshot(path=str(out/f'{prefix}-sql-unknown.png'), animations='disabled')
     page.get_by_role('button', name='核实状态', exact=True).click()
     expect(page.get_by_text('执行结果待确认', exact=True)).to_be_visible()
     page.get_by_role('button', name='已核实，继续', exact=True).click()
@@ -235,8 +249,94 @@ with sync_playwright() as p:
     assert not [path for _,path in calls if '/api/v1' in path and any(part in path for part in forbidden)]
     assert not errors, 'Browser page errors occurred'
     passed('no advanced panels or background feature requests')
+
+    # 数据源的 prod 标签应在写操作发送前要求确认，取消不能发请求。
+    confirmation = request('POST', '/connections', {'name':'Release confirmation (local)', 'type':'postgres', 'host':'postgres', 'port':5432, 'database':values['POSTGRES_DB'], 'username':values['POSTGRES_USER'], 'password':values['POSTGRES_PASSWORD'], 'ssl_mode':'disable', 'connection_timeout':5, 'environment':'prod'}, (201,))
+    try:
+        open_sql('postgres', "UPDATE dbhub_cloud_demo SET name='Cloud alpha' WHERE id=1", confirmation['id'])
+        before = sum(method=='POST' and path.endswith('/query/execute') for method,path in calls)
+        page.get_by_role('button', name='运行', exact=True).click()
+        expect(page.get_by_text('生产环境执行确认', exact=True)).to_be_visible()
+        page.get_by_role('button', name='取消', exact=True).click()
+        expect(page.get_by_role('button', name='运行', exact=True)).to_be_enabled()
+        assert sum(method=='POST' and path.endswith('/query/execute') for method,path in calls)==before
+        page.get_by_role('button', name='运行', exact=True).click()
+        with page.expect_response(lambda response:'/api/v1/query/execute' in response.url) as pending:
+            page.get_by_role('button', name='确认执行', exact=True).click()
+        assert pending.value.status == 200
+        assert sum(method=='POST' and path.endswith('/query/execute') for method,path in calls)==before+1
+        passed('production target requires confirmation; cancel sends no SQL and confirm sends once')
+    finally:
+        request('DELETE', f"/connections/{confirmation['id']}")
     context.close()
+
+    for role in ('developer','readonly'):
+        username, password = 'browser_'+secrets.token_hex(8), secrets.token_urlsafe(24)+'!Aa9'
+        user = request('POST', '/users', {'username':username, 'password':password, 'role':role}, (201,))
+        role_context = browser.new_context(viewport={'width':1440,'height':1000}, locale='zh-CN', reduced_motion='reduce')
+        try:
+            page = role_context.new_page()
+            page.set_default_timeout(20000)
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(frontend+'/login', wait_until='networkidle')
+            page.locator('#username').fill(username)
+            page.locator('#password').fill(password)
+            page.locator('button[type=submit]').click()
+            page.wait_for_url('**/dashboard')
+            browser_token = page.evaluate("localStorage.getItem('dbhub_access_token')")
+            for path in ('/users','/metrics/query','/metrics/query?format=prometheus'):
+                request('GET', path, expected=(403,), token_override=browser_token)
+            page.goto(frontend+'/users', wait_until='networkidle')
+            expect(page).to_have_url(frontend+'/dashboard')
+            open_sql('postgres', 'SELECT id,name FROM dbhub_cloud_demo ORDER BY id')
+            response, payload, _ = execute()
+            assert response.status == 200 and payload['data']['rows'][0] == [1,'Cloud alpha']
+            if role == 'readonly':
+                response, _, _ = execute("UPDATE dbhub_cloud_demo SET name='forbidden' WHERE id=1")
+                assert response.status == 400
+            else:
+                response, _, _ = execute("UPDATE dbhub_cloud_demo SET name='Cloud alpha' WHERE id=1")
+                assert response.status == 200
+                response, _, _ = execute("UPDATE dbhub_cloud_demo SET name='forbidden'")
+                assert response.status == 400
+            actual = request('POST', '/query/execute', {'connection_id':ids['postgres'], 'sql':'SELECT name FROM dbhub_cloud_demo WHERE id=1'})
+            assert actual['rows'] == [['Cloud alpha']]
+            passed(role+' workbench access, server authorization and unchanged protected data')
+            request('POST', '/auth/logout', token_override=browser_token)
+            set_sql('SELECT 99 AS revoked_session')
+            page.get_by_role('button', name='运行', exact=True).click()
+            page.wait_for_url('**/login?redirect=**')
+            passed(role+' revoked session returns to login instead of executing SQL')
+        finally:
+            role_context.close()
+            request('DELETE', f"/users/{user['id']}")
+    assert not errors, 'Browser page errors occurred'
     browser.close()
 
-(out/'phase1-checks.json').write_text(json.dumps({'scope':'sql-workbench-phase1','checks':checks,'real_databases':list(ids),'page_errors':errors}, ensure_ascii=False, indent=2))
+if health['env'] == 'production':
+    # 用独立用户验证代理真实长查询，避免只检查配置文本。
+    username, password = 'proxy_'+secrets.token_hex(8), secrets.token_urlsafe(24)+'!Aa9'
+    user = request('POST', '/users', {'username':username, 'password':password, 'role':'developer'}, (201,))
+    try:
+        probe_token = request('POST', '/auth/login', {'username':username, 'password':password})['access_token']
+        request('PUT', '/query/settings', {'timeout_ms':90000, 'max_rows':1000, 'block_unsafe_write':True}, token_override=probe_token)
+        started = time.monotonic()
+        actual = request('POST', '/query/execute', {'connection_id':ids['postgres'], 'sql':'SELECT pg_sleep(62) AS proxy_wait', 'timeout_ms':90000}, token_override=probe_token, timeout=100)
+        assert time.monotonic()-started >= 61 and actual['kind']=='query' and len(actual['rows'])==1
+        passed('production proxy preserves a real 62-second query beyond the default 60-second timeout')
+        before = request('GET', '/metrics/query')
+        probe_id = str(uuid.uuid4())
+        receipt = request('POST', '/query/execute', {'request_id':probe_id, 'connection_id':ids['postgres'], 'sql':'SELECT pg_sleep(3)', 'timeout_ms':1000}, (400,), token_override=probe_token)
+        assert receipt['status']=='unknown'
+        assert request('GET', '/query/executions/'+probe_id, token_override=probe_token)['status']=='unknown'
+        after = request('GET', '/metrics/query')
+        assert after['counters']['timeouts_total']-before['counters']['timeouts_total']==1
+        assert after['counters']['canceled_total']==before['counters']['canceled_total']
+        assert after['executions']['total']-before['executions']['total']==1
+        passed('production execution timeout remains unknown and is distinguished from cancellation')
+        request('POST', '/auth/logout', token_override=probe_token)
+    finally:
+        request('DELETE', f"/users/{user['id']}")
+
+(out/f'{prefix}-checks.json').write_text(json.dumps({'scope':'sql-workbench-phase1','backend_environment':health['env'],'frontend_url':frontend,'checks':checks,'real_databases':list(ids),'page_errors':errors}, ensure_ascii=False, indent=2))
 print('Phase-one browser checks passed: '+str(len(checks)), flush=True)

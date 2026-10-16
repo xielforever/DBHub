@@ -108,3 +108,5 @@ dbhub/
 ## Cloud 完整后端
 
 使用 `./scripts/cloud/setup.sh` 安装、编译并执行真实 PostgreSQL/MySQL/Redis 集成测试，再用 `./scripts/cloud/start.sh` 启动。配置和服务命令见 [Cloud 开发环境](scripts/cloud/README.md)，实现与边界见 [补齐验收契约](docs/开发指南/云端后端补齐验收.md)。AI 服务可稍后配置，未配置时界面明确提示不可用。
+
+根 `docker-compose.yaml` 用于开发；生产使用独立的 `docker-compose.prod.yaml`，构建、隔离验收、备份与回滚步骤见 [部署运维指南](docs/部署运维/部署运维指南.md)。

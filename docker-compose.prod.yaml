@@ -1,0 +1,31 @@
+# 生产编排只运行已构建的镜像。PostgreSQL/Redis 由外部服务提供。
+services:
+  backend:
+    image: ${DBHUB_BACKEND_IMAGE:?必须指定已验证的后端镜像标签或摘要}
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    environment:
+      APP_ENV: production
+      PORT: "8080"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      GOMAXPROCS: ${GOMAXPROCS:-4}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?必须配置应用主密钥}
+      APP_ADMIN_USERNAME: ${APP_ADMIN_USERNAME:-admin}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?必须配置管理员密码}
+      DATABASE_URL: ${DATABASE_URL:?必须配置元数据库连接}
+      REDIS_URL: ${REDIS_URL:?必须配置认证会话服务}
+      META_DB_MAX_CONNS: ${META_DB_MAX_CONNS:-10}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      JWT_ACCESS_TTL_MINUTES: ${JWT_ACCESS_TTL_MINUTES:-15}
+      JWT_REFRESH_TTL_HOURS: ${JWT_REFRESH_TTL_HOURS:-168}
+      DBHUB_AI_BASE_URL: ${DBHUB_AI_BASE_URL:-https://api.openai.com/v1}
+      DBHUB_AI_MODEL: ${DBHUB_AI_MODEL:-gpt-4.1-mini}
+      DBHUB_AI_API_KEY: ${DBHUB_AI_API_KEY:-}
+    expose: ["8080"]
+  frontend:
+    image: ${DBHUB_FRONTEND_IMAGE:?必须指定已验证的前端镜像标签或摘要}
+    restart: unless-stopped
+    ports: ["${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_HTTP_PORT:-8088}:80"]
+    depends_on:
+      backend: {condition: service_healthy}

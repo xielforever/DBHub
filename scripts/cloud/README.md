@@ -34,3 +34,13 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 查询队列和活动目标事务属于单个后端进程，重启后活动事务由数据库连接关闭回滚；已经提交的自动提交写入不因此回滚。跨实例部署需要会话路由或共享调度器。SQL 执行编号与回执保存在 PostgreSQL，独立处理器使用同一元数据库时也能防止相同编号重复执行；该能力不提供跨实例并发总量限制。在线心跳和认证会话使用 Redis，业务表数据和任意 SQL 查询结果不进入 Redis 缓存。完整接口与支持边界见 [补齐验收契约](../../docs/开发指南/云端后端补齐验收.md) 和 [执行可靠性](../../docs/开发指南/SQL工作台执行可靠性.md)。
 
 可选浏览器验收：先启动服务，再运行 `./scripts/cloud/browser.sh`。浏览器依赖安装在临时容器中，截图和验收结果保存到私有状态目录 `browser-artifacts`，本轮文件以 `phase1-` 开头。检查真实 PostgreSQL/MySQL 查询、格式化、选中执行、单请求与真实取消、错误、截断、虚拟滚动和手机首屏；还验证刷新后恢复待确认编号、丢失写入响应后只查询回执而不重跑，并断言工作台不请求已暂缓的高级功能。脚本仅向本地 Cloud 开发数据库写入 `dbhub_cloud_demo` 验证表。
+
+生产构建验收使用独立项目，不复用开发项目的凭据、元数据库或 Redis。先构建 `dbhub-backend:phase1-release` 与 `dbhub-frontend:phase1-release`，再运行：
+
+```sh
+./scripts/cloud/release.sh up -d --wait --wait-timeout 180
+./scripts/cloud/release.sh run --rm --no-deps browser
+./scripts/cloud/release.sh stop
+```
+
+生产 Compose 为根目录 `docker-compose.prod.yaml`；Cloud 额外合并 `release.compose.yaml` 提供本地依赖。验收状态保存在 `/workspace/dbhub-release-check`，数据库临时文件保存在 `${DBHUB_BUILD_ROOT:-/tmp/dbhub-cloud-build}/release-data`，不能用作生产持久化路径。浏览器经 Nginx 访问真实 production 后端，额外覆盖角色权限、会话撤销、生产目标写入确认、62 秒长查询与超时原因指标。构建、后端替换核实、备份和回滚步骤见 [部署运维指南](../../docs/部署运维/部署运维指南.md)。
