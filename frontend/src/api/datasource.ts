@@ -76,6 +76,24 @@ export interface TestResult {
   type: string
   version: string
   elapsed_ms: number
+  compatibility?: VersionCompatibility
+}
+
+export interface VersionCompatibility {
+  engine: string
+  product: string
+  version: string
+  branch: string
+  status: 'verified' | 'branch_verified' | 'unverified' | 'unknown'
+  tested_version?: string
+  mode?: string
+  message: string
+}
+
+export interface TestedVersion {
+  engine: DbType
+  branch: string
+  tested_version: string
 }
 
 interface ListWrap<T> {
@@ -84,6 +102,9 @@ interface ListWrap<T> {
 }
 
 export const connectionApi = {
+  compatibility() {
+    return request.get<unknown, { items: TestedVersion[]; scope: string }>('/connections/compatibility', { silentError: true })
+  },
   list(params?: { type?: string; keyword?: string }) {
     return request.get<unknown, ListWrap<ConnectionItem>>('/connections', { params })
   },

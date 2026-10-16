@@ -25,6 +25,13 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 # 单实例执行容量基线：独立容器、随机测试对象，结束后清理
 ./scripts/cloud/benchmark.sh
 
+# 数据源版本矩阵：逐个临时数据库，真实操作与 HTTP 验证
+python3 scripts/cloud/compatibility.py
+# 可先单独验证一个版本；此报告不能单独改写完整支持清单
+python3 scripts/cloud/compatibility.py --engine mysql --branch 5.7
+# 完整矩阵遇到环境故障时，仅补跑失败项；后端实现必须未变化
+python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.json
+
 # 查看服务状态和日志；停止进程但保留数据库卷
 ./scripts/cloud/dev.sh ps
 ./scripts/cloud/dev.sh logs --tail 40 backend frontend
@@ -44,3 +51,9 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 ```
 
 生产 Compose 为根目录 `docker-compose.prod.yaml`；Cloud 额外合并 `release.compose.yaml` 提供本地依赖。验收状态保存在 `/workspace/dbhub-release-check`，数据库临时文件保存在 `${DBHUB_BUILD_ROOT:-/tmp/dbhub-cloud-build}/release-data`，不能用作生产持久化路径。浏览器经 Nginx 访问真实 production 后端，额外覆盖角色权限、会话撤销、生产目标写入确认、62 秒长查询与超时原因指标。构建、后端替换核实、备份和回滚步骤见 [部署运维指南](../../docs/部署运维/部署运维指南.md)。
+
+版本矩阵会使用当前开发后端容器执行 Go 竞态测试，基础 PostgreSQL/MySQL/Redis 必须已启动。目标版本逐个拉取、启动并清理，数据放在容器临时内存文件系统；默认删除本轮新拉取的镜像，保留运行前已有镜像，`--keep-images` 可保留本轮镜像。不要并行运行矩阵或重建后端；VFS 环境也应避免同时执行其他大量磁盘写入的构建。
+
+报告在私有 `compatibility-artifacts/<UTC时间>/matrix.json`，记录真实补丁号、镜像摘要、测试名称、跳过与清理状态，以及后端 Go 实现指纹。完整有效报告可通过 `python3 scripts/cloud/compatibility.py --record-from /私有报告路径/matrix.json` 更新内嵌版本记录；部分报告、失败或实现指纹变化时拒绝更新。恢复运行会记录原报告摘要和复用项来源，不会掩盖原运行的失败。`.github/workflows/datasource-compatibility.yml` 提供手动触发的完整 CI 验证，不上传凭据文件。具体范围见 [数据源版本兼容](../../docs/开发指南/数据源版本兼容.md)。
+
+版本提示的浏览器验收：`DBHUB_BROWSER_TEST_SCRIPT=/app/scripts/cloud/version_browser_test.py ./scripts/cloud/browser.sh`。验证真实数据库版本显示、修改连接后清除旧结果、过期响应处理及手机表单；MariaDB 警示使用界面契约样例，不代表真实产品兼容验证。

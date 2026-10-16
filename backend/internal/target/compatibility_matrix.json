@@ -1,0 +1,62 @@
+[
+  {
+    "engine": "mysql",
+    "branch": "5.7",
+    "tested_version": "5.7.44"
+  },
+  {
+    "engine": "mysql",
+    "branch": "8.0",
+    "tested_version": "8.0.46"
+  },
+  {
+    "engine": "mysql",
+    "branch": "8.4",
+    "tested_version": "8.4.11"
+  },
+  {
+    "engine": "postgres",
+    "branch": "14",
+    "tested_version": "14.24"
+  },
+  {
+    "engine": "postgres",
+    "branch": "15",
+    "tested_version": "15.19"
+  },
+  {
+    "engine": "postgres",
+    "branch": "16",
+    "tested_version": "16.15"
+  },
+  {
+    "engine": "postgres",
+    "branch": "17",
+    "tested_version": "17.11"
+  },
+  {
+    "engine": "postgres",
+    "branch": "18",
+    "tested_version": "18.6"
+  },
+  {
+    "engine": "redis",
+    "branch": "6.2",
+    "tested_version": "6.2.24"
+  },
+  {
+    "engine": "redis",
+    "branch": "7.2",
+    "tested_version": "7.2.16"
+  },
+  {
+    "engine": "redis",
+    "branch": "7.4",
+    "tested_version": "7.4.11"
+  },
+  {
+    "engine": "redis",
+    "branch": "8.0",
+    "tested_version": "8.0.6"
+  }
+]

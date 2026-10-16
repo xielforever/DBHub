@@ -3,7 +3,7 @@
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">数据源管理</h1>
-        <p class="text-sm text-white/45 mt-1">统一纳管 MySQL / PostgreSQL / Redis 连接，凭据全程 AES-256-GCM 加密存储，支持代理出网（占位）</p>
+        <p class="text-sm text-white/45 mt-1">统一纳管 MySQL / PostgreSQL / Redis 连接，凭据加密存储，测试连接可查看版本兼容情况。</p>
       </div>
       <button v-if="canWrite" class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
         <Plus class="w-4 h-4" />新建连接
@@ -70,6 +70,10 @@
             </span>
           </div>
 
+          <p v-if="connectionChecks[conn.id]" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(connectionChecks[conn.id]!)">
+            最近测试：{{ compatibilityText(connectionChecks[conn.id]!) }}
+          </p>
+
           <div class="flex items-center gap-2 pt-2 border-t border-white/10">
             <button class="ghost-button flex-1 text-xs py-2 flex items-center justify-center gap-1.5" @click="goQuery(conn)">
               <SquareTerminal class="w-3.5 h-3.5" />查询
@@ -77,6 +81,7 @@
             <button
               class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors"
               :aria-label="`测试连接 ${conn.name}`"
+              :disabled="!!testingSaved[conn.id]"
               title="测试连接"
               @click="testSaved(conn)"
             >
@@ -129,6 +134,7 @@
             <el-option label="Redis" value="redis" />
           </el-select>
         </el-form-item>
+        <p class="text-xs text-white/50 leading-relaxed" data-testid="version-support-hint">{{ versionHint }}</p>
 
         <p class="text-xs text-white/45 mb-3 mt-4">连接信息</p>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -180,6 +186,10 @@
           </el-select>
           <p class="text-[11px] text-white/30 mt-1">在代理管理创建代理后在此选用，连接测试和查询均使用该代理。</p>
         </el-form-item>
+        <p v-if="formTest" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(formTest)" data-testid="connection-version-result">
+          {{ compatibilityText(formTest) }}。{{ versionInfo(formTest).message }}
+          <span v-if="versionInfo(formTest).tested_version && versionInfo(formTest).status === 'branch_verified'">实测版本 {{ versionInfo(formTest).tested_version }}。</span>
+        </p>
       </el-form>
 
       <template #footer>
@@ -198,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -219,6 +229,9 @@ import {
   type ConnectionPayload,
   type DbType,
   type EnvKind,
+  type TestResult,
+  type TestedVersion,
+  type VersionCompatibility,
 } from '../../api/datasource'
 import { proxyApi, type ProxyItem } from '../../api/proxy'
 import { useUserStore } from '../../stores/user'
@@ -232,6 +245,27 @@ const typeFilter = ref('all')
 const connections = ref<ConnectionItem[]>([])
 const proxies = ref<ProxyItem[]>([])
 const connLoading = ref(false)
+const connectionChecks = ref<Record<number, TestResult>>({})
+const formTest = ref<TestResult | null>(null)
+const testedVersions = ref<TestedVersion[]>([])
+const testingSaved = ref<Record<number, boolean>>({})
+
+function versionInfo(result: TestResult): VersionCompatibility {
+  return result.compatibility ?? { engine: result.type, product: typeMeta[result.type as DbType]?.label || '数据库', version: '', branch: '', status: 'unknown', message: '当前服务未返回版本验证信息，兼容性尚未确认。' }
+}
+function compatibilityText(result: TestResult) {
+  const info = versionInfo(result)
+  const label = { verified: '版本已验证', branch_verified: '同分支已验证，当前补丁待验证', unverified: '兼容性未验证', unknown: '版本待确认' }[info.status]
+  return `${info.product || result.type} ${info.version || '版本未知'} · ${label}`
+}
+function compatibilityClass(result: TestResult) {
+  return versionInfo(result).status === 'verified' ? 'text-emerald-300' : 'text-amber-200'
+}
+function showTestMessage(result: TestResult) {
+  const text = `连接成功：${compatibilityText(result)}（${result.elapsed_ms} ms）`
+  if (versionInfo(result).status === 'verified') ElMessage.success(text)
+  else ElMessage.warning(text)
+}
 
 const typeMeta: Record<DbType, { label: string; color: string; tint: string; icon: unknown }> = {
   mysql: { label: 'MySQL', color: '#60a5fa', tint: 'rgba(59,130,246,0.16)', icon: Database },
@@ -253,6 +287,7 @@ async function fetchConnections() {
       keyword: keyword.value,
     })
     connections.value = res.items
+    connectionChecks.value = {}
   } catch {
     /* 拦截器已统一提示 */
   } finally {
@@ -270,6 +305,7 @@ async function fetchProxies() {
 onMounted(() => {
   fetchConnections()
   fetchProxies()
+  void connectionApi.compatibility().then(result => { testedVersions.value = result.items }).catch(() => { /* 拦截器已提示 */ })
 })
 
 function goProxies() {
@@ -300,15 +336,23 @@ const connDialog = ref(false)
 const connForm = reactive<ConnForm>(emptyConnForm())
 const saving = ref(false)
 const testing = ref(false)
+const versionHint = computed(() => {
+  const branches = testedVersions.value.filter(item => item.engine === connForm.type && item.tested_version).map(item => item.branch)
+  return branches.length ? `已验证分支：${branches.join(' / ')}。测试连接可确认当前服务端版本。` : '测试连接后显示版本识别结果；其他版本的兼容性需要单独确认。'
+})
+// 编辑目标或凭据后不保留旧结果，较早发起的响应也不能覆盖当前表单。
+watch(() => JSON.stringify(payloadOf()), () => { formTest.value = null })
 
 function onTypeChange(type: DbType) {
   connForm.port = { mysql: 3306, postgres: 5432, redis: 6379 }[type]
 }
 function openCreate() {
+  formTest.value = null
   Object.assign(connForm, emptyConnForm())
   connDialog.value = true
 }
 function openEdit(c: ConnectionItem) {
+  formTest.value = null
   Object.assign(connForm, {
     id: c.id,
     name: c.name,
@@ -370,14 +414,19 @@ async function saveConnection() {
 }
 
 async function testUnsaved() {
+  if (testing.value) return
   if (!connForm.host.trim()) {
     ElMessage.warning('请先填写主机与端口')
     return
   }
   testing.value = true
+  formTest.value = null
+  const snapshot = JSON.stringify(payloadOf())
   try {
     const res = await connectionApi.test(payloadOf())
-    ElMessage.success(`连接成功：${res.version || res.type}（${res.elapsed_ms} ms）`)
+    if (snapshot !== JSON.stringify(payloadOf())) return
+    formTest.value = res
+    showTestMessage(res)
   } catch {
     /* 拦截器已提示 */
   } finally {
@@ -386,12 +435,20 @@ async function testUnsaved() {
 }
 
 async function testSaved(c: ConnectionItem) {
+  if (testingSaved.value[c.id]) return
+  testingSaved.value[c.id] = true
+  delete connectionChecks.value[c.id]
   try {
     ElMessage.info({ message: `正在测试 ${c.name} …`, duration: 1200 })
     const res = await connectionApi.testSaved(c.id)
-    ElMessage.success(`连接成功：${res.version || res.type}（${res.elapsed_ms} ms）`)
+    const current = connections.value.find(item => item.id === c.id)
+    if (!current || current.updated_at !== c.updated_at) return
+    connectionChecks.value[c.id] = res
+    showTestMessage(res)
   } catch {
     /* 拦截器已提示 */
+  } finally {
+    delete testingSaved.value[c.id]
   }
 }
 

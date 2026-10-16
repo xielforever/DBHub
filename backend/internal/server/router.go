@@ -107,6 +107,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log, deps.Proxies)
 		mux.Handle("GET /api/v1/connections",
 			middleware.Chain(http.HandlerFunc(dsH.List), requireAuth))
+		mux.Handle("GET /api/v1/connections/compatibility",
+			middleware.Chain(http.HandlerFunc(dsH.CompatibilityMatrix), requireAuth))
 		mux.Handle("POST /api/v1/connections",
 			middleware.Chain(http.HandlerFunc(dsH.Create), requireAuth, canWrite, auditMW))
 		mux.Handle("POST /api/v1/connections/test",

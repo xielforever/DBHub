@@ -23,7 +23,8 @@ func infoMap(info string) map[string]string {
 	return out
 }
 func RedisOverviewInfo(ctx context.Context, client *redis.Client) (*RedisInfo, error) {
-	text, e := client.Info(ctx, "server", "clients", "memory", "stats", "keyspace").Result()
+	// Redis 6.2 不支持多 section 参数；默认 INFO 已包含本页需要的五段信息。
+	text, e := client.Info(ctx).Result()
 	if e != nil {
 		return nil, fmt.Errorf("读取 Redis INFO 失败")
 	}

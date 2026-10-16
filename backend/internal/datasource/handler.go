@@ -350,11 +350,17 @@ func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Conne
 		return
 	}
 	httpx.OK(w, map[string]any{
-		"ok":         true,
-		"type":       info.Type,
-		"version":    info.Version,
-		"elapsed_ms": duration,
+		"ok":            true,
+		"type":          info.Type,
+		"version":       info.Version,
+		"compatibility": info.Compatibility,
+		"elapsed_ms":    duration,
 	})
+}
+
+// CompatibilityMatrix 只提供已验证的版本记录，不连接目标数据库。
+func (h *Handler) CompatibilityMatrix(w http.ResponseWriter, r *http.Request) {
+	httpx.OK(w, map[string]any{"items": target.TestedVersions(), "scope": "基础 SQL、元数据和 Redis 单节点键值操作；不保证所有新语法或兼容产品"})
 }
 
 func (h *Handler) checkTunnelOwner(ctx context.Context, tunnelID int64, c *auth.Claims) error {

@@ -135,8 +135,9 @@ type ExecResult struct {
 }
 
 type TestInfo struct {
-	Type    string `json:"type"`
-	Version string `json:"version"`
+	Type          string        `json:"type"`
+	Version       string        `json:"version"`
+	Compatibility Compatibility `json:"compatibility"`
 }
 
 type RedisInfo struct {

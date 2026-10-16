@@ -84,6 +84,21 @@ services:
       - ${DBHUB_STATE_DIR}:/runtime
       - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
     ports: ["127.0.0.1:5173:5173"]
+  browser:
+    profiles: ["checks"]
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    command: ["sh", "/app/scripts/cloud/browser-runtime.sh"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+      DBHUB_BROWSER_TEST_SCRIPT: ${DBHUB_BROWSER_TEST_SCRIPT:-/app/scripts/cloud/browser_test.py}
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app:ro
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
 volumes:
   postgres-data:
   mysql-data:

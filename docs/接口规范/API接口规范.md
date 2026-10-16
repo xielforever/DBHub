@@ -188,9 +188,42 @@ curl http://localhost:8080/api/health
 
 **Response data:**
 ```json
-{ "ok": true, "type": "postgres", "version": "PostgreSQL 16.4 ...", "elapsed_ms": 48 }
+{
+  "ok": true,
+  "type": "postgres",
+  "version": "PostgreSQL 16.15 ...",
+  "elapsed_ms": 48,
+  "compatibility": {
+    "engine": "postgres",
+    "product": "PostgreSQL",
+    "version": "16.15",
+    "branch": "16",
+    "status": "verified",
+    "tested_version": "16.15",
+    "message": "该版本已通过基础兼容验证。"
+  }
+}
 ```
 失败返回 `40000`，消息为清洗后的驱动错误（不含口令片段）。
+
+`version` 保留原有响应字段；`compatibility.version` 为规范化版本。`ok` 表示连接成功，兼容结论另见 `status`：`verified` 为实测补丁；`branch_verified` 为同分支其他补丁；`unverified` 为尚未验证的版本、兼容产品或 Redis 部署模式；`unknown` 为版本无法可靠识别。Redis 账号可以连接但无权读取 INFO 时返回成功与 `unknown`，不伪造验证结论。Redis 的 `compatibility.mode` 表示服务端报告的运行模式。具体边界见[数据源版本兼容](../开发指南/数据源版本兼容.md)。
+
+### 4.6 版本验证范围
+
+**GET** `/api/v1/connections/compatibility`，所有已登录角色可读，未登录返回 `401`。本接口只读取内嵌验证记录，不连接目标数据库。
+
+**Response data（节选）:**
+```json
+{
+  "items": [
+    { "engine": "mysql", "branch": "5.7", "tested_version": "5.7.44" },
+    { "engine": "postgres", "branch": "16", "tested_version": "16.15" }
+  ],
+  "scope": "基础 SQL、元数据和 Redis 单节点键值操作；不保证所有新语法或兼容产品"
+}
+```
+
+完整记录含 12 个分支；只有非空 `tested_version` 才表示已有实测。连接列表本身不自动探测版本，用户执行测试连接后在当前页面显示结果。
 
 ---
 

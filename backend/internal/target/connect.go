@@ -157,25 +157,36 @@ func Test(ctx context.Context, conn *db.Connection, password string, tunnel *db.
 		defer r.Close()
 		info, e := r.Client.Info(ctx, "server").Result()
 		if e != nil {
+			if strings.HasPrefix(e.Error(), "NOPERM ") {
+				return &TestInfo{Type: "redis", Compatibility: Compatibility{Engine: "redis", Product: "Redis", Status: "unknown", Message: "连接已建立，但账号无权读取版本信息；兼容性尚未确认。"}}, nil
+			}
 			return nil, fmt.Errorf("读取 Redis 版本失败")
 		}
-		return &TestInfo{Type: "redis", Version: infoMap(info)["redis_version"]}, nil
+		server := infoMap(info)
+		version, product := server["redis_version"], ""
+		for _, fork := range []string{"valkey", "keydb", "dragonfly"} {
+			if server[fork+"_version"] != "" {
+				version, product = server[fork+"_version"], fork
+				break
+			}
+		}
+		return &TestInfo{Type: "redis", Version: server["redis_version"], Compatibility: classifyCompatibility("redis", version, product, server["redis_mode"])}, nil
 	}
 	r, e := OpenRelational(ctx, conn, password, tunnel)
 	if e != nil {
 		return nil, e
 	}
 	defer r.Close()
-	var version string
+	var version, comment string
 	if r.pgConn != nil {
 		e = r.pgConn.QueryRow(ctx, "SELECT version()").Scan(&version)
 	} else {
-		e = r.sqlConn.QueryRowContext(ctx, "SELECT VERSION()").Scan(&version)
+		e = r.sqlConn.QueryRowContext(ctx, "SELECT VERSION(), @@version_comment").Scan(&version, &comment)
 	}
 	if e != nil {
 		return nil, fmt.Errorf("读取数据库版本失败")
 	}
-	return &TestInfo{Type: conn.Type, Version: version}, nil
+	return &TestInfo{Type: conn.Type, Version: version, Compatibility: classifyCompatibility(conn.Type, version, comment, "")}, nil
 }
 func firstNonEmpty(a, b string) string {
 	if a != "" {

@@ -1,0 +1,38 @@
+name: 数据源版本兼容
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DBHUB_STATE_DIR: ${{ runner.temp }}/dbhub-state
+      DBHUB_BUILD_ROOT: ${{ runner.temp }}/dbhub-build
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: 启动真实基础服务和后端
+        shell: bash
+        run: |
+          ./scripts/cloud/dev.sh up -d --wait --wait-timeout 180 postgres mysql redis
+          ./scripts/cloud/dev.sh up -d backend
+          curl --fail --silent --retry 180 --retry-connrefused --retry-all-errors --retry-delay 2 --retry-max-time 360 --max-time 3 http://127.0.0.1:8080/api/health
+      - name: 顺序验证完整版本矩阵
+        run: python3 scripts/cloud/compatibility.py
+      - name: 保存版本、镜像摘要和测试结论
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: datasource-compatibility
+          path: ${{ runner.temp }}/dbhub-state/compatibility-artifacts/**/*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: 清理本次运行服务
+        if: always()
+        run: ./scripts/cloud/dev.sh down

@@ -6,6 +6,6 @@ if docker container inspect dbhub-browser-check >/dev/null 2>&1; then
  docker rm dbhub-browser-check >/dev/null
 fi
 dbhubbrowser_status=0
-scripts/cloud/dev.sh run --name dbhub-browser-check --no-deps -u 0 backend sh /app/scripts/cloud/browser-runtime.sh || dbhubbrowser_status=$?
+scripts/cloud/dev.sh run --name dbhub-browser-check --no-deps browser || dbhubbrowser_status=$?
 docker rm -f dbhub-browser-check >/dev/null 2>&1 || true
 exit "$dbhubbrowser_status"
