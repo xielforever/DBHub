@@ -19,6 +19,9 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 ./scripts/cloud/dev.sh run --rm --no-deps backend go test -race -p=4 ./...
 ./scripts/cloud/dev.sh run --rm --no-deps backend go vet -p=4 ./...
 
+# 第一阶段工作台的执行状态回归测试与前端构建
+./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm run test:query; npm run build'
+
 # 查看服务状态和日志；停止进程但保留数据库卷
 ./scripts/cloud/dev.sh ps
 ./scripts/cloud/dev.sh logs --tail 40 backend frontend
@@ -27,4 +30,4 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 
 查询队列和活动目标事务属于单个后端进程，重启后事务由数据库连接关闭回滚；跨实例部署需要会话路由或共享调度器。在线心跳和认证会话使用 Redis，SQL 片段、策略、分享、导出申请与工单使用 PostgreSQL。完整接口与支持边界见 [补齐验收契约](../../docs/开发指南/云端后端补齐验收.md)。
 
-可选浏览器验收：先启动服务，再运行 `./scripts/cloud/browser.sh`。浏览器依赖安装在临时容器中，截图和验收结果保存到私有状态目录 `browser-artifacts`。脚本仅向本地 Cloud 开发数据库写入 `dbhub_cloud_demo` 验证表。
+可选浏览器验收：先启动服务，再运行 `./scripts/cloud/browser.sh`。浏览器依赖安装在临时容器中，截图和验收结果保存到私有状态目录 `browser-artifacts`，本轮文件以 `phase1-` 开头。检查真实 PostgreSQL/MySQL 查询、格式化、选中执行、单请求与真实取消、错误、截断、虚拟滚动和手机首屏，并断言工作台不请求已暂缓的高级功能。脚本仅向本地 Cloud 开发数据库写入 `dbhub_cloud_demo` 验证表。

@@ -12,7 +12,7 @@ import (
 	"github.com/user/dbhub/internal/target"
 )
 
-// Execute dispatches to an existing owned transaction or a new real connection.
+// Execute uses an independent connection unless the request explicitly names a transaction.
 func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	c := claimsOf(r)
 	var in executeRequest
@@ -70,10 +70,19 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		return target.ExecuteWithOptions(ctx, handle, rewritten, c.Role == "readonly", opt)
 	}
 	var result *target.ExecResult
-	if tx := h.txs.get(c.Subject, conn.ID); tx != nil {
+	if in.TransactionID == "" {
+		var handle *target.RelDB
+		handle, execErr = target.OpenRelational(ctx, conn, password, tunnel)
+		if execErr == nil {
+			defer handle.Close()
+			result, execErr = run(handle)
+		}
+	} else if tx := h.txs.get(c.Subject, conn.ID); tx == nil || tx.ID != in.TransactionID {
+		execErr = fmt.Errorf("事务不存在或已过期")
+	} else {
 		tx.mu.Lock()
-		if in.TransactionID != "" && in.TransactionID != tx.ID {
-			execErr = fmt.Errorf("事务 ID 不匹配")
+		if h.txs.get(c.Subject, conn.ID) != tx {
+			execErr = fmt.Errorf("事务不存在或已过期")
 		} else if in.Database != "" && tx.Database != in.Database {
 			execErr = fmt.Errorf("事务内不能切换数据库")
 		} else if time.Since(tx.LastUsed) > 5*time.Minute {
@@ -88,15 +97,6 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			tx.close()
 		}
 		tx.mu.Unlock()
-	} else if in.TransactionID != "" {
-		execErr = fmt.Errorf("事务不存在或已过期")
-	} else {
-		var handle *target.RelDB
-		handle, execErr = target.OpenRelational(ctx, conn, password, tunnel)
-		if execErr == nil {
-			defer handle.Close()
-			result, execErr = run(handle)
-		}
 	}
 	if execErr != nil {
 		h.recordHistory(context.WithoutCancel(r.Context()), c, in, conn, 0, nil, execErr)

@@ -90,9 +90,10 @@ export const workbenchApi = {
       timeout:(options?.timeout_ms || 30000)+60000,
     } as any)
   },
-  databases(connectionId: number) {
+  databases(connectionId: number, signal?: AbortSignal) {
     return request.get<unknown, { items: { name: string }[] }>('/metadata/databases', {
       params: { connection_id: connectionId },
+      signal,
     })
   },
   schemas(connectionId: number, database?: string) {

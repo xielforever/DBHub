@@ -190,7 +190,15 @@ func TestRealHTTPBackend(t *testing.T) {
 		a.exec(a.readonly, "WITH x AS (DELETE FROM "+a.table+" RETURNING *) SELECT * FROM x", 400)
 		tx := a.call("POST", "/query/transaction/begin", a.admin, map[string]any{"connection_id": a.connID}, 200)
 		id := tx["transaction_id"]
-		a.exec(a.admin, "INSERT INTO "+a.table+" VALUES(3,1,'c@example.com','three')", 200)
+		a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": a.connID, "transaction_id": id, "sql": "INSERT INTO " + a.table + " VALUES(3,1,'c@example.com','three')"}, 200)
+		if len(a.exec(a.admin, "SELECT * FROM "+a.table, 200)["rows"].([]any)) != 2 {
+			t.Fatal("ordinary query inherited the user's active transaction")
+		}
+		a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": a.connID, "transaction_id": "invalid", "sql": "SELECT 1"}, 400)
+		inside := a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": a.connID, "transaction_id": id, "sql": "SELECT * FROM " + a.table}, 200)
+		if len(inside["rows"].([]any)) != 3 {
+			t.Fatal("explicit transaction was not preserved after an invalid reference")
+		}
 		if len(a.exec(a.developer, "SELECT * FROM "+a.table, 200)["rows"].([]any)) != 2 {
 			t.Fatal("uncommitted write leaked")
 		}
@@ -219,10 +227,16 @@ func TestRealHTTPBackend(t *testing.T) {
 		run := func(sql string, token string, want int) map[string]any {
 			return a.call("POST", "/query/execute", token, map[string]any{"connection_id": conn.ID, "sql": sql}, want)
 		}
+		runTx := func(sql string, id any) map[string]any {
+			return a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": conn.ID, "transaction_id": id, "sql": sql}, 200)
+		}
 		run("CREATE TABLE "+a.table+" (id INT PRIMARY KEY)", a.admin, 200)
 		defer run("DROP TABLE "+a.table, a.admin, 200)
 		begin := a.call("POST", "/query/transaction/begin", a.admin, map[string]any{"connection_id": conn.ID}, 200)
-		run("INSERT INTO "+a.table+" VALUES(1)", a.admin, 200)
+		runTx("INSERT INTO "+a.table+" VALUES(1)", begin["transaction_id"])
+		if len(run("SELECT * FROM "+a.table, a.admin, 200)["rows"].([]any)) != 0 {
+			t.Fatal("ordinary MySQL query inherited the user's active transaction")
+		}
 		if len(run("SELECT * FROM "+a.table, a.developer, 200)["rows"].([]any)) != 0 {
 			t.Fatal("uncommitted MySQL transaction leaked")
 		}
@@ -231,7 +245,7 @@ func TestRealHTTPBackend(t *testing.T) {
 			t.Fatal("MySQL commit did not persist")
 		}
 		begin = a.call("POST", "/query/transaction/begin", a.admin, map[string]any{"connection_id": conn.ID}, 200)
-		run("INSERT INTO "+a.table+" VALUES(2)", a.admin, 200)
+		runTx("INSERT INTO "+a.table+" VALUES(2)", begin["transaction_id"])
 		a.call("POST", "/query/transaction/rollback", a.admin, map[string]any{"connection_id": conn.ID, "transaction_id": begin["transaction_id"]}, 200)
 		if len(run("SELECT * FROM "+a.table, a.admin, 200)["rows"].([]any)) != 1 {
 			t.Fatal("MySQL rollback failed")
