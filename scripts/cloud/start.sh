@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+scripts/cloud/dev.sh up -d --wait --wait-timeout 240 jdbc
 scripts/cloud/dev.sh up -d backend frontend
 python3 - <<'PY'
 import time,urllib.request

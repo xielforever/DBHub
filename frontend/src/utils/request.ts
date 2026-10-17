@@ -128,7 +128,7 @@ request.interceptors.response.use(
     } else {
       const message = error.response?.data?.message
       if (original?.silentError) {
-        // SQL 工作台自行解释执行结果，通信异常不能提示直接重试写操作。
+        // 数据工作台自行解释执行结果，通信异常不能提示直接重试写操作。
       } else if (message) {
         ElMessage.error(message)
       } else if (error.code === 'ECONNABORTED') {

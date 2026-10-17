@@ -11,6 +11,7 @@ import (
 	"github.com/user/dbhub/internal/assetapi"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/config"
+	"github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/datasource"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/health"
@@ -66,6 +67,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	requireAuth := middleware.RequireAuth(cfg.SecretKey, users, sessions)
 
 	if deps != nil && deps.Conns != nil {
+		drivers := connectorruntime.NewConfigured(cfg.JDBCURL, cfg.JDBCToken)
 		auditMW := middleware.Audit(deps.Audit, log)
 		canWrite := middleware.RequireRoles("admin", "developer")
 		requireAdmin := middleware.RequireRoles("admin")
@@ -104,7 +106,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			middleware.Chain(http.HandlerFunc(auditH.AuditLogs), requireAuth, requireAdmin))
 
 		// ---------- 数据源 ----------
-		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log, deps.Proxies)
+		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log, deps.Proxies, drivers)
 		mux.Handle("GET /api/v1/connections",
 			middleware.Chain(http.HandlerFunc(dsH.List), requireAuth))
 		mux.Handle("GET /api/v1/connections/compatibility",
@@ -121,6 +123,18 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			middleware.Chain(http.HandlerFunc(dsH.Delete), requireAuth, canWrite, auditMW))
 		mux.Handle("POST /api/v1/connections/{id}/test",
 			middleware.Chain(http.HandlerFunc(dsH.TestPersisted), requireAuth, auditMW))
+
+		mux.Handle("GET /api/v1/connector-drivers/available", middleware.Chain(http.HandlerFunc(dsH.AvailableDrivers), requireAuth, requireAdmin))
+		mux.Handle("GET /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.Drivers), requireAuth))
+		mux.Handle("POST /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.RegisterDriver), requireAuth, requireAdmin, auditMW))
+		mux.Handle("GET /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.Templates), requireAuth))
+		mux.Handle("POST /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, requireAdmin, auditMW))
+		mux.Handle("PUT /api/v1/datasource-templates/{id}", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, requireAdmin, auditMW))
+		mux.Handle("PATCH /api/v1/connector-drivers/{id}/status", middleware.Chain(dsH.SetCatalogStatus("driver"), requireAuth, requireAdmin, auditMW))
+		mux.Handle("PATCH /api/v1/datasource-templates/{id}/status", middleware.Chain(dsH.SetCatalogStatus("template"), requireAuth, requireAdmin, auditMW))
+		mux.Handle("DELETE /api/v1/connector-drivers/{id}", middleware.Chain(dsH.DeleteCatalog("driver"), requireAuth, requireAdmin, auditMW))
+		mux.Handle("DELETE /api/v1/datasource-templates/{id}", middleware.Chain(dsH.DeleteCatalog("template"), requireAuth, requireAdmin, auditMW))
+		mux.Handle("GET /api/v1/connections/{id}/capabilities", middleware.Chain(http.HandlerFunc(dsH.Capabilities), requireAuth))
 
 		// SSH 隧道（已废弃，保留兼容，M5 迁移至代理）
 		mux.Handle("GET /api/v1/ssh-tunnels",
@@ -151,7 +165,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 
 		// ---------- 工单中心（Step26 落库） ----------
 		if deps.Tickets != nil {
-			tH := ticketapi.NewHandler(deps.Tickets, log, deps.Conns, deps.Tunnels, deps.History)
+			tH := ticketapi.NewHandler(deps.Tickets, log, deps.Conns, deps.Tunnels, deps.History, drivers)
 			mux.Handle("POST /api/v1/tickets",
 				middleware.Chain(http.HandlerFunc(tH.Create), requireAuth, canWrite, auditMW))
 			mux.Handle("GET /api/v1/tickets",
@@ -174,7 +188,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("PUT /api/v1/snippets/{id}", middleware.Chain(http.HandlerFunc(snippetH.Update), requireAuth, auditMW))
 		mux.Handle("DELETE /api/v1/snippets/{id}", middleware.Chain(http.HandlerFunc(snippetH.Delete), requireAuth, auditMW))
 		// ---------- SQL 工作台 ----------
-		qH := queryapi.NewHandler(deps.Conns, deps.Tunnels, deps.History, log, deps.Controls)
+		qH := queryapi.NewHandler(deps.Conns, deps.Tunnels, deps.History, log, deps.Controls, drivers)
 		mux.Handle("GET /api/v1/metrics/query", middleware.Chain(http.HandlerFunc(qH.QueryMetrics), requireAuth, requireAdmin))
 		aiH := aiapi.New(cfg.AIBaseURL, cfg.AIKey, cfg.AIModel)
 		mux.Handle("GET /api/v1/ai/status", middleware.Chain(http.HandlerFunc(aiH.Status), requireAuth))
@@ -245,7 +259,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		// ---------- 数据资产（字典快照 / 目录 / 标注 / 收藏 / 搜索） ----------
 		if deps.Meta != nil {
 			aH := assetapi.NewHandler(deps.Conns, deps.Tunnels, deps.Meta,
-				deps.UserRepo, deps.History, log)
+				deps.UserRepo, deps.History, log, drivers)
 			mux.Handle("POST /api/v1/assets/sync",
 				middleware.Chain(http.HandlerFunc(aH.Sync), requireAuth, canWrite, auditMW))
 			mux.Handle("GET /api/v1/assets/search",

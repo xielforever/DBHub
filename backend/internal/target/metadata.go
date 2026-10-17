@@ -191,6 +191,25 @@ func IntrospectSchema(ctx context.Context, r *RelDB, database, schema string) ([
 	return out, nil
 }
 
+// DescribeTable reads exactly one table without scanning every table in a schema.
+func DescribeTable(ctx context.Context, r *RelDB, database, schema, name, kind string) (TableMeta, error) {
+	m := TableMeta{Name: name, Schema: firstNonEmpty(schema, "public"), Type: kind, Indexes: []IndexMeta{}, Keys: []KeyMeta{}}
+	if r.Conn.Type == "mysql" {
+		m.Schema = firstNonEmpty(database, r.Conn.Database)
+	}
+	var err error
+	m.Columns, err = columnMetadata(ctx, r, database, schema, name)
+	if err != nil {
+		return m, err
+	}
+	if r.Conn.Type == "postgres" {
+		err = pgDetails(ctx, r, &m)
+	} else {
+		err = mysqlDetails(ctx, r, &m)
+	}
+	return m, err
+}
+
 func pgDetails(ctx context.Context, r *RelDB, m *TableMeta) error {
 	_, rows, e := rawQuery(ctx, r, `SELECT GREATEST(c.reltuples,0)::bigint,pg_total_relation_size(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname=$2`, m.Schema, m.Name)
 	if e != nil {

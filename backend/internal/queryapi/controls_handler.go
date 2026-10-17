@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/sqlparse"
-	"github.com/user/dbhub/internal/target"
 )
 
 func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
@@ -67,10 +67,10 @@ func (h *Handler) SavePolicy(w http.ResponseWriter, r *http.Request) {
 	if p.Database == "" {
 		p.Database = conn.Database
 	}
-	if conn.Type == "mysql" {
+	if conn.SQLDialect() == "mysql" {
 		p.Schema = ""
 	}
-	if p.Schema == "" && conn.Type == "postgres" {
+	if p.Schema == "" && conn.SQLDialect() == "postgres" {
 		p.Schema = "public"
 	}
 	if p.Table == "" || (p.Role != "developer" && p.Role != "readonly") || conn.Type == "redis" || len(p.Columns) > 500 || len(p.Conditions) > 20 {
@@ -194,7 +194,7 @@ func (h *Handler) CreateShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	query, args, e := sqlparse.BindNamed(in.SQL, conn.Type, in.Params)
+	query, args, e := sqlparse.BindNamed(in.SQL, conn.SQLDialect(), in.Params)
 	if e != nil {
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return

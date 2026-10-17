@@ -230,7 +230,7 @@ with sync_playwright() as p:
     assert actual['rows'] == [['Cloud beta-receipt']]
     passed('lost committed-write response is recovered from a receipt without repeating the write')
 
-    page.get_by_role('combobox', name='选择连接').focus()
+    page.get_by_role('combobox', name='选择数据源').focus()
     page.keyboard.press('ArrowDown')
     page.get_by_role('option').filter(has_text='Cloud MySQL').click()
     expect(page.get_by_role('button', name='运行', exact=True)).to_be_enabled()

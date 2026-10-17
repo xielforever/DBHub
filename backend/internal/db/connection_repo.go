@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/user/dbhub/internal/connector"
 	"github.com/user/dbhub/pkg/crypto"
 )
 
@@ -36,7 +37,11 @@ type Connection struct {
 	UpdatedAt         time.Time        `json:"updated_at"`
 	LastCheck         *ConnectionCheck `json:"last_check,omitempty"`
 
-	HasPassword bool `json:"has_password"`
+	HasPassword        bool                   `json:"has_password"`
+	TemplateRevisionID *int64                 `json:"template_revision_id,omitempty"`
+	Parameters         map[string]string      `json:"parameters,omitempty"`
+	Template           *DatasourceTemplate    `json:"template,omitempty"`
+	Capabilities       connector.Capabilities `json:"capabilities"`
 
 	// 关联隧道摘要（列表联表带）
 	TunnelName string `json:"tunnel_name,omitempty"`
@@ -70,14 +75,15 @@ const connSelectCols = `
 	COALESCE(c.environment, 'dev'),
 	c.created_at, c.updated_at, COALESCE(t.name, ''), c.proxy_id,
 	COALESCE((SELECT p.name FROM sys_proxies p WHERE p.id=c.proxy_id),''),
-	(SELECT cc.result FROM sys_connection_checks cc WHERE cc.connection_id=c.id AND cc.config_updated_at=c.updated_at)`
+	(SELECT cc.result FROM sys_connection_checks cc WHERE cc.connection_id=c.id AND cc.config_updated_at=c.updated_at),c.template_revision_id,c.parameters,
+ (SELECT to_jsonb(dt)||jsonb_build_object('driver',to_jsonb(jd)) FROM sys_datasource_templates dt JOIN sys_jdbc_drivers jd ON jd.id=dt.driver_id WHERE dt.id=c.template_revision_id)`
 
 func scanConnection(row pgx.Row, extra ...any) (*Connection, error) {
 	c := &Connection{}
-	var checkJSON []byte
+	var checkJSON, paramsJSON, templateJSON []byte
 	dest := []any{&c.ID, &c.UserID, &c.SSHTunnelID, &c.Name, &c.Type, &c.Host, &c.Port,
 		&c.Database, &c.Username, &c.HasPassword, &c.SSLMode, &c.ConnectionTimeout,
-		&c.ColorLabel, &c.Environment, &c.CreatedAt, &c.UpdatedAt, &c.TunnelName, &c.ProxyID, &c.ProxyName, &checkJSON}
+		&c.ColorLabel, &c.Environment, &c.CreatedAt, &c.UpdatedAt, &c.TunnelName, &c.ProxyID, &c.ProxyName, &checkJSON, &c.TemplateRevisionID, &paramsJSON, &templateJSON}
 	err := row.Scan(append(dest, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -90,6 +96,17 @@ func scanConnection(row pgx.Row, extra ...any) (*Connection, error) {
 			return nil, err
 		}
 	}
+	if len(paramsJSON) > 0 {
+		if err := json.Unmarshal(paramsJSON, &c.Parameters); err != nil {
+			return nil, err
+		}
+	}
+	if len(templateJSON) > 0 {
+		if err := json.Unmarshal(templateJSON, &c.Template); err != nil {
+			return nil, err
+		}
+	}
+	c.Capabilities = c.SupportedCapabilities()
 	return c, nil
 }
 
@@ -168,13 +185,13 @@ func (r *ConnectionRepository) Create(ctx context.Context, c *Connection) error 
 	return r.pool.QueryRow(ctx, `
 		INSERT INTO sys_connections
 			(user_id, ssh_tunnel_id, name, type, host, port, database, username,
-			 password, ssl_mode, connection_timeout, color_label, environment, proxy_id)
+			 password, ssl_mode, connection_timeout, color_label, environment, proxy_id,template_revision_id,parameters)
 		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),
-		        NULLIF($9,''),$10,$11,NULLIF($12,''),$13,$14)
+		        NULLIF($9,''),$10,$11,NULLIF($12,''),$13,$14,$15,$16::jsonb)
 		RETURNING id, created_at, updated_at`,
 		c.UserID, c.SSHTunnelID, c.Name, c.Type, c.Host, c.Port, c.Database,
 		c.Username, enc, c.SSLMode, c.ConnectionTimeout, c.ColorLabel,
-		defaultEnv(c.Environment), c.ProxyID,
+		defaultEnv(c.Environment), c.ProxyID, c.TemplateRevisionID, mustJSONParameters(c.Parameters),
 	).Scan(&c.ID, &c.CreatedAt, &c.UpdatedAt)
 }
 
@@ -201,10 +218,10 @@ func (r *ConnectionRepository) Update(ctx context.Context, c *Connection) error 
 			ssh_tunnel_id = $2, name = $3, type = $4, host = $5, port = $6,
 			database = NULLIF($7,''), username = NULLIF($8,''),
 			ssl_mode = $9, connection_timeout = $10, color_label = NULLIF($11,''),
-			environment = $12, proxy_id = $13
+			environment = $12, proxy_id = $13,template_revision_id=$14,parameters=$15::jsonb
 		WHERE id = $1`,
 		c.ID, c.SSHTunnelID, c.Name, c.Type, c.Host, c.Port, c.Database,
-		c.Username, c.SSLMode, c.ConnectionTimeout, c.ColorLabel, defaultEnv(c.Environment), c.ProxyID)
+		c.Username, c.SSLMode, c.ConnectionTimeout, c.ColorLabel, defaultEnv(c.Environment), c.ProxyID, c.TemplateRevisionID, mustJSONParameters(c.Parameters))
 	if err != nil {
 		return fmt.Errorf("更新连接失败: %w", err)
 	}
@@ -247,4 +264,42 @@ func (r *ConnectionRepository) Count(ctx context.Context) (total int64, byType m
 	}
 	err = rows.Err()
 	return
+}
+
+// SQLDialect is independent of the connector transport. Unknown products fail closed.
+func (c *Connection) SQLDialect() string {
+	if c.Type == "mysql" || c.Type == "postgres" {
+		return c.Type
+	}
+	if c.Type == "jdbc" && c.Template != nil {
+		return c.Template.Dialect
+	}
+	return ""
+}
+func (c *Connection) SupportedCapabilities() connector.Capabilities {
+	if c.Type == "redis" {
+		return connector.Capabilities{Keys: true}
+	}
+	if c.Type == "mysql" || c.Type == "postgres" {
+		return connector.Capabilities{SQL: true, Format: true, Metadata: true, Collect: true, Transactions: true, EnforcedReadOnly: true}
+	}
+	if c.Type == "jdbc" && c.Template != nil {
+		if !c.Template.Enabled || !c.Template.Driver.Enabled {
+			return connector.Capabilities{Reason: "驱动或模板已停用"}
+		}
+		sql := c.Template.Dialect == "postgres" || c.Template.Dialect == "mysql"
+		reason := ""
+		if !sql {
+			reason = "此模板仅启用结构浏览，SQL 方言尚未适配"
+		}
+		return connector.Capabilities{SQL: sql, Format: sql, Metadata: true, Collect: c.Template.Driver.ClassName == "org.postgresql.Driver" || c.Template.Driver.ClassName == "com.mysql.cj.jdbc.Driver" || c.Template.Driver.ClassName == "org.h2.Driver", Transactions: sql, EnforcedReadOnly: sql, Reason: reason}
+	}
+	return connector.Capabilities{Reason: "未注册的数据源类型"}
+}
+func mustJSONParameters(params map[string]string) string {
+	if params == nil {
+		return "{}"
+	}
+	b, _ := json.Marshal(params)
+	return string(b)
 }

@@ -2,7 +2,7 @@
   <div class="space-y-5">
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold">报表中心</h1>
+        <h1 class="text-xl font-semibold">报表</h1>
         <p class="text-sm text-white/45 mt-1">工作台另存的图表沉淀，支持私有/共享与收藏</p>
       </div>
       <div class="flex items-center gap-2">
@@ -75,7 +75,7 @@
       </article>
       <div v-if="!loading && !items.length" class="col-span-full glass-card p-12 flex flex-col items-center gap-3 text-center">
         <BarChart3 class="w-10 h-10 text-white/20" />
-        <p class="text-white/50 text-sm">暂无报表，在 SQL 工作台「图表」Tab 另存为报表</p>
+        <p class="text-white/50 text-sm">暂无报表，在 数据工作台「图表」Tab 另存为报表</p>
       </div>
     </div>
 

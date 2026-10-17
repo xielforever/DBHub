@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/sshx"
-	"github.com/user/dbhub/internal/target"
 )
 
 // Handler 数据源模块处理器。
@@ -24,27 +24,31 @@ type Handler struct {
 	tunnels *db.TunnelRepository
 	log     *slog.Logger
 	proxies *db.ProxyRepository
+	drivers *target.Runtime
 }
 
 // NewHandler 创建处理器。
-func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, log *slog.Logger, proxies *db.ProxyRepository) *Handler {
-	return &Handler{conns: conns, tunnels: tunnels, log: log, proxies: proxies}
+func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, log *slog.Logger, proxies *db.ProxyRepository, runtimes ...*target.Runtime) *Handler {
+	return &Handler{conns: conns, tunnels: tunnels, log: log, proxies: proxies, drivers: target.Default(runtimes)}
 }
 
 type connectionRequest struct {
-	Name              string `json:"name"`
-	Type              string `json:"type"`
-	Host              string `json:"host"`
-	Port              int    `json:"port"`
-	Database          string `json:"database"`
-	Username          string `json:"username"`
-	Password          string `json:"password"`
-	SSHTunnelID       *int64 `json:"ssh_tunnel_id"`
-	ProxyID           *int64 `json:"proxy_id"`
-	SSLMode           string `json:"ssl_mode"`
-	ConnectionTimeout int    `json:"connection_timeout"`
-	ColorLabel        string `json:"color_label"`
-	Environment       string `json:"environment"`
+	Name               string            `json:"name"`
+	Type               string            `json:"type"`
+	Host               string            `json:"host"`
+	Port               int               `json:"port"`
+	Database           string            `json:"database"`
+	Username           string            `json:"username"`
+	Password           string            `json:"password"`
+	SSHTunnelID        *int64            `json:"ssh_tunnel_id"`
+	ProxyID            *int64            `json:"proxy_id"`
+	SSLMode            string            `json:"ssl_mode"`
+	ConnectionTimeout  int               `json:"connection_timeout"`
+	ColorLabel         string            `json:"color_label"`
+	Environment        string            `json:"environment"`
+	TemplateRevisionID *int64            `json:"template_revision_id,omitempty"`
+	Parameters         map[string]string `json:"parameters,omitempty"`
+	template           *db.DatasourceTemplate
 }
 
 type tunnelRequest struct {
@@ -59,7 +63,7 @@ type tunnelRequest struct {
 	Password   string `json:"password"`
 }
 
-var allowedTypes = map[string]bool{"mysql": true, "postgres": true, "redis": true}
+var allowedTypes = map[string]bool{"mysql": true, "postgres": true, "redis": true, "jdbc": true}
 
 func validConnReq(in *connectionRequest) error {
 	in.Name = strings.TrimSpace(in.Name)
@@ -68,12 +72,17 @@ func validConnReq(in *connectionRequest) error {
 		return httpx.BadRequest("连接名称不能为空")
 	}
 	if !allowedTypes[in.Type] {
-		return httpx.BadRequest("数据库类型仅支持 mysql / postgres / redis")
+		return httpx.BadRequest("请选择内置数据源类型或自定义 JDBC 模板")
 	}
-	if in.Host == "" {
+	if in.Type == "jdbc" {
+		if in.TemplateRevisionID == nil || *in.TemplateRevisionID < 1 {
+			return httpx.BadRequest("请选择已发布的 JDBC 数据源模板")
+		}
+	}
+	if in.Host == "" && in.Type != "jdbc" {
 		return httpx.BadRequest("主机地址不能为空")
 	}
-	if in.Port <= 0 || in.Port > 65535 {
+	if in.Type != "jdbc" && (in.Port <= 0 || in.Port > 65535) {
 		return httpx.BadRequest("端口必须在 1-65535 之间")
 	}
 	if in.SSHTunnelID != nil && in.ProxyID != nil {
@@ -137,6 +146,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Internal("查询连接列表失败", err))
 		return
 	}
+	for i := range list {
+		list[i].Capabilities = h.drivers.Capabilities(&list[i])
+	}
 	httpx.OK(w, map[string]any{"items": list, "total": len(list)})
 }
 
@@ -148,7 +160,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, err)
 		return
 	}
-	if err := validConnReq(&in); err != nil {
+	if err := h.prepareRequest(r.Context(), &in); err != nil {
 		httpx.Fail(w, err)
 		return
 	}
@@ -160,7 +172,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	conn := &db.Connection{
 		UserID: c.Subject, SSHTunnelID: in.SSHTunnelID, ProxyID: in.ProxyID,
-		Name: in.Name, Type: in.Type, Host: in.Host, Port: in.Port,
+		Name: in.Name, Type: in.Type, Host: in.Host, Port: in.Port, TemplateRevisionID: in.TemplateRevisionID, Parameters: in.Parameters, Template: in.template,
 		Database: in.Database, Username: in.Username, Password: in.Password,
 		SSLMode: in.SSLMode, ConnectionTimeout: in.ConnectionTimeout, ColorLabel: in.ColorLabel,
 		Environment: in.Environment,
@@ -197,6 +209,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 数据源为团队共享资源，所有登录用户均可查看元数据；口令不随详情返回。
+	conn.Capabilities = h.drivers.Capabilities(conn)
 	httpx.OK(w, conn)
 }
 
@@ -213,7 +226,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, err)
 		return
 	}
-	if err := validConnReq(&in); err != nil {
+	if err := h.prepareRequest(r.Context(), &in); err != nil {
 		httpx.Fail(w, err)
 		return
 	}
@@ -234,7 +247,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	conn := &db.Connection{
 		ID: id, UserID: existing.UserID, SSHTunnelID: in.SSHTunnelID, ProxyID: in.ProxyID,
-		Name: in.Name, Type: in.Type, Host: in.Host, Port: in.Port,
+		Name: in.Name, Type: in.Type, Host: in.Host, Port: in.Port, TemplateRevisionID: in.TemplateRevisionID, Parameters: in.Parameters, Template: in.template,
 		Database: in.Database, Username: in.Username, Password: in.Password,
 		SSLMode: in.SSLMode, ConnectionTimeout: in.ConnectionTimeout, ColorLabel: in.ColorLabel,
 		Environment: in.Environment,
@@ -286,13 +299,13 @@ func (h *Handler) TestUnpersisted(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, err)
 		return
 	}
-	if err := validConnReq(&in); err != nil {
+	if err := h.prepareRequest(r.Context(), &in); err != nil {
 		httpx.Fail(w, err)
 		return
 	}
 	conn := &db.Connection{
 		UserID: c.Subject, SSHTunnelID: in.SSHTunnelID, ProxyID: in.ProxyID,
-		Type: in.Type, Host: in.Host, Port: in.Port,
+		Type: in.Type, Host: in.Host, Port: in.Port, TemplateRevisionID: in.TemplateRevisionID, Parameters: in.Parameters, Template: in.template,
 		Database: in.Database, Username: in.Username,
 		SSLMode: in.SSLMode, ConnectionTimeout: in.ConnectionTimeout,
 	}
@@ -317,7 +330,7 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if present {
-		if err := validConnReq(draft); err != nil {
+		if err := h.prepareRequest(r.Context(), draft); err != nil {
 			httpx.Fail(w, err)
 			return
 		}
@@ -346,7 +359,7 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 			password = draft.Password
 		}
 		conn = &db.Connection{Type: draft.Type, Host: draft.Host, Port: draft.Port, Database: draft.Database,
-			Username: draft.Username, SSLMode: draft.SSLMode, ConnectionTimeout: draft.ConnectionTimeout,
+			TemplateRevisionID: draft.TemplateRevisionID, Parameters: draft.Parameters, Template: draft.template, Username: draft.Username, SSLMode: draft.SSLMode, ConnectionTimeout: draft.ConnectionTimeout,
 			SSHTunnelID: draft.SSHTunnelID, ProxyID: draft.ProxyID}
 	}
 	// 共享数据源，所有登录用户均可发起连通性测试。
@@ -355,6 +368,13 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 
 func sameCredentialDestination(conn *db.Connection, draft *connectionRequest) bool {
 	sameID := func(a, b *int64) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+	if conn.Type == "jdbc" || draft.Type == "jdbc" {
+		old, _ := json.Marshal(conn.Parameters)
+		next, _ := json.Marshal(draft.Parameters)
+		if !sameID(conn.TemplateRevisionID, draft.TemplateRevisionID) || string(old) != string(next) {
+			return false
+		}
+	}
 	return conn.Type == draft.Type && conn.Host == draft.Host && conn.Port == draft.Port &&
 		conn.Username == draft.Username && conn.SSLMode == draft.SSLMode &&
 		sameID(conn.SSHTunnelID, draft.SSHTunnelID) && sameID(conn.ProxyID, draft.ProxyID)
@@ -387,7 +407,7 @@ func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Conne
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
 	start := time.Now()
-	info, err := target.Test(ctx, conn, password, tunnel)
+	info, err := h.drivers.Test(ctx, conn, password, tunnel)
 	duration := time.Since(start).Milliseconds()
 	result := db.ConnectionCheck{OK: err == nil, Type: conn.Type, ElapsedMS: duration,
 		StartedAt: start.UTC(), CheckedAt: time.Now().UTC()}

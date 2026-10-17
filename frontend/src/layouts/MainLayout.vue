@@ -120,7 +120,7 @@
 
         <button
           class="md:hidden w-9 h-9 rounded-xl flex items-center justify-center text-white/55 hover:bg-white/10 hover:text-white transition-colors shrink-0"
-          aria-label="搜索数据资产"
+          aria-label="搜索数据目录"
           @click="router.push('/assets')"
         >
           <Search class="w-4.5 h-4.5" />
@@ -163,6 +163,7 @@
 </template>
 
 <script setup lang="ts">
+import { pageTitles } from '../navigation'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -206,25 +207,25 @@ interface MenuItem {
 const menuGroups: { title: string; items: MenuItem[] }[] = [
   {
     title: '概览',
-    items: [{ name: 'dashboard', label: '运营总览', to: '/dashboard', icon: Activity }],
+    items: [{ name: 'dashboard', label: pageTitles.dashboard, to: '/dashboard', icon: Activity }],
   },
   {
     title: '数据',
     items: [
-      { name: 'assets', label: '数据资产', to: '/assets', icon: Boxes },
-      { name: 'connections', label: '数据源管理', to: '/connections', icon: Database },
-      { name: 'query', label: 'SQL 工作台', to: '/query', icon: SquareTerminal },
-      { name: 'reports', label: '报表中心', to: '/reports', icon: BarChart3 },
-      { name: 'dashboards', label: '仪表盘', to: '/dashboards', icon: LayoutDashboard },
-      { name: 'proxies', label: '代理管理', to: '/proxies', icon: Waypoints },
-      { name: 'tickets', label: '工单中心', to: '/tickets', icon: Ticket },
+      { name: 'assets', label: pageTitles.assets, to: '/assets', icon: Boxes },
+      { name: 'connections', label: pageTitles.connections, to: '/connections', icon: Database },
+      { name: 'query', label: pageTitles.query, to: '/query', icon: SquareTerminal },
+      { name: 'reports', label: pageTitles.reports, to: '/reports', icon: BarChart3 },
+      { name: 'dashboards', label: pageTitles.dashboards, to: '/dashboards', icon: LayoutDashboard },
+      { name: 'proxies', label: pageTitles.proxies, to: '/proxies', icon: Waypoints },
+      { name: 'tickets', label: pageTitles.tickets, to: '/tickets', icon: Ticket },
     ],
   },
   {
     title: '安全',
     items: [
-      { name: 'users', label: '用户与权限', to: '/users', icon: UsersRound, roles: ['admin'] },
-      { name: 'audit', label: '操作审计', to: '/audit', icon: ShieldCheck, roles: ['admin'] },
+      { name: 'users', label: pageTitles.users, to: '/users', icon: UsersRound, roles: ['admin'] },
+      { name: 'audit', label: pageTitles.audit, to: '/audit', icon: ShieldCheck, roles: ['admin'] },
     ],
   },
 ]

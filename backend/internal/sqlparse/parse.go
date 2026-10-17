@@ -23,6 +23,9 @@ type Statement struct {
 
 // Parse accepts exactly one statement. Unsupported syntax fails closed.
 func Parse(sql, dialect string) (*Statement, error) {
+	if dialect != "mysql" && dialect != "postgres" {
+		return nil, fmt.Errorf("此数据源尚未适配 SQL 方言")
+	}
 	if dialect == "mysql" {
 		return parseMySQL(sql)
 	}

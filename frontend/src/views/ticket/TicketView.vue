@@ -3,7 +3,7 @@
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold flex items-center gap-2">
-          <Ticket class="w-5 h-5 text-amber-300" />工单中心
+          <Ticket class="w-5 h-5 text-amber-300" />变更工单
         </h1>
         <p class="text-sm text-white/45 mt-1">变更工单的创建、审批与执行；支持血缘影响一键建单，完整审计留痕</p>
       </div>

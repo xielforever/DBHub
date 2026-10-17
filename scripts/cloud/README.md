@@ -1,6 +1,6 @@
 # Cloud 开发环境
 
-使用 `./scripts/cloud/setup.sh` 安装并测试，使用 `./scripts/cloud/start.sh` 启动真实后端和前端。需要宿主 Docker、Compose、Python 3；应用依赖安装、构建、测试均在容器中进行。PostgreSQL、MySQL、Redis 的端口仅在容器网络开放，前后端开发端口只绑定宿主回环地址。
+使用 `./scripts/cloud/setup.sh` 安装并测试，使用 `./scripts/cloud/start.sh` 启动真实后端和前端。需要宿主 Docker、Compose、Python 3；应用依赖安装、构建、测试均在容器中进行。PostgreSQL、MySQL、Redis、JDBC 的端口仅在容器网络开放，前后端开发端口只绑定宿主回环地址。
 
 脚本继承会话 HTTP/HTTPS 代理，将平台 CA 只读挂载进容器，并动态解析代理主机；不关闭证书或模块校验。Node、Go 基础镜像固定摘要，PG AST 解析需要带 GCC 的 Go 镜像及 CGO。Go 编译缓存和临时文件放在 `${DBHUB_BUILD_ROOT:-/tmp/dbhub-cloud-build}`，避免占满 Cloud 持久层。代码依赖使用已提交 vendor，可离线编译；依赖变更后在容器中运行 `backend/scripts/vendor.sh`，脚本会补回 Go vendor 默认遗漏的 libpg_query C 头文件。
 
@@ -11,8 +11,8 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 常用命令：
 
 ```sh
-# 真实 PostgreSQL、MySQL、Redis 集成测试（环境变量由 wrapper 注入）
-./scripts/cloud/dev.sh up -d --wait postgres mysql redis
+# 真实 PostgreSQL、MySQL、Redis、JDBC 集成测试（环境变量由 wrapper 注入）
+./scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
 ./scripts/cloud/dev.sh run --rm --no-deps backend go test -p=4 ./...
 
 # 并发竞态检查与静态检查
@@ -59,3 +59,12 @@ python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.
 版本提示的浏览器验收：`DBHUB_BROWSER_TEST_SCRIPT=/app/scripts/cloud/version_browser_test.py ./scripts/cloud/browser.sh`。验证真实数据库版本显示、修改连接后清除旧结果、过期响应处理及手机表单；MariaDB 警示使用界面契约样例，不代表真实产品兼容验证。
 
 数据源异常与并发的定向回归：`./scripts/cloud/dev.sh exec -T backend go test -race -count=1 ./internal/server -run '^(TestDatasourceReliability|TestMetadataSyncReliability)$'`。测试会创建随机 Schema、临时账号与连接，在独立目标账号上设置 statement timeout 并对测试表加锁，验证采集失败和取消；不修改现有账号的权限。行为与原始结果见 [检查与采集可靠性](../../docs/开发指南/数据源检查与采集可靠性.md)。
+
+
+JDBC 服务随 Cloud setup/start 启动，首次在 Docker 中安装 JDK 17、按锁定清单下载并核验驱动、编译 Java。已准备 PostgreSQL 42.7.7、MySQL 8.4.0、H2 2.4.240。私有 runtime.env 自动生成服务 Token（至少 32 字符），配置内部 `DBHUB_JDBC_URL`，重复启动不轮换。应用构建和测试仍全部在 Docker 中执行。
+
+JDBC 浏览器验收：`DBHUB_BROWSER_TEST_SCRIPT=/app/scripts/cloud/connector_browser_test.py ./scripts/cloud/browser.sh`。真实创建驱动、模板、H2/PG 实例，验证结构采集、修订绑定、SQL/键值/元数据视图与角色；测试清理自身对象，性能对照保存在私有 `connector-timing.json`。原有 SQL 与版本提示套件分别保留。不要在任一 Go 测试/矩阵执行期间重启或重建 backend；需要重启时先等待测试明确退出。
+
+可选生产 JDBC 镜像使用 `services/jdbc-runner/Dockerfile`，Compose profile 为 `jdbc`，只运行已构建镜像，不在启动时安装 JDK。实际配置、增加驱动和验收范围见[连接器与 JDBC 自定义数据源验收](../../docs/开发指南/连接器与JDBC自定义数据源验收.md)。
+
+JDBC 生产镜像的隔离验收：先按连接器指南提供公共 CA bundle 构建镜像，再执行 `DBHUB_JDBC_CHECK_IMAGE=dbhub-jdbc:<version> ./scripts/cloud/jdbc-image-check.sh`。脚本运行非 root、只读文件系统的镜像，重跑真实 JDBC 集成用例，并验证 PostgreSQL/MySQL 的 TLS 信任、主机名、只读及 MySQL 跨库外键。只创建和清理本轮随机命名的容器与证书，不部署生产；运行期间不要重启 Cloud JDBC 编排容器。

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/sqlparse"
-	"github.com/user/dbhub/internal/target"
 )
 
 func (h *Handler) ListExports(w http.ResponseWriter, r *http.Request) {
@@ -51,7 +51,7 @@ func (h *Handler) CreateExport(w http.ResponseWriter, r *http.Request) {
 	}
 	var execErr error
 	defer func() { finish(execErr) }()
-	query, args, e := sqlparse.BindNamed(in.SQL, conn.Type, in.Params)
+	query, args, e := sqlparse.BindNamed(in.SQL, conn.SQLDialect(), in.Params)
 	if e != nil {
 		execErr = e
 		httpx.Fail(w, httpx.BadRequest(e.Error()))

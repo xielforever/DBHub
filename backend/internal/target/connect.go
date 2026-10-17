@@ -155,28 +155,39 @@ func Test(ctx context.Context, conn *db.Connection, password string, tunnel *db.
 			return nil, e
 		}
 		defer r.Close()
-		info, e := r.Client.Info(ctx, "server").Result()
-		if e != nil {
-			if strings.HasPrefix(e.Error(), "NOPERM ") {
-				return &TestInfo{Type: "redis", Compatibility: Compatibility{Engine: "redis", Product: "Redis", Status: "unknown", Message: "连接已建立，但账号无权读取版本信息；兼容性尚未确认。"}}, nil
-			}
-			return nil, fmt.Errorf("读取 Redis 版本失败")
-		}
-		server := infoMap(info)
-		version, product := server["redis_version"], ""
-		for _, fork := range []string{"valkey", "keydb", "dragonfly"} {
-			if server[fork+"_version"] != "" {
-				version, product = server[fork+"_version"], fork
-				break
-			}
-		}
-		return &TestInfo{Type: "redis", Version: server["redis_version"], Compatibility: classifyCompatibility("redis", version, product, server["redis_mode"])}, nil
+		return ProbeRedis(ctx, r)
 	}
 	r, e := OpenRelational(ctx, conn, password, tunnel)
 	if e != nil {
 		return nil, e
 	}
 	defer r.Close()
+	return ProbeRelational(ctx, r)
+}
+
+// ProbeRedis reads identity on the already-open connection.
+func ProbeRedis(ctx context.Context, r *RedisClient) (*TestInfo, error) {
+	info, e := r.Client.Info(ctx, "server").Result()
+	if e != nil {
+		if strings.HasPrefix(e.Error(), "NOPERM ") {
+			return &TestInfo{Type: "redis", Compatibility: Compatibility{Engine: "redis", Product: "Redis", Status: "unknown", Message: "连接已建立，但账号无权读取版本信息；兼容性尚未确认。"}}, nil
+		}
+		return nil, fmt.Errorf("读取 Redis 版本失败")
+	}
+	server := infoMap(info)
+	version, product := server["redis_version"], ""
+	for _, fork := range []string{"valkey", "keydb", "dragonfly"} {
+		if server[fork+"_version"] != "" {
+			version, product = server[fork+"_version"], fork
+			break
+		}
+	}
+	return &TestInfo{Type: "redis", Version: server["redis_version"], Compatibility: classifyCompatibility("redis", version, product, server["redis_mode"])}, nil
+}
+
+// ProbeRelational reads identity without opening a second physical connection.
+func ProbeRelational(ctx context.Context, r *RelDB) (*TestInfo, error) {
+	var e error
 	var version, comment string
 	if r.pgConn != nil {
 		e = r.pgConn.QueryRow(ctx, "SELECT version()").Scan(&version)
@@ -186,7 +197,7 @@ func Test(ctx context.Context, conn *db.Connection, password string, tunnel *db.
 	if e != nil {
 		return nil, fmt.Errorf("读取数据库版本失败")
 	}
-	return &TestInfo{Type: conn.Type, Version: version, Compatibility: classifyCompatibility(conn.Type, version, comment, "")}, nil
+	return &TestInfo{Type: r.Conn.Type, Version: version, Compatibility: classifyCompatibility(r.Conn.Type, version, comment, "")}, nil
 }
 func firstNonEmpty(a, b string) string {
 	if a != "" {

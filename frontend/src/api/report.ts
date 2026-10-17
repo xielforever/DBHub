@@ -1,5 +1,5 @@
 /**
- * 报表中心 M3/M4
+ * 报表 M3/M4
  */
 import request from '../utils/request'
 import type { ChartKind, ChartConfig } from '../components/business/chart/ChartCard.vue'

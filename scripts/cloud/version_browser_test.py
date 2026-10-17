@@ -74,7 +74,7 @@ try:
 
         item = created[0]
         card = page.locator('article').filter(has=page.get_by_role('heading',name=item['name'],exact=True))
-        card.get_by_role('button',name='编辑连接',exact=True).click()
+        card.get_by_role('button',name='编辑数据源',exact=True).click()
         dialog = page.get_by_role('dialog')
         expect(dialog.get_by_test_id('version-support-hint')).to_contain_text('14 / 15 / 16 / 17 / 18')
         expect(dialog.get_by_label('密码',exact=True)).to_have_value('')
@@ -143,7 +143,7 @@ try:
         dialog.get_by_role('button',name='取消',exact=True).click()
         mysql_item = created[1]
         mysql_card = page.locator('article').filter(has=page.get_by_role('heading',name=mysql_item['name'],exact=True))
-        mysql_card.get_by_role('button',name='编辑连接',exact=True).click()
+        mysql_card.get_by_role('button',name='编辑数据源',exact=True).click()
         dialog.get_by_label('主机',exact=True).fill('127.0.0.1')
         dialog.get_by_label('端口',exact=True).fill('1')
         dialog.get_by_role('button',name='保存',exact=True).click()
@@ -159,7 +159,7 @@ try:
         passed('failed checks survive a page reload')
 
         # 保存编辑表单时空口令仍保留原凭据，恢复地址后可重新连接。
-        mysql_card.get_by_role('button',name='编辑连接',exact=True).click()
+        mysql_card.get_by_role('button',name='编辑数据源',exact=True).click()
         dialog.get_by_label('主机',exact=True).fill('mysql')
         dialog.get_by_label('端口',exact=True).fill('3306')
         dialog.get_by_role('button',name='保存',exact=True).click()

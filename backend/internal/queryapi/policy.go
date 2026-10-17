@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	pgquery "github.com/pganalyze/pg_query_go/v5"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/sqlparse"
-	"github.com/user/dbhub/internal/target"
 	my "github.com/xwb1989/sqlparser"
 )
 
@@ -25,7 +25,7 @@ func (h *Handler) applyPolicies(ctx context.Context, handle *target.RelDB, user 
 	if len(policies) == 0 {
 		return query, args, nil
 	}
-	ast, e := sqlparse.Parse(query, handle.Conn.Type)
+	ast, e := sqlparse.Parse(query, handle.Conn.SQLDialect())
 	if e != nil {
 		return "", nil, e
 	}
@@ -34,7 +34,7 @@ func (h *Handler) applyPolicies(ctx context.Context, handle *target.RelDB, user 
 	}
 	t := ast.Tables[0]
 	schema := t.Schema
-	if schema == "" && handle.Conn.Type == "postgres" {
+	if schema == "" && handle.Conn.SQLDialect() == "postgres" {
 		schema = "public"
 	}
 	database := t.Database
@@ -60,7 +60,7 @@ func (h *Handler) applyPolicies(ctx context.Context, handle *target.RelDB, user 
 	for _, c := range cols {
 		names = append(names, c.Name)
 	}
-	return rewritePolicy(query, handle.Conn.Type, *policy, names, user, args)
+	return rewritePolicy(query, handle.Conn.SQLDialect(), *policy, names, user, args)
 }
 func quoted(name, dialect string) string {
 	if dialect == "mysql" {

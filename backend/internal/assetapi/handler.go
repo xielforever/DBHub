@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/target"
 )
 
 // Handler 数据资产处理器。
@@ -26,13 +26,14 @@ type Handler struct {
 	users   *db.UserRepository
 	history *db.HistoryRepository
 	log     *slog.Logger
+	drivers *target.Runtime
 }
 
 func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository,
 	meta *db.MetadataRepository, users *db.UserRepository,
-	history *db.HistoryRepository, log *slog.Logger) *Handler {
+	history *db.HistoryRepository, log *slog.Logger, runtimes ...*target.Runtime) *Handler {
 	return &Handler{conns: conns, tunnels: tunnels, meta: meta, users: users,
-		history: history, log: log}
+		history: history, log: log, drivers: target.Default(runtimes)}
 }
 
 // ---------------- 同步字典 ----------------
@@ -135,7 +136,7 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		Databases:      []string{},
 		ByDatabase:     []dbSyncStat{},
 	}
-	if conn.Type != "postgres" && conn.Type != "mysql" {
+	if conn.Type != "postgres" && conn.Type != "mysql" && conn.Type != "jdbc" {
 		res.Skipped = true
 		res.Status = "skipped"
 		return res
@@ -146,6 +147,12 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		return res
 	}
 	conn = full
+	if !h.drivers.Capabilities(conn).Collect {
+		res.Skipped = true
+		res.Status = "skipped"
+		res.Errors = []string{"此驱动尚未验证完整结构采集，可先浏览结构"}
+		return res
+	}
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
 		t, err := h.tunnels.GetSecrets(ctx, *conn.SSHTunnelID)
@@ -167,7 +174,7 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 	snapshots := []*db.MetaSnapshot{}
 
 	openConn := *conn
-	rootHandle, err := target.OpenRelational(ctx, &openConn, password, tunnel)
+	rootHandle, err := h.drivers.OpenRelational(ctx, &openConn, password, tunnel)
 	if err != nil {
 		res.Errors = append(res.Errors, "打开目标数据库失败: "+safeErr(err))
 		return res
@@ -181,20 +188,20 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 
 	for _, item := range dbNames {
 		dbName := item.Name
-		if !target.IsUserDatabase(conn.Type, dbName) {
+		if !target.IsUserDatabase(conn.SQLDialect(), dbName) {
 			res.SkippedDBs = append(res.SkippedDBs, dbName)
 			continue
 		}
 		dbConn := *conn
 		dbConn.Database = dbName
-		handle, err := target.OpenRelational(ctx, &dbConn, password, tunnel)
+		handle, err := h.drivers.OpenRelational(ctx, &dbConn, password, tunnel)
 		if err != nil {
 			res.Errors = append(res.Errors, dbName+": 连接失败 "+safeErr(err))
 			continue
 		}
 		stat := dbSyncStat{Database: dbName}
 		schemas := []string{""}
-		if conn.Type == "postgres" {
+		if conn.Type == "postgres" || conn.Type == "jdbc" {
 			list, err := target.Schemas(ctx, handle)
 			if err != nil {
 				handle.Close()
@@ -203,7 +210,7 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 			}
 			schemas = schemas[:0]
 			for _, s := range list {
-				if target.IsUserSchema(conn.Type, s) {
+				if target.IsUserSchema(conn.SQLDialect(), s) {
 					schemas = append(schemas, s)
 				}
 			}
@@ -237,7 +244,7 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 					RawColumns:    jsonRaw(m.Columns),
 					RawIndexes:    jsonRaw(m.Indexes),
 					RawKeys:       jsonRaw(m.Keys),
-					DDLText:       m.DDL,
+					DDLText:       m.DDL, MetadataStatus: jsonRaw(m.MetadataStatus),
 				}
 				snapshots = append(snapshots, snap)
 				if m.Type == "view" {
@@ -256,7 +263,12 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 	if len(res.Errors) == 0 {
 		if err := batch.Publish(ctx, snapshots); err != nil {
 			h.log.Warn("发布字典快照失败", "connection_id", conn.ID, "error", err)
-			res.Errors = append(res.Errors, "本次采集未发布，旧快照已保留: "+safeErr(err))
+			if errors.Is(err, db.ErrMetadataPublishUnknown) {
+				res.Status = "unknown"
+				res.Errors = append(res.Errors, "发布响应未确认，请刷新数据目录核实快照；未自动重试。")
+			} else {
+				res.Errors = append(res.Errors, "本次采集未发布，旧快照已保留: "+safeErr(err))
+			}
 		} else {
 			res.Status = "succeeded"
 		}

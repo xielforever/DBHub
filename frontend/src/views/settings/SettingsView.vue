@@ -5,6 +5,8 @@
       <p class="text-sm text-white/45 mt-1">账号偏好与安全配置</p>
     </header>
 
+    <ConnectorSettings v-if="userStore.role === 'admin'" />
+
     <section class="glass-card p-6">
       <h2 class="font-medium mb-4">个人资料</h2>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -80,6 +82,7 @@ import { ElMessage } from 'element-plus'
 import { KeyRound } from 'lucide-vue-next'
 import { useUserStore } from '../../stores/user'
 import { adminApi } from '../../api/admin'
+import ConnectorSettings from './ConnectorSettings.vue'
 
 const userStore = useUserStore()
 const darkMode = ref(true)

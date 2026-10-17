@@ -1,3 +1,4 @@
+import { pageTitles } from '../navigation'
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '../stores/user'
 
@@ -35,67 +36,67 @@ const routes: RouteRecordRaw[] = [
         path: 'dashboard',
         name: 'dashboard',
         component: () => import('../views/dashboard/DashboardView.vue'),
-        meta: { title: '仪表盘', icon: 'LayoutDashboard' },
+        meta: { title: pageTitles.dashboard, icon: 'LayoutDashboard' },
       },
       {
         path: 'assets',
         name: 'assets',
         component: () => import('../views/asset/AssetView.vue'),
-        meta: { title: '数据资产', icon: 'Boxes' },
+        meta: { title: pageTitles.assets, icon: 'Boxes' },
       },
       {
         path: 'connections',
         name: 'connections',
         component: () => import('../views/connection/ConnectionView.vue'),
-        meta: { title: '数据源管理', icon: 'Database' },
+        meta: { title: pageTitles.connections, icon: 'Database' },
       },
       {
         path: 'query',
         name: 'query',
         component: () => import('../views/query/QueryView.vue'),
-        meta: { title: 'SQL 工作台', icon: 'SquareTerminal' },
+        meta: { title: pageTitles.query, icon: 'SquareTerminal' },
       },
       {
         path: 'reports',
         name: 'reports',
         component: () => import('../views/report/ReportsView.vue'),
-        meta: { title: '报表中心', icon: 'BarChart3' },
+        meta: { title: pageTitles.reports, icon: 'BarChart3' },
       },
       {
         path: 'dashboards',
         name: 'dashboards',
         component: () => import('../views/report/DashboardView.vue'),
-        meta: { title: '仪表盘', icon: 'LayoutDashboard' },
+        meta: { title: pageTitles.dashboards, icon: 'LayoutDashboard' },
       },
       {
         path: 'proxies',
         name: 'proxies',
         component: () => import('../views/proxy/ProxyView.vue'),
-        meta: { title: '代理管理', icon: 'Waypoints' },
+        meta: { title: pageTitles.proxies, icon: 'Waypoints' },
       },
       {
         path: 'tickets',
         name: 'tickets',
         component: () => import('../views/ticket/TicketView.vue'),
-        meta: { title: '工单中心', icon: 'Ticket' },
+        meta: { title: pageTitles.tickets, icon: 'Ticket' },
       },
       {
         path: 'users',
         name: 'users',
         component: () => import('../views/admin/UsersView.vue'),
-        meta: { title: '用户与权限', icon: 'UsersRound', roles: ['admin'] },
+        meta: { title: pageTitles.users, icon: 'UsersRound', roles: ['admin'] },
       },
       {
         path: 'audit',
         name: 'audit',
         component: () => import('../views/audit/AuditView.vue'),
-        meta: { title: '操作审计', icon: 'ShieldCheck', roles: ['admin'] },
+        meta: { title: pageTitles.audit, icon: 'ShieldCheck', roles: ['admin'] },
       },
       {
         path: 'settings',
         name: 'settings',
         component: () => import('../views/settings/SettingsView.vue'),
-        meta: { title: '系统设置', icon: 'Settings' },
+        meta: { title: pageTitles.settings, icon: 'Settings' },
       },
     ],
   },

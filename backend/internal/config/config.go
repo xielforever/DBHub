@@ -37,6 +37,7 @@ type Config struct {
 	RedisURL                  string
 	CORSOrigins               []string
 	AIBaseURL, AIKey, AIModel string
+	JDBCURL, JDBCToken        string
 }
 
 // AdminConfig 引导管理员账号配置。
@@ -48,6 +49,7 @@ type AdminConfig struct {
 // Load 从环境变量读取配置并执行必要的校验。
 func Load() (*Config, error) {
 	cfg := &Config{
+		JDBCURL: os.Getenv("DBHUB_JDBC_URL"), JDBCToken: os.Getenv("DBHUB_JDBC_TOKEN"),
 		Env:            getenv("APP_ENV", "development"),
 		Port:           getenv("PORT", "8080"),
 		LogLevel:       getenv("LOG_LEVEL", "info"),
@@ -61,6 +63,9 @@ func Load() (*Config, error) {
 		},
 	}
 
+	if cfg.JDBCURL != "" && len(cfg.JDBCToken) < 32 {
+		return nil, errors.New("配置 JDBC 服务时必须设置至少 32 字符的 DBHUB_JDBC_TOKEN")
+	}
 	secret := os.Getenv("APP_SECRET_KEY")
 	if secret == "" {
 		if cfg.IsProduction() {

@@ -1,5 +1,17 @@
 # 生产编排只运行已构建的镜像。PostgreSQL/Redis 由外部服务提供。
 services:
+  jdbc:
+    profiles: ["jdbc"]
+    image: ${DBHUB_JDBC_IMAGE:-dbhub-jdbc:local}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m,mode=1777"]
+    environment:
+      DBHUB_JDBC_TOKEN: ${DBHUB_JDBC_TOKEN:-}
+    expose: ["8090"]
   backend:
     image: ${DBHUB_BACKEND_IMAGE:?必须指定已验证的后端镜像标签或摘要}
     restart: unless-stopped
@@ -22,6 +34,8 @@ services:
       DBHUB_AI_BASE_URL: ${DBHUB_AI_BASE_URL:-https://api.openai.com/v1}
       DBHUB_AI_MODEL: ${DBHUB_AI_MODEL:-gpt-4.1-mini}
       DBHUB_AI_API_KEY: ${DBHUB_AI_API_KEY:-}
+      DBHUB_JDBC_URL: ${DBHUB_JDBC_URL:-}
+      DBHUB_JDBC_TOKEN: ${DBHUB_JDBC_TOKEN:-}
     expose: ["8080"]
   frontend:
     image: ${DBHUB_FRONTEND_IMAGE:?必须指定已验证的前端镜像标签或摘要}

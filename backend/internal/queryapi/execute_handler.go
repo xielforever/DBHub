@@ -12,11 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgconn"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/sqlparse"
-	"github.com/user/dbhub/internal/target"
 )
 
 var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -63,12 +62,12 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	if in.Database != "" {
 		conn.Database = in.Database
 	}
-	query, args, e := sqlparse.BindNamed(in.SQL, conn.Type, in.Params)
+	query, args, e := sqlparse.BindNamed(in.SQL, conn.SQLDialect(), in.Params)
 	if e != nil {
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return
 	}
-	if _, e = sqlparse.Parse(query, conn.Type); e != nil {
+	if _, e = sqlparse.Parse(query, conn.SQLDialect()); e != nil {
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return
 	}
@@ -147,7 +146,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	if in.MaxRows <= 0 || in.MaxRows > settings.MaxRows {
 		in.MaxRows = settings.MaxRows
 	}
-	opt := target.ExecuteOptions{Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
+	opt := target.ExecuteOptions{Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, ExecutionKey: fmt.Sprintf("query:%d:%s", c.Subject, in.RequestID), AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
 	sent := false
 	var executionStarted time.Time
 	opt.BeforeExecute = func() error {
@@ -185,7 +184,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	var result *target.ExecResult
 	if in.TransactionID == "" {
 		var handle *target.RelDB
-		handle, execErr = target.OpenRelational(ctx, conn, password, tunnel)
+		handle, execErr = h.drivers.OpenRelational(ctx, conn, password, tunnel)
 		if execErr == nil {
 			defer handle.Close()
 			result, execErr = run(handle)
@@ -239,17 +238,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 }
 
 // 仅把 PostgreSQL 明确的语句拒绝视为确定失败；通信、取消及提交不明保守处理。
-func definiteStatementError(err error) bool {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code == "40003" || len(pgErr.Code) != 5 {
-		return false
-	}
-	switch pgErr.Code[:2] {
-	case "22", "23", "25", "40", "42", "0A":
-		return true
-	}
-	return false
-}
+func definiteStatementError(err error) bool { return target.DefiniteStatementError(err) }
 
 // Execution 仅允许请求所属用户读取回执，管理员也不能跨用户取回。
 func (h *Handler) Execution(w http.ResponseWriter, r *http.Request) {

@@ -3,7 +3,7 @@
     <header class="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold flex items-center gap-2">
-          代理管理
+          连接代理
           <span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-400/15 text-amber-300 border border-amber-400/20">已接通</span>
         </h1>
         <p class="text-sm text-white/45 mt-1">替代 SSH 隧道的统一代理层，支持 HTTP / HTTPS / SOCKS5 / DB Proxy，数据源查询和测试均通过所选代理拨号</p>
@@ -26,7 +26,7 @@
         </div>
         <div class="space-y-2">
           <h3 class="font-medium text-sm">为什么从 SSH 隧道演进到 Proxy？</h3>
-          <ul class="space-y-2 mt-3 text-xs text-white/50"><li>HTTP 与 HTTPS 使用 CONNECT 隧道；SOCKS5 支持用户认证；数据库代理网关使用其实际入口。</li><li>HTTPS 代理验证证书。代理可在数据源管理中选择，保存的密码加密存储。</li><li>连接测试须指定可达的目标地址，以验证代理认证和转发权限。</li></ul>
+          <ul class="space-y-2 mt-3 text-xs text-white/50"><li>HTTP 与 HTTPS 使用 CONNECT 隧道；SOCKS5 支持用户认证；数据库代理网关使用其实际入口。</li><li>HTTPS 代理验证证书。代理可在数据源中选择，保存的密码加密存储。</li><li>连接测试须指定可达的目标地址，以验证代理认证和转发权限。</li></ul>
         </div>
       </div>
     </div>

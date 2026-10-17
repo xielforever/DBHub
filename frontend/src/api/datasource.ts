@@ -2,8 +2,12 @@
  * 数据源（目标数据库连接）与 SSH 隧道 API
  */
 import request from '../utils/request'
+import type { DatasourceTemplate } from './connector'
 
-export type DbType = 'mysql' | 'postgres' | 'redis'
+export interface Capabilities {sql: boolean;format: boolean;metadata: boolean;collect: boolean;keys: boolean;transactions: boolean;enforced_read_only: boolean;reason?: string}
+export function sourceLabel(c: ConnectionItem) {return c.template?.product || ({mysql:'MySQL',postgres:'PostgreSQL',redis:'Redis',jdbc:'自定义 JDBC'}[c.type] ?? c.type)}
+
+export type DbType = 'mysql' | 'postgres' | 'redis' | 'jdbc'
 export type EnvKind = 'dev' | 'test' | 'prod'
 
 export interface ConnectionItem {
@@ -27,6 +31,10 @@ export interface ConnectionItem {
   created_at: string
   updated_at: string
   last_check?: TestResult
+  template_revision_id?: number | null
+  parameters?: Record<string,string>
+  template?: DatasourceTemplate
+  capabilities?: Capabilities
 }
 
 export interface ConnectionPayload {
@@ -44,6 +52,8 @@ export interface ConnectionPayload {
   connection_timeout: number
   color_label?: string
   environment?: EnvKind
+  template_revision_id?: number | null
+  parameters?: Record<string,string>
 }
 
 export interface SSHTunnelItem {

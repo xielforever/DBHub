@@ -45,7 +45,7 @@
 
     <div class="flex-1 overflow-y-auto p-2" v-loading="loading">
       <div v-if="!filteredConnections.length && !loading" class="text-center text-xs text-white/40 px-4 py-10">
-        {{ keyword ? '无匹配结果' : '暂无数据源' }}<br v-if="!keyword" /><span v-if="!keyword" class="text-[11px]">请先在「数据源管理」中创建连接</span>
+        {{ keyword ? '无匹配结果' : '暂无数据源' }}<br v-if="!keyword" /><span v-if="!keyword" class="text-[11px]">请先在「数据源」中创建连接</span>
       </div>
 
       <div v-for="conn in filteredConnections" :key="conn.id" class="mb-0.5">
@@ -352,7 +352,7 @@ function typeIcon(t: DbType) {
   return t === 'redis' ? KeyRound : Database
 }
 function typeColor(t: DbType) {
-  return { mysql: '#60a5fa', postgres: '#a78bfa', redis: '#f472b6' }[t] ?? '#94a3b8'
+  return { mysql: '#60a5fa', postgres: '#a78bfa', redis: '#f472b6', jdbc: '#34d399' }[t] ?? '#94a3b8'
 }
 
 async function toggleConnection(conn: ConnectionItem) {

@@ -12,6 +12,7 @@ import (
 
 var ErrSyncBusy = errors.New("该数据源正在采集，请稍后重试")
 var ErrConnectionChanged = errors.New("数据源配置已变化，请重新发起操作")
+var ErrMetadataPublishUnknown = errors.New("采集发布结果待确认")
 
 // MetadataSync 的事务锁跨处理器和实例生效；采集和发布共用一个池连接，避免锁占满连接池后再申请连接。
 type MetadataSync struct {
@@ -26,7 +27,7 @@ func (r *MetadataRepository) BeginSync(ctx context.Context, connectionID int64, 
 		return nil, err
 	}
 	var locked bool
-	err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema() || ':dbhub:metadata-sync:' || $1::text, 0))`, connectionID).Scan(&locked)
+	err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended(current_schema() || ':dbhub:metadata-sync:' || $1::bigint::text, 0))`, connectionID).Scan(&locked)
 	if err != nil || !locked {
 		_ = tx.Rollback(ctx)
 		if err != nil {
@@ -92,5 +93,11 @@ func (s *MetadataSync) Publish(ctx context.Context, snapshots []*MetaSnapshot) e
 	if err != nil {
 		return err
 	}
-	return s.tx.Commit(ctx)
+	if err = s.tx.Commit(ctx); err != nil {
+		if errors.Is(err, pgx.ErrTxCommitRollback) {
+			return err
+		}
+		return fmt.Errorf("%w: %w", ErrMetadataPublishUnknown, err)
+	}
+	return nil
 }

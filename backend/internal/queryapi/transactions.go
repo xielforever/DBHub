@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/target"
 )
 
 type transaction struct {

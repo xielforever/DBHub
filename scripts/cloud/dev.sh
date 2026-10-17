@@ -27,6 +27,15 @@ with os.fdopen(fd,'w') as f:
  for name,value in values.items(): f.write(f'{name}={value}\n')
 PY
 fi
+python3 - "$DBHUB_STATE_DIR/runtime.env" <<'PY'
+import os,secrets,sys
+path=sys.argv[1]
+with open(path) as f: names={line.split('=',1)[0] for line in f if '=' in line}
+with open(path,'a') as f:
+ if 'DBHUB_JDBC_TOKEN' not in names: f.write('DBHUB_JDBC_TOKEN='+secrets.token_hex(32)+'\n')
+ if 'DBHUB_JDBC_URL' not in names: f.write('DBHUB_JDBC_URL=http://jdbc:8090\n')
+os.chmod(path,0o600)
+PY
 export DBHUB_CA_FILE="${CODEX_PROXY_CERT:-${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}}"
 dbhub_proxy="$(python3 - <<'PY'
 import os,socket
@@ -36,5 +45,5 @@ print(u.hostname+':'+socket.gethostbyname(u.hostname))
 PY
 )"
 export DBHUB_PROXY_HOST="${dbhub_proxy%%:*}" DBHUB_PROXY_IP="${dbhub_proxy#*:}"
-export DBHUB_NO_PROXY="localhost,127.0.0.1,frontend,backend,postgres,mysql,redis${NO_PROXY:+,$NO_PROXY}"
+export DBHUB_NO_PROXY="localhost,127.0.0.1,frontend,backend,postgres,mysql,redis,jdbc${NO_PROXY:+,$NO_PROXY}"
 exec docker compose --project-name "${DBHUB_COMPOSE_PROJECT:-dbhub-cloud}" --project-directory "$dbhub_root" --env-file "$DBHUB_STATE_DIR/runtime.env" -f "${DBHUB_COMPOSE_FILE:-$dbhub_root/scripts/cloud/compose.yaml}" "$@"

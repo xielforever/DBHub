@@ -1,19 +1,19 @@
 package ticketapi
 
 import (
-  "context"
-  "errors"
-  "net/http"
-  "strconv"
-  "strings"
-  "time"
-  "log/slog"
+	"context"
+	"errors"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
-  "github.com/user/dbhub/internal/sqlparse"
-  "github.com/user/dbhub/internal/target"
-  "github.com/user/dbhub/internal/auth"
-  "github.com/user/dbhub/internal/db"
-  "github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
+	"github.com/user/dbhub/internal/db"
+	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/sqlparse"
 )
 
 type Handler struct {
@@ -22,10 +22,11 @@ type Handler struct {
 	conns   *db.ConnectionRepository
 	tunnels *db.TunnelRepository
 	history *db.HistoryRepository
+	drivers *target.Runtime
 }
 
-func NewHandler(tickets *db.TicketRepository, log *slog.Logger, conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository) *Handler {
-	return &Handler{tickets: tickets, log: log, conns: conns, tunnels: tunnels, history: history}
+func NewHandler(tickets *db.TicketRepository, log *slog.Logger, conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, runtimes ...*target.Runtime) *Handler {
+	return &Handler{tickets: tickets, log: log, conns: conns, tunnels: tunnels, history: history, drivers: target.Default(runtimes)}
 }
 
 func claimsOf(r *http.Request) *auth.Claims {
@@ -99,7 +100,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("目标数据源不存在或不支持 SQL"))
 		return
 	}
-	if _, err = sqlparse.Parse(in.SQL, conn.Type); err != nil {
+	if _, err = sqlparse.Parse(in.SQL, conn.SQLDialect()); err != nil {
 		httpx.Fail(w, httpx.BadRequest(err.Error()))
 		return
 	}
@@ -238,7 +239,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	start := time.Now()
-	handle, execErr := target.OpenRelational(ctx, conn, password, tunnel)
+	handle, execErr := h.drivers.OpenRelational(ctx, conn, password, tunnel)
 	var result *target.ExecResult
 	if execErr == nil {
 		defer handle.Close()

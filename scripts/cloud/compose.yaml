@@ -1,4 +1,24 @@
 services:
+  jdbc:
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    command: ["sh", "/app/scripts/cloud/jdbc-runtime.sh"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    environment:
+      DBHUB_RUNTIME_UID: ${DBHUB_UID}
+      DBHUB_RUNTIME_GID: ${DBHUB_GID}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app:ro
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
   postgres:
     image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:

@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/user/dbhub/internal/connector"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,16 +20,7 @@ type TestedVersion struct {
 }
 
 // Compatibility 描述连接所报告的版本和验证范围，不等同于所有 SQL/部署模式均受支持。
-type Compatibility struct {
-	Engine        string `json:"engine"`
-	Product       string `json:"product"`
-	Version       string `json:"version"`
-	Branch        string `json:"branch"`
-	Status        string `json:"status"`
-	TestedVersion string `json:"tested_version,omitempty"`
-	Mode          string `json:"mode,omitempty"`
-	Message       string `json:"message"`
-}
+type Compatibility = connector.Compatibility
 
 var numericVersion = regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?`)
 var tidbVersion = regexp.MustCompile(`(?i)tidb[- ]v?(\d+\.\d+\.\d+)`)

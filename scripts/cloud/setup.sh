@@ -6,7 +6,7 @@ command -v docker >/dev/null
 docker compose version >/dev/null
 scripts/cloud/dev.sh stop backend frontend
 scripts/cloud/dev.sh pull
-scripts/cloud/dev.sh up -d --wait postgres mysql redis
+scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
 scripts/cloud/dev.sh run --rm --no-deps frontend npm ci --no-audit --no-fund
 scripts/cloud/dev.sh run --rm --no-deps backend sh -ec 'go test -p=4 ./...; go build -p=4 -o /runtime/dbhub-backend ./cmd/server'
 scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm run test:query; npm run build'

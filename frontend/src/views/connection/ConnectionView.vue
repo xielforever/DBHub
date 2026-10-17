@@ -2,11 +2,11 @@
   <div class="space-y-5">
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold">数据源管理</h1>
-        <p class="text-sm text-white/45 mt-1">统一纳管 MySQL / PostgreSQL / Redis 连接，凭据加密存储，测试连接可查看版本兼容情况。</p>
+        <h1 class="text-xl font-semibold">数据源</h1>
+        <p class="text-sm text-white/45 mt-1">管理内置与自定义 JDBC 数据源，测试连接后查看实际版本及兼容情况。</p>
       </div>
       <button v-if="canWrite" class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
-        <Plus class="w-4 h-4" />新建连接
+        <Plus class="w-4 h-4" />新建数据源
       </button>
     </header>
 
@@ -33,10 +33,11 @@
           <el-option label="MySQL" value="mysql" />
           <el-option label="PostgreSQL" value="postgres" />
           <el-option label="Redis" value="redis" />
+          <el-option label="自定义 JDBC" value="jdbc" />
         </el-select>
       </div>
       <button class="ghost-button text-xs py-1.5 px-3 flex items-center gap-1" @click="goProxies">
-        <Waypoints class="w-3.5 h-3.5" />代理管理
+        <Waypoints class="w-3.5 h-3.5" />连接代理
       </button>
     </div>
 
@@ -44,17 +45,17 @@
       <section v-if="connections.length" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         <article v-for="conn in connections" :key="conn.id" class="glass-card p-5 hover:-translate-y-1 flex flex-col gap-4">
           <div class="flex items-start gap-3.5">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" :style="{ background: typeMeta[conn.type].tint }">
-              <component :is="typeMeta[conn.type].icon" class="w-5 h-5" :style="{ color: typeMeta[conn.type].color }" />
+            <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" :style="{ background: (typeMeta[conn.type] || typeMeta.jdbc).tint }">
+              <component :is="(typeMeta[conn.type] || typeMeta.jdbc).icon" class="w-5 h-5" :style="{ color: (typeMeta[conn.type] || typeMeta.jdbc).color }" />
             </div>
             <div class="min-w-0 flex-1">
               <h3 class="font-medium truncate">{{ conn.name }}</h3>
-              <p class="text-xs text-white/45 mt-0.5 truncate">{{ conn.host }}:{{ conn.port }}</p>
+              <p class="text-xs text-white/45 mt-0.5 truncate">{{ conn.port ? `${conn.host}:${conn.port}` : conn.database }}</p>
             </div>
           </div>
 
           <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ typeMeta[conn.type].label }}</span>
+            <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ sourceLabel(conn) }}{{ conn.type === 'jdbc' ? ' · JDBC' : '' }}</span>
             <span class="px-2 py-0.5 rounded-full" :class="envMeta[conn.environment || 'dev'].cls">
               {{ envMeta[conn.environment || 'dev'].label }}
             </span>
@@ -70,14 +71,15 @@
             </span>
           </div>
 
+          <p v-if="conn.capabilities?.reason" class="text-xs text-amber-200" role="status">{{ conn.capabilities.reason }}</p>
           <p v-if="connectionChecks[conn.id]" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(connectionChecks[conn.id]!)">
-            最近测试：{{ compatibilityText(connectionChecks[conn.id]!) }}
+            最近检查：{{ compatibilityText(connectionChecks[conn.id]!) }}
             <span v-if="connectionChecks[conn.id]!.checked_at" class="block text-white/40">{{ checkTime(connectionChecks[conn.id]!.checked_at) }} · {{ connectionChecks[conn.id]!.elapsed_ms }} ms</span>
           </p>
 
           <div class="flex items-center gap-2 pt-2 border-t border-white/10">
             <button class="ghost-button flex-1 text-xs py-2 flex items-center justify-center gap-1.5" @click="goQuery(conn)">
-              <SquareTerminal class="w-3.5 h-3.5" />查询
+              <SquareTerminal class="w-3.5 h-3.5" />打开
             </button>
             <button
               class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors"
@@ -89,18 +91,18 @@
               <Zap class="w-4 h-4" />
             </button>
             <button
-              v-if="canWrite"
+              v-if="canEdit(conn)"
               class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-white/10 hover:text-white transition-colors"
-              aria-label="编辑连接"
+              aria-label="编辑数据源"
               title="编辑"
               @click="openEdit(conn)"
             >
               <Pencil class="w-4 h-4" />
             </button>
             <button
-              v-if="canWrite"
+              v-if="canEdit(conn)"
               class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
-              aria-label="删除连接"
+              aria-label="删除数据源"
               title="删除"
               @click="remove(conn)"
             >
@@ -111,33 +113,48 @@
       </section>
       <div v-else-if="!connLoading" class="glass-card p-12 flex flex-col items-center justify-center gap-3 text-center">
         <Database class="w-10 h-10 text-white/20" />
-        <p class="text-white/55 text-sm">还没有数据源，点击右上角「新建连接」接入第一个数据库</p>
+        <p class="text-white/55 text-sm">还没有数据源，点击右上角「新建数据源」接入第一个数据库</p>
       </div>
     </div>
 
     <!-- 连接弹窗 -->
     <el-dialog
       v-model="connDialog"
-      :title="connForm.id ? '编辑连接' : '新建连接'"
+      :title="connForm.id ? '编辑数据源' : '新建数据源'"
       :width="dialogWidth"
       :close-on-click-modal="false"
       class="glass-dialog"
     >
       <el-form label-position="top" class="space-y-1">
         <p class="text-xs text-white/45 mb-3">基本信息</p>
-        <el-form-item label="连接名称">
+        <el-form-item label="数据源名称">
           <el-input v-model="connForm.name" placeholder="例如：生产环境-订单库" />
         </el-form-item>
-        <el-form-item label="数据库类型">
+        <el-form-item label="数据源类型">
           <el-select v-model="connForm.type" class="w-full" popper-class="glass-popper" @change="onTypeChange">
             <el-option label="MySQL" value="mysql" />
             <el-option label="PostgreSQL" value="postgres" />
             <el-option label="Redis" value="redis" />
+            <el-option label="自定义 JDBC" value="jdbc" />
           </el-select>
         </el-form-item>
         <p class="text-xs text-white/50 leading-relaxed" data-testid="version-support-hint">{{ versionHint }}</p>
 
+        <template v-if="connForm.type === 'jdbc'">
+          <el-form-item label="数据源模板">
+            <el-select v-model="connForm.template_revision_id" class="w-full" aria-label="数据源模板" placeholder="选择已发布模板" @change="onTemplateChange">
+              <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="`${t.name} · 修订 ${t.revision}`" :disabled="!t.enabled || !t.driver.enabled" />
+            </el-select>
+          </el-form-item>
+          <p v-if="!templates.length" class="text-xs text-amber-200">暂无已发布模板。<RouterLink v-if="userStore.role === 'admin'" to="/settings" class="underline">前往系统设置登记驱动并发布模板</RouterLink><span v-else>请联系管理员配置驱动与数据源模板。</span></p>
+          <p v-if="selectedTemplate" class="text-xs text-white/45">{{ selectedTemplate.product }} · {{ selectedTemplate.driver.name }} {{ selectedTemplate.driver.version }} · {{ selectedTemplate.dialect ? 'SQL 与结构浏览' : '仅结构浏览' }}</p>
+          <el-form-item v-for="field in selectedTemplate?.fields || []" :key="field.name" :label="field.label">
+            <el-input v-model="jdbcParameters[field.name]" :type="field.type === 'integer' ? 'number' : 'text'" :placeholder="field.default || field.label" />
+          </el-form-item>
+        </template>
+
         <p class="text-xs text-white/45 mb-3 mt-4">连接信息</p>
+        <template v-if="connForm.type !== 'jdbc'">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <el-form-item label="主机" class="sm:col-span-2">
             <el-input v-model="connForm.host" placeholder="192.168.1.10" />
@@ -149,6 +166,7 @@
         <el-form-item :label="connForm.type === 'redis' ? '数据库编号（0-15，可选）' : '默认数据库（可选）'">
           <el-input v-model="connForm.database" :placeholder="connForm.type === 'redis' ? '0' : '业务库名'" />
         </el-form-item>
+        </template>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <el-form-item :label="connForm.type === 'redis' ? 'ACL 用户名（可选）' : '用户名'">
             <el-input v-model="connForm.username" />
@@ -160,18 +178,18 @@
               show-password
               :placeholder="connForm.id && !connForm.password ? '已保存，留空表示不修改' : 'AES-256-GCM 加密存储'"
             />
-            <p v-if="connForm.id" class="text-[11px] text-white/40 mt-1">留空使用已保存口令；修改连接地址、账号、TLS 或代理后，测试需重新输入口令。</p>
+            <p v-if="connForm.id" class="text-[11px] text-white/40 mt-1">留空使用已保存口令；修改连接目标、JDBC 模板或参数、账号、TLS 或代理后，测试需重新输入口令。</p>
           </el-form-item>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <el-form-item label="SSL 模式">
             <el-select v-model="connForm.ssl_mode" class="w-full" popper-class="glass-popper">
               <el-option label="禁用（内网明文）" value="disable" />
-              <el-option label="加密并验证证书" value="verify-full" />
+              <el-option label="加密并验证证书" value="verify-full" :disabled="selectedTemplate && !['org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.driver.class_name)" />
             </el-select>
           </el-form-item>
           <el-form-item label="连接超时（秒）">
-            <el-input v-model.number="connForm.connection_timeout" type="number" :min="1" :max="60" />
+            <el-input v-model.number="connForm.connection_timeout" type="number" :min="1" :max="30" />
           </el-form-item>
         </div>
         <el-form-item label="所属环境（资产徽标与高危操作提示依据）">
@@ -181,12 +199,12 @@
             <el-option label="生产环境（prod）" value="prod" />
           </el-select>
         </el-form-item>
-        <el-form-item label="代理（可选）">
+        <el-form-item v-if="connForm.type !== 'jdbc'" label="代理（可选）">
           <el-select v-model="connForm.proxy_id" class="w-full" popper-class="glass-popper" clearable placeholder="不使用代理">
             <el-option label="不使用代理" :value="null" />
             <el-option v-for="p in proxies" :key="p.id" :label="`${p.name}（${p.type} ${p.host}:${p.port}）`" :value="p.id" />
           </el-select>
-          <p class="text-[11px] text-white/30 mt-1">在代理管理创建代理后在此选用，连接测试和查询均使用该代理。</p>
+          <p class="text-[11px] text-white/30 mt-1">在连接代理创建代理后在此选用，连接测试和查询均使用该代理。</p>
         </el-form-item>
         <p v-if="formTest" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(formTest)" data-testid="connection-version-result">
           {{ compatibilityText(formTest) }}
@@ -229,6 +247,7 @@ import {
 } from 'lucide-vue-next'
 import {
   connectionApi,
+  sourceLabel,
   type ConnectionItem,
   type ConnectionPayload,
   type DbType,
@@ -240,10 +259,14 @@ import {
 import { proxyApi, type ProxyItem } from '../../api/proxy'
 import { useUserStore } from '../../stores/user'
 import { ApiRequestError } from '../../utils/request'
+import { connectorApi, type DatasourceTemplate } from '../../api/connector'
 
 const router = useRouter()
 const userStore = useUserStore()
-const canWrite = computed(() => userStore.role !== 'readonly')
+const canWrite = computed(() => ['admin','developer'].includes(userStore.role))
+const canEdit = (c: ConnectionItem) => canWrite.value && (userStore.role === 'admin' || userStore.user?.id === c.user_id)
+const templates = ref<DatasourceTemplate[]>([])
+const jdbcParameters = reactive<Record<string,string>>({})
 
 const keyword = ref('')
 const typeFilter = ref('all')
@@ -281,6 +304,7 @@ const typeMeta: Record<DbType, { label: string; color: string; tint: string; ico
   mysql: { label: 'MySQL', color: '#60a5fa', tint: 'rgba(59,130,246,0.16)', icon: Database },
   postgres: { label: 'PostgreSQL', color: '#a78bfa', tint: 'rgba(167,139,250,0.16)', icon: Database },
   redis: { label: 'Redis', color: '#f472b6', tint: 'rgba(236,72,153,0.14)', icon: Server },
+  jdbc: { label: '自定义 JDBC', color: '#34d399', tint: 'rgba(52,211,153,0.14)', icon: Database },
 }
 
 const envMeta: Record<EnvKind, { label: string; cls: string }> = {
@@ -315,6 +339,7 @@ async function fetchProxies() {
 onMounted(() => {
   fetchConnections()
   fetchProxies()
+  void connectorApi.templates().then(result => { templates.value = result.items }).catch(() => {})
   void connectionApi.compatibility().then(result => { testedVersions.value = result.items }).catch(() => { /* 拦截器已提示 */ })
 })
 
@@ -341,11 +366,13 @@ const emptyConnForm = (): ConnForm => ({
   environment: 'dev',
   ssh_tunnel_id: null,
   proxy_id: null,
+  template_revision_id: null,
 })
 const connDialog = ref(false)
 const connForm = reactive<ConnForm>(emptyConnForm())
 const saving = ref(false)
 const testing = ref(false)
+const selectedTemplate = computed(() => templates.value.find(t => t.id === connForm.template_revision_id))
 const versionHint = computed(() => {
   const branches = testedVersions.value.filter(item => item.engine === connForm.type && item.tested_version).map(item => item.branch)
   return branches.length ? `已验证分支：${branches.join(' / ')}。测试连接可确认当前服务端版本。` : '测试连接后显示版本识别结果；其他版本的兼容性需要单独确认。'
@@ -354,11 +381,20 @@ const versionHint = computed(() => {
 watch(() => JSON.stringify({ id: connForm.id, payload: payloadOf() }), () => { formTest.value = null })
 
 function onTypeChange(type: DbType) {
-  connForm.port = { mysql: 3306, postgres: 5432, redis: 6379 }[type]
+  connForm.port = { mysql: 3306, postgres: 5432, redis: 6379, jdbc: 0 }[type]
+  connForm.template_revision_id = null
+  for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
+  if (type === 'jdbc') { connForm.proxy_id = null; connForm.ssh_tunnel_id = null }
+}
+function onTemplateChange() {
+  for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
+  for (const field of selectedTemplate.value?.fields || []) jdbcParameters[field.name] = field.default || ''
+  if (selectedTemplate.value && !['org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.value.driver.class_name)) connForm.ssl_mode = 'disable'
 }
 function openCreate() {
   formTest.value = null
   Object.assign(connForm, emptyConnForm())
+  for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
   connDialog.value = true
 }
 function openEdit(c: ConnectionItem) {
@@ -378,7 +414,10 @@ function openEdit(c: ConnectionItem) {
     environment: c.environment || 'dev',
     ssh_tunnel_id: c.ssh_tunnel_id,
     proxy_id: (c as any).proxy_id ?? null,
+    template_revision_id: c.template_revision_id ?? null,
   })
+  for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
+  Object.assign(jdbcParameters, c.parameters || {})
   connDialog.value = true
 }
 
@@ -386,9 +425,9 @@ function payloadOf(): ConnectionPayload {
   return {
     name: connForm.name.trim(),
     type: connForm.type,
-    host: connForm.host.trim(),
-    port: Number(connForm.port),
-    database: connForm.database?.trim() || '',
+    host: connForm.type === 'jdbc' ? jdbcParameters.host || 'jdbc-memory' : connForm.host.trim(),
+    port: connForm.type === 'jdbc' ? Number(jdbcParameters.port || 0) : Number(connForm.port),
+    database: connForm.type === 'jdbc' ? jdbcParameters.database || '' : connForm.database?.trim() || '',
     username: connForm.username?.trim() || '',
     password: connForm.password ?? '',
     ssl_mode: connForm.ssl_mode,
@@ -397,22 +436,24 @@ function payloadOf(): ConnectionPayload {
     environment: connForm.environment || 'dev',
     ssh_tunnel_id: connForm.ssh_tunnel_id ?? null,
     proxy_id: (connForm as any).proxy_id ?? null,
+    ...(connForm.type === 'jdbc' ? { template_revision_id: connForm.template_revision_id, parameters: {...jdbcParameters} } : {}),
   }
 }
 
 async function saveConnection() {
-  if (!connForm.name.trim() || !connForm.host.trim()) {
-    ElMessage.warning('请填写连接名称与主机')
+  if (saving.value) return
+  if (!connForm.name.trim() || (connForm.type !== 'jdbc' && !connForm.host.trim()) || (connForm.type === 'jdbc' && !selectedTemplate.value)) {
+    ElMessage.warning('请填写数据源名称与主机')
     return
   }
   saving.value = true
   try {
     if (connForm.id) {
       await connectionApi.update(connForm.id, payloadOf())
-      ElMessage.success('连接已更新')
+      ElMessage.success('数据源已更新')
     } else {
       await connectionApi.create(payloadOf())
-      ElMessage.success('连接已创建')
+      ElMessage.success('数据源已创建')
     }
     connDialog.value = false
     await fetchConnections()
@@ -425,7 +466,7 @@ async function saveConnection() {
 
 async function testUnsaved() {
   if (testing.value) return
-  if (!connForm.host.trim()) {
+  if ((connForm.type !== 'jdbc' && !connForm.host.trim()) || (connForm.type === 'jdbc' && !selectedTemplate.value)) {
     ElMessage.warning('请先填写主机与端口')
     return
   }

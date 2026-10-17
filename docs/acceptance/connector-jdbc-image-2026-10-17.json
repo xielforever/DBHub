@@ -1,0 +1,84 @@
+{
+  "scope": "jdbc-production-image",
+  "checks": [
+    "production image loads checksum-verified PostgreSQL, MySQL and H2 artifacts",
+    "private JDBC operations reject a missing service identity",
+    "a real session rejects a different owner",
+    "the Java execution key rejects a duplicate without redispatch",
+    "postgresql verifies a trusted TLS certificate and executes a server-readonly query",
+    "postgresql rejects a certificate hostname mismatch",
+    "postgresql rejects a certificate outside the default trust store",
+    "mysql verifies a trusted TLS certificate and executes a server-readonly query",
+    "MySQL JDBC preserves the referenced catalog of a cross-database foreign key",
+    "mysql rejects a certificate hostname mismatch",
+    "mysql rejects a certificate outside the default trust store",
+    "owned sessions are removed after success and TLS failures"
+  ],
+  "artifacts": [
+    {
+      "id": "postgresql-42.7.7",
+      "name": "postgresql",
+      "version": "42.7.7",
+      "class_name": "org.postgresql.Driver",
+      "sha256": "157963d60ae66d607e09466e8c0cdf8087e9cb20d0159899ffca96bca2528460",
+      "ready": true
+    },
+    {
+      "id": "mysql-8.4.0",
+      "name": "mysql",
+      "version": "8.4.0",
+      "class_name": "com.mysql.cj.jdbc.Driver",
+      "sha256": "d77962877d010777cff997015da90ee689f0f4bb76848340e1488f2b83332af5",
+      "ready": true
+    },
+    {
+      "id": "h2-2.4.240",
+      "name": "h2",
+      "version": "2.4.240",
+      "class_name": "org.h2.Driver",
+      "sha256": "29b70e427cc1c40cdc376283adbb0cc62853073797bb5fe5761f81fe73d57ce0",
+      "ready": true
+    }
+  ],
+  "tls_profiles": [
+    {
+      "product": "postgresql",
+      "server_version": "16.15",
+      "driver_version": "42.7.7"
+    },
+    {
+      "product": "mysql",
+      "server_version": "8.4.11",
+      "driver_version": "mysql-connector-j-8.4.0 (Revision: 1c3f5c149e0bfe31c7fbeb24e2d260cd890972c4)"
+    }
+  ],
+  "fixtures": [
+    "Private protocol creates the H2 execution-key fixture; public H2 SQL remains disabled.",
+    "Short-lived self-signed TLS fixture is trusted only by an isolated image-check container."
+  ],
+  "image_id": "sha256:e688e434cf30c36f5b8ec753a8a62ed839525beff244ac49ab7b2fb314130fc3",
+  "exit_code": 0,
+  "cleanup_succeeded": true,
+  "runtime_user": "10001:10001",
+  "read_only_root_filesystem": true,
+  "go_integration": {
+    "passed_test_items": 12,
+    "passed_tests": [
+      "TestConnectorJDBCRealHTTP/admin-only-registration-and-immutable-revisions",
+      "TestConnectorJDBCRealHTTP/custom-h2-connects-browses-and-collects-without-sql",
+      "TestConnectorJDBCRealHTTP/revision-pinning-disabled-state-and-reference-protection",
+      "TestConnectorJDBCRealHTTP/jdbc-postgres-parameters-types-and-saved-check",
+      "TestConnectorJDBCRealHTTP/jdbc-writes-are-not-replayed-and-readonly-is-enforced",
+      "TestConnectorJDBCRealHTTP/jdbc-transaction-pins-session-commits-and-rolls-back",
+      "TestConnectorJDBCRealHTTP/lost-jdbc-write-response-remains-unknown-without-retry",
+      "TestConnectorJDBCRealHTTP/jdbc-mysql-real-driver-and-server-readonly",
+      "TestConnectorJDBCRealHTTP/jdbc-null-binary-time-and-field-budget",
+      "TestConnectorJDBCRealHTTP/jdbc-honors-an-execution-budget-above-thirty-seconds",
+      "TestConnectorJDBCRealHTTP/jdbc-deadline-and-driver-disable-close-new-access",
+      "TestConnectorJDBCRealHTTP"
+    ],
+    "skipped_tests": [],
+    "failed_tests": [],
+    "log_sha256": "0aa5eec3484ffaad34be2af4b0f05fe107031df5832b22f5ae5c85c8a32c9401"
+  }
+}

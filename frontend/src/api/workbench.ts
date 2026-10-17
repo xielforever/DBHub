@@ -1,5 +1,5 @@
 /**
- * SQL 工作台 API：执行、元数据浏览、表数据预览、查询历史
+ * 数据工作台 API：执行、元数据浏览、表数据预览、查询历史
  */
 import request from '../utils/request'
 import { newRequestId } from '../utils/request-id'
@@ -36,6 +36,7 @@ export interface TableInfo {
 export interface ColumnInfo {
   name: string
   data_type: string
+  comment?: string
   is_nullable: boolean
   is_primary: boolean
   default?: string
@@ -74,6 +75,7 @@ export interface RedisOverview {
   connected_clients: number
   used_memory_mb: number
   total_commands: number
+  total_keys: number
   keyspaces: { db: string; keys: number; expires: number }[]
 }
 

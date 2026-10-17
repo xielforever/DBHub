@@ -15,20 +15,21 @@ import (
 
 // MetaSnapshot 一张表/视图的采集快照。
 type MetaSnapshot struct {
-	ID            int64           `json:"id"`
-	ConnectionID  int64           `json:"connection_id"`
-	DatabaseName  string          `json:"database_name"`
-	SchemaName    string          `json:"schema_name"`
-	TableName     string          `json:"table_name"`
-	TableType     string          `json:"table_type"`
-	TableComment  string          `json:"table_comment"`
-	EstimatedRows int64           `json:"estimated_rows"`
-	DataBytes     int64           `json:"data_bytes"`
-	RawColumns    json.RawMessage `json:"raw_columns"`
-	RawIndexes    json.RawMessage `json:"raw_indexes"`
-	RawKeys       json.RawMessage `json:"raw_keys"`
-	DDLText       string          `json:"ddl_text"`
-	SyncedAt      time.Time       `json:"synced_at"`
+	ID             int64           `json:"id"`
+	ConnectionID   int64           `json:"connection_id"`
+	DatabaseName   string          `json:"database_name"`
+	SchemaName     string          `json:"schema_name"`
+	TableName      string          `json:"table_name"`
+	TableType      string          `json:"table_type"`
+	TableComment   string          `json:"table_comment"`
+	EstimatedRows  int64           `json:"estimated_rows"`
+	DataBytes      int64           `json:"data_bytes"`
+	RawColumns     json.RawMessage `json:"raw_columns"`
+	RawIndexes     json.RawMessage `json:"raw_indexes"`
+	RawKeys        json.RawMessage `json:"raw_keys"`
+	DDLText        string          `json:"ddl_text"`
+	SyncedAt       time.Time       `json:"synced_at"`
+	MetadataStatus json.RawMessage `json:"metadata_status"`
 }
 
 // AssetAnnotation 表级或列级人工标注。
@@ -109,12 +110,15 @@ func upsertSnapshot(ctx context.Context, writer interface {
 	if s.RawKeys == nil {
 		s.RawKeys = json.RawMessage("[]")
 	}
+	if s.MetadataStatus == nil {
+		s.MetadataStatus = json.RawMessage("{}")
+	}
 	return writer.QueryRow(ctx, `
 		INSERT INTO sys_meta_snapshots
 			(connection_id, database_name, schema_name, table_name, table_type,
 			 table_comment, estimated_rows, data_bytes, raw_columns, raw_indexes,
-			 raw_keys, ddl_text, synced_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+			 raw_keys, ddl_text, metadata_status,synced_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW())
 		ON CONFLICT ON CONSTRAINT uq_meta_snapshot_obj DO UPDATE SET
 			table_type = EXCLUDED.table_type,
 			table_comment = EXCLUDED.table_comment,
@@ -123,12 +127,12 @@ func upsertSnapshot(ctx context.Context, writer interface {
 			raw_columns = EXCLUDED.raw_columns,
 			raw_indexes = EXCLUDED.raw_indexes,
 			raw_keys = EXCLUDED.raw_keys,
-			ddl_text = EXCLUDED.ddl_text,
+			ddl_text = EXCLUDED.ddl_text,metadata_status=EXCLUDED.metadata_status,
 			synced_at = NOW()
 		RETURNING id, synced_at`,
 		s.ConnectionID, s.DatabaseName, s.SchemaName, s.TableName, s.TableType,
 		s.TableComment, s.EstimatedRows, s.DataBytes, s.RawColumns, s.RawIndexes,
-		s.RawKeys, s.DDLText,
+		s.RawKeys, s.DDLText, s.MetadataStatus,
 	).Scan(&s.ID, &s.SyncedAt)
 }
 
@@ -222,7 +226,7 @@ func (r *MetadataRepository) ListTables(ctx context.Context, f TableListFilter) 
 	listSQL := `
 		SELECT s.id, s.connection_id, s.database_name, s.schema_name, s.table_name,
 		       s.table_type, s.table_comment, s.estimated_rows, s.data_bytes,
-		       s.raw_columns, s.raw_indexes, s.raw_keys, s.ddl_text, s.synced_at,
+		       s.raw_columns, s.raw_indexes, s.raw_keys, s.ddl_text, s.synced_at,s.metadata_status,
 		       a.owner_user_id, COALESCE(u.username, ''),
 		       COALESCE(a.business_desc, ''),
 		       COALESCE(a.tags, '{}'),
@@ -251,7 +255,7 @@ func (r *MetadataRepository) ListTables(ctx context.Context, f TableListFilter) 
 		if err := rows.Scan(
 			&it.ID, &it.ConnectionID, &it.DatabaseName, &it.SchemaName, &it.TableName,
 			&it.TableType, &it.TableComment, &it.EstimatedRows, &it.DataBytes,
-			&it.RawColumns, &it.RawIndexes, &it.RawKeys, &it.DDLText, &it.SyncedAt,
+			&it.RawColumns, &it.RawIndexes, &it.RawKeys, &it.DDLText, &it.SyncedAt, &it.MetadataStatus,
 			&it.OwnerID, &it.OwnerName, &it.BusinessDesc, &it.Tags, &it.Sensitivity,
 			&it.Starred, &it.SensitiveColCount,
 		); err != nil {
@@ -268,14 +272,14 @@ func (r *MetadataRepository) GetSnapshot(ctx context.Context, connID int64, data
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, connection_id, database_name, schema_name, table_name, table_type,
 		       table_comment, estimated_rows, data_bytes, raw_columns, raw_indexes,
-		       raw_keys, ddl_text, synced_at
+		       raw_keys, ddl_text, synced_at,metadata_status
 		FROM sys_meta_snapshots
 		WHERE connection_id = $1 AND database_name = $2
 		  AND schema_name = COALESCE(NULLIF($3, ''), schema_name) AND table_name = $4`,
 		connID, database, schema, table,
 	).Scan(&s.ID, &s.ConnectionID, &s.DatabaseName, &s.SchemaName, &s.TableName,
 		&s.TableType, &s.TableComment, &s.EstimatedRows, &s.DataBytes,
-		&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt)
+		&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt, &s.MetadataStatus)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -289,7 +293,7 @@ func (r *MetadataRepository) GetSnapshot(ctx context.Context, connID int64, data
 func (r *MetadataRepository) ListSnapshots(ctx context.Context, connID int64) ([]MetaSnapshot, error) {
 	q := `SELECT id, connection_id, database_name, schema_name, table_name, table_type,
 	             table_comment, estimated_rows, data_bytes, '[]'::jsonb,
-	             '[]'::jsonb, '[]'::jsonb, '', synced_at
+	             '[]'::jsonb, '[]'::jsonb, '', synced_at,metadata_status
 	      FROM sys_meta_snapshots`
 	args := []any{}
 	if connID > 0 {
@@ -307,7 +311,7 @@ func (r *MetadataRepository) ListSnapshots(ctx context.Context, connID int64) ([
 		var s MetaSnapshot
 		if err := rows.Scan(&s.ID, &s.ConnectionID, &s.DatabaseName, &s.SchemaName, &s.TableName,
 			&s.TableType, &s.TableComment, &s.EstimatedRows, &s.DataBytes,
-			&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt); err != nil {
+			&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt, &s.MetadataStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

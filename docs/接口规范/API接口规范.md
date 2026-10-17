@@ -465,13 +465,13 @@ JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`reques
 
 ---
 
-## 10. 数据资产 (Assets，M1)
+## 10. 数据目录 (Assets)
 
 > 所有接口需登录。**读接口**（overview/tree/tables/table/search/users-brief）任意登录角色可用；
-> **同步字典、写入标注**仅 `admin`、`developer`，`readonly` 返回 `40300`；**收藏**任意登录用户可用。
-> 资产快照由「同步字典」动作采集，人工标注独立存储，重新同步不覆盖人工内容。
+> **采集结构、写入标注**仅 `admin`、`developer`，`readonly` 返回 `40300`；**收藏**任意登录用户可用。
+> 结构快照由「采集结构」动作采集，人工标注独立存储，重新同步不覆盖人工内容。
 
-### 10.1 同步字典
+### 10.1 采集结构
 
 **POST** `/api/v1/assets/sync`（写角色，记审计）
 
@@ -481,9 +481,9 @@ JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`reques
 ```
 空请求体或 `{}` 表示全量。显式 `connection_id` 必须为正整数，0、负数、null、未知字段或尾随 JSON 返回 400。
 
-串行采集，整体超时 4 分钟；非关系型（redis 等）标记 `skipped`。每个数据源的全部库/Schema 成功采集后，一次事务发布快照和清理过期对象；部分失败、取消、超时或配置变更均保留该源原快照，返回 `status=failed`、发布计数为 0。错误聚合进 `errors`，不中断其余数据源。
+串行采集，整体超时 4 分钟；非关系型（redis 等）标记 `skipped`。每个数据源的全部库/Schema 成功采集后，一次事务发布快照和清理过期对象；发布前的读取失败、取消、超时或配置变更均保留该源原快照，返回 `status=failed`、发布计数为 0。错误聚合进 `errors`，不中断其余数据源。
 
-同一元数据库下的同源采集跨后端互斥。单源请求重复采集返回 409；全量请求将冲突源标为 `busy` 并继续其他源。结果状态为 `succeeded | failed | busy | skipped`。
+同一元数据库下的同源采集跨后端互斥。单源请求重复采集返回 409；全量请求将冲突源标为 `busy` 并继续其他源。结果状态为 `succeeded | failed | busy | skipped | unknown`；提交确认丢失为 `unknown`，可能已经发布，刷新数据目录核实，不自动重试。
 
 **Response data:**
 ```json
@@ -895,3 +895,48 @@ emits: (e:'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_
 - 血缘 → 数据资产详情 `血缘` Tab（12）
 
 
+
+
+## 连接器目录、自定义数据源与能力
+
+所有接口使用 `Authorization: Bearer <access_token>`，沿用统一 envelope。驱动与模板写入仅 admin，写入接受严格 JSON、记审计；普通登录用户只读模板与驱动摘要，不返回路径或凭据。
+
+| 方法/路径（/api/v1） | 行为 |
+| --- | --- |
+| GET /connector-drivers/available | admin 读取 JDBC 服务实际可加载、校验通过的制品 |
+| GET /connector-drivers | 已登记驱动摘要列表 |
+| POST /connector-drivers | admin 登记 `{ "artifact_id":"postgresql-42.7.7", "name":"PostgreSQL JDBC" }`；重复制品 409 |
+| PATCH /connector-drivers/{id}/status | admin `{ "enabled": false }`；停用阻止新会话，不重派已有执行 |
+| DELETE /connector-drivers/{id} | admin 删除未引用版本，引用中返回 409 |
+| GET /datasource-templates | 登录用户读取模板列表；admin 可包含停用版本 |
+| POST /datasource-templates | admin 发布第一个不可变修订 |
+| PUT /datasource-templates/{id} | admin 按相同 key 发布新修订，不改旧实例 |
+| PATCH /datasource-templates/{id}/status | admin 启停指定修订 |
+| DELETE /datasource-templates/{id} | admin 删除未引用修订，引用中返回 409 |
+| GET /connections/{id}/capabilities | 取得配置绑定和实际实现的能力，不触发目标 SQL |
+
+模板请求示例：
+
+```json
+{"template_key":"pg-jdbc","name":"PostgreSQL JDBC","product":"PostgreSQL","driver_id":1,"dialect":"postgres","url_template":"jdbc:postgresql://{host}:{port}/{database}","fields":[{"name":"host","label":"主机","type":"string","required":true},{"name":"port","label":"端口","type":"integer","required":true,"default":"5432"},{"name":"database","label":"数据库","type":"string","required":true}]}
+```
+
+fields 只定义 URL 占位参数，不接受凭据、任意 JDBC 属性或执行脚本。驱动对应可校验的 URL 结构；未知驱动须先加入部署制品清单；通用网络模板要求包含 `//{host}:{port}`，只提供结构浏览，不启用完整采集。特殊 URL、认证和范围映射需额外适配。`dialect` 默认为空，仅元数据；mysql/postgres 方言须与实际驱动家族匹配。URL 不含用户名和密码。缺字段、未知字段、非法 URL/模板返回 400；目标类型或传输能力未实现返回 400；制品或服务不可用返回 503；不存在返回 404；版本重复/被引用返回 409；无权限返回 403。
+
+JDBC 实例沿用 /connections CRUD 和测试接口，扩展如下字段：
+
+```json
+{"name":"分析库","type":"jdbc","template_revision_id":1,"parameters":{"host":"postgres","port":"5432","database":"analytics"},"host":"postgres","port":5432,"database":"analytics","username":"analyst","password":"<only-in-request>","ssl_mode":"disable","connection_timeout":10,"environment":"test"}
+```
+
+实例的 host/port/database 从模板参数规范化，不以重复字段覆盖模板。JDBC 第一版支持直连；PostgreSQL/MySQL 已验证 TLS 的可信 CA、主机名检查与失败关闭。H2 内存演示及未知产品不开放 TLS 选项，代理和 SSH 明确拒绝。编辑留空可复用口令，但模板、参数、身份、TLS 等目标信息变化时草稿测试要求重输；保存后检查按配置修订失效。实例响应增加 template_revision_id、parameters、template 摘要、capabilities，不返回口令。`type=jdbc` 只是兼容字段，产品、驱动、方言来自绑定的模板。
+
+能力响应示例：
+
+```json
+{"code":0,"message":"ok","data":{"sql":true,"format":true,"metadata":true,"collect":true,"keys":false,"transactions":true,"enforced_read_only":true}}
+```
+
+JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确小数和大整数以无损文本返回，二进制以显式编码返回，响应可附列类型。JDBC 的连接结果与兼容性分开，原生矩阵不自动授予 JDBC 已验证状态。元数据不支持的 DDL/统计由 metadata_status 标识，不以 0 或空文本冒充已读取；采集仍整轮原子发布。
+
+结构采集的 `status` 为 `succeeded|failed|busy|skipped|unknown`。`unknown` 表示元数据库提交确认丢失，可能已经发布；客户端提示刷新数据目录核实，不能将其表述为失败并保留旧快照。JDBC 默认只对实例配置库提供元数据，响应 `metadata_status` 记录不支持的 DDL/统计；完整采集单独检查 `collect`。

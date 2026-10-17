@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/target"
 )
 
 // Handler 查询工作台处理器。
@@ -28,10 +28,11 @@ type Handler struct {
 	jobs     *jobs
 	controls *db.QueryControls
 	metrics  *queryMetrics
+	drivers  *target.Runtime
 }
 
-func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger, controls *db.QueryControls) *Handler {
-	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls, metrics: newQueryMetrics()}
+func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger, controls *db.QueryControls, runtimes ...*target.Runtime) *Handler {
+	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls, metrics: newQueryMetrics(), drivers: target.Default(runtimes)}
 }
 
 type executeRequest struct {
@@ -87,7 +88,7 @@ func (h *Handler) openRelational(r *http.Request, connID int64, database string)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	handle, err := target.OpenRelational(ctx, conn, password, tunnel)
+	handle, err := h.drivers.OpenRelational(ctx, conn, password, tunnel)
 	if err != nil {
 		return nil, nil, nil, httpx.BadRequest("打开目标数据库失败: " + safeErr(err))
 	}
@@ -256,7 +257,7 @@ func (h *Handler) RedisOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	info, err := target.RedisOverviewInfo(r.Context(), handle.Client)
+	info, err := target.RedisOverviewInfo(r.Context(), handle)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -275,7 +276,7 @@ func (h *Handler) RedisKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	keys, err := target.ScanKeys(r.Context(), handle.Client, q.Get("pattern"), max)
+	keys, err := target.ScanKeys(r.Context(), handle, q.Get("pattern"), max)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -298,7 +299,7 @@ func (h *Handler) RedisValue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	val, err := target.InspectKey(r.Context(), handle.Client, key)
+	val, err := target.InspectKey(r.Context(), handle, key)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -316,7 +317,7 @@ func (h *Handler) openRedis(r *http.Request, connID int64) (*target.RedisClient,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	handle, err := target.OpenRedis(ctx, conn, password, tunnel)
+	handle, err := h.drivers.OpenRedis(ctx, conn, password, tunnel)
 	if err != nil {
 		return nil, nil, httpx.BadRequest("打开 Redis 失败: " + safeErr(err))
 	}
@@ -417,17 +418,17 @@ func firstN(s string, n int) string {
 
 // previewWithPolicies applies the same server policy to preview and its count.
 func (h *Handler) previewWithPolicies(r *http.Request, handle *target.RelDB, database, schema, table string, limit, offset int) ([]string, [][]any, int64, error) {
-	name := quoted(table, handle.Conn.Type)
-	if handle.Conn.Type == "postgres" {
+	name := quoted(table, handle.Conn.SQLDialect())
+	if handle.Conn.SQLDialect() == "postgres" {
 		if schema == "" {
 			schema = "public"
 		}
-		name = quoted(schema, handle.Conn.Type) + "." + name
+		name = quoted(schema, handle.Conn.SQLDialect()) + "." + name
 	} else {
 		if database == "" {
 			database = handle.Conn.Database
 		}
-		name = quoted(database, handle.Conn.Type) + "." + name
+		name = quoted(database, handle.Conn.SQLDialect()) + "." + name
 	}
 	c := claimsOf(r)
 	query, args, e := h.applyPolicies(r.Context(), handle, c.Subject, c.Role, "SELECT * FROM "+name, nil)
