@@ -3,14 +3,19 @@
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">数据源</h1>
-        <p class="text-sm text-white/45 mt-1">管理内置与自定义 JDBC 数据源，测试连接后查看实际版本及兼容情况。</p>
+        <p class="text-sm text-white/45 mt-1">从目录添加数据源，使用自己的数据库账号连接；也可以创建个人数据源。</p>
       </div>
-      <button v-if="canWrite" class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
-        <Plus class="w-4 h-4" />新建数据源
+      <button class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
+        <Plus class="w-4 h-4" />新建个人数据源
       </button>
     </header>
 
-    <div class="flex flex-wrap items-center gap-3">
+    <div class="flex flex-wrap gap-2" role="tablist" aria-label="数据源范围">
+      <button id="my-connections-tab" role="tab" :aria-selected="activeTab === 'mine'" :class="activeTab === 'mine' ? 'liquid-button' : 'ghost-button'" @click="activeTab = 'mine'">我的连接</button>
+      <button id="source-catalog-tab" role="tab" :aria-selected="activeTab === 'catalog'" :class="activeTab === 'catalog' ? 'liquid-button' : 'ghost-button'" @click="activeTab = 'catalog'">数据源目录</button>
+    </div>
+    <SourceCatalog v-if="activeTab === 'catalog'" @added="addedFromCatalog" />
+    <div v-if="activeTab === 'mine'" class="flex flex-wrap items-center gap-3">
       <div class="relative w-full sm:w-72 shrink-0">
         <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
         <input
@@ -41,7 +46,7 @@
       </button>
     </div>
 
-    <div v-loading="connLoading" class="min-h-[160px]">
+    <div v-if="activeTab === 'mine'" v-loading="connLoading" class="min-h-[160px]" role="tabpanel" aria-labelledby="my-connections-tab">
       <section v-if="connections.length" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         <article v-for="conn in connections" :key="conn.id" class="glass-card p-5 hover:-translate-y-1 flex flex-col gap-4">
           <div class="flex items-start gap-3.5">
@@ -71,12 +76,14 @@
             </span>
           </div>
 
+          <p class="text-xs text-white/50 break-all">数据库账号：{{ conn.username || '未设置' }}<span v-if="conn.definition"> · 修订 {{ conn.definition.revision }}</span></p>
           <p v-if="conn.capabilities?.reason" class="text-xs text-amber-200" role="status">{{ conn.capabilities.reason }}</p>
           <p v-if="connectionChecks[conn.id]" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(connectionChecks[conn.id]!)">
             最近检查：{{ compatibilityText(connectionChecks[conn.id]!) }}
             <span v-if="connectionChecks[conn.id]!.checked_at" class="block text-white/40">{{ checkTime(connectionChecks[conn.id]!.checked_at) }} · {{ connectionChecks[conn.id]!.elapsed_ms }} ms</span>
           </p>
 
+          <button v-if="userStore.role === 'admin' && conn.definition?.visibility !== 'global' && !conn.proxy_id && !conn.ssh_tunnel_id" class="ghost-button text-xs" :disabled="publishing" @click="publishDefinition(conn)">发布数据源定义</button>
           <div class="flex items-center gap-2 pt-2 border-t border-white/10">
             <button class="ghost-button flex-1 text-xs py-2 flex items-center justify-center gap-1.5" @click="goQuery(conn)">
               <SquareTerminal class="w-3.5 h-3.5" />打开
@@ -113,7 +120,7 @@
       </section>
       <div v-else-if="!connLoading" class="glass-card p-12 flex flex-col items-center justify-center gap-3 text-center">
         <Database class="w-10 h-10 text-white/20" />
-        <p class="text-white/55 text-sm">还没有数据源，点击右上角「新建数据源」接入第一个数据库</p>
+        <p class="text-white/55 text-sm">还没有个人连接。前往“数据源目录”添加，或新建个人数据源。</p>
       </div>
     </div>
 
@@ -130,7 +137,8 @@
         <el-form-item label="数据源名称">
           <el-input v-model="connForm.name" placeholder="例如：生产环境-订单库" />
         </el-form-item>
-        <el-form-item label="数据源类型">
+        <p v-if="publicTargetLocked" class="text-xs text-white/55 mb-3">连接目标来自共享定义，地址和驱动不可在这里覆盖。新修订请到数据源目录确认切换。</p>
+        <el-form-item v-if="!publicTargetLocked" label="数据源类型">
           <el-select v-model="connForm.type" class="w-full" popper-class="glass-popper" @change="onTypeChange">
             <el-option label="MySQL" value="mysql" />
             <el-option label="PostgreSQL" value="postgres" />
@@ -138,9 +146,9 @@
             <el-option label="自定义 JDBC" value="jdbc" />
           </el-select>
         </el-form-item>
-        <p class="text-xs text-white/50 leading-relaxed" data-testid="version-support-hint">{{ versionHint }}</p>
+        <p v-if="!publicTargetLocked" class="text-xs text-white/50 leading-relaxed" data-testid="version-support-hint">{{ versionHint }}</p>
 
-        <template v-if="connForm.type === 'jdbc'">
+        <template v-if="!publicTargetLocked && connForm.type === 'jdbc'">
           <el-form-item label="数据源模板">
             <el-select v-model="connForm.template_revision_id" class="w-full" aria-label="数据源模板" placeholder="选择已发布模板" @change="onTemplateChange">
               <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="`${t.name} · 修订 ${t.revision}`" :disabled="!t.enabled || !t.driver.enabled" />
@@ -154,7 +162,7 @@
         </template>
 
         <p class="text-xs text-white/45 mb-3 mt-4">连接信息</p>
-        <template v-if="connForm.type !== 'jdbc'">
+        <template v-if="!publicTargetLocked && connForm.type !== 'jdbc'">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <el-form-item label="主机" class="sm:col-span-2">
             <el-input v-model="connForm.host" placeholder="192.168.1.10" />
@@ -181,7 +189,7 @@
             <p v-if="connForm.id" class="text-[11px] text-white/40 mt-1">留空使用已保存口令；修改连接目标、JDBC 模板或参数、账号、TLS 或代理后，测试需重新输入口令。</p>
           </el-form-item>
         </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div v-if="!publicTargetLocked" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <el-form-item label="SSL 模式">
             <el-select v-model="connForm.ssl_mode" class="w-full" popper-class="glass-popper">
               <el-option label="禁用（内网明文）" value="disable" />
@@ -192,14 +200,14 @@
             <el-input v-model.number="connForm.connection_timeout" type="number" :min="1" :max="30" />
           </el-form-item>
         </div>
-        <el-form-item label="所属环境（资产徽标与高危操作提示依据）">
+        <el-form-item v-if="!publicTargetLocked" label="所属环境（资产徽标与高危操作提示依据）">
           <el-select v-model="connForm.environment" class="w-full" popper-class="glass-popper">
             <el-option label="开发环境（dev）" value="dev" />
             <el-option label="测试环境（test）" value="test" />
             <el-option label="生产环境（prod）" value="prod" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="connForm.type !== 'jdbc'" label="代理（可选）">
+        <el-form-item v-if="!publicTargetLocked && connForm.type !== 'jdbc'" label="代理（可选）">
           <el-select v-model="connForm.proxy_id" class="w-full" popper-class="glass-popper" clearable placeholder="不使用代理">
             <el-option label="不使用代理" :value="null" />
             <el-option v-for="p in proxies" :key="p.id" :label="`${p.name}（${p.type} ${p.host}:${p.port}）`" :value="p.id" />
@@ -260,11 +268,21 @@ import { proxyApi, type ProxyItem } from '../../api/proxy'
 import { useUserStore } from '../../stores/user'
 import { ApiRequestError } from '../../utils/request'
 import { connectorApi, type DatasourceTemplate } from '../../api/connector'
+import SourceCatalog from './SourceCatalog.vue'
+import { sourceCatalogApi } from '../../api/source-catalog'
 
 const router = useRouter()
 const userStore = useUserStore()
-const canWrite = computed(() => ['admin','developer'].includes(userStore.role))
-const canEdit = (c: ConnectionItem) => canWrite.value && (userStore.role === 'admin' || userStore.user?.id === c.user_id)
+const canEdit = (c: ConnectionItem) => userStore.user?.id === c.user_id
+const activeTab = ref<'mine'|'catalog'>('mine')
+const publishing = ref(false)
+async function addedFromCatalog() { activeTab.value = 'mine'; await fetchConnections() }
+async function publishDefinition(c: ConnectionItem) {
+ if (publishing.value) return
+ try { await ElMessageBox.confirm(`发布「${c.name}」的地址、库名和驱动配置到全局目录？使用者需要填写自己的数据库账号。`, '发布数据源定义', { type:'info',confirmButtonText:'发布定义' }) } catch { return }
+ publishing.value = true
+ try { await sourceCatalogApi.publish(c.id,'global'); ElMessage.success('数据源定义已发布'); activeTab.value='catalog' } catch { /* API displays failure */ } finally { publishing.value=false }
+}
 const templates = ref<DatasourceTemplate[]>([])
 const jdbcParameters = reactive<Record<string,string>>({})
 
@@ -370,6 +388,7 @@ const emptyConnForm = (): ConnForm => ({
 })
 const connDialog = ref(false)
 const connForm = reactive<ConnForm>(emptyConnForm())
+const publicTargetLocked = computed(() => connections.value.find(c => c.id === connForm.id)?.definition?.visibility === 'global')
 const saving = ref(false)
 const testing = ref(false)
 const selectedTemplate = computed(() => templates.value.find(t => t.id === connForm.template_revision_id))
@@ -392,6 +411,7 @@ function onTemplateChange() {
   if (selectedTemplate.value && !['org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.value.driver.class_name)) connForm.ssl_mode = 'disable'
 }
 function openCreate() {
+  activeTab.value = 'mine'
   formTest.value = null
   Object.assign(connForm, emptyConnForm())
   for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
@@ -524,7 +544,7 @@ async function refreshSavedCheck(id: number) {
 
 async function remove(c: ConnectionItem) {
   try {
-    await ElMessageBox.confirm(`确认删除数据源「${c.name}」？其查询历史将一并删除。`, '删除确认', {
+    await ElMessageBox.confirm(`确认移除我的连接「${c.name}」？本人的关联历史会清理，公共数据源定义会保留。`, '删除确认', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消',

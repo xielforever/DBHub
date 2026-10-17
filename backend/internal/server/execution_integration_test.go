@@ -152,6 +152,7 @@ func TestExecutionReliability(t *testing.T) {
 		if owner() != before+1 {
 			t.Fatal("a conflicting request executed")
 		}
+		body["connection_id"] = a.connectionFor(a.developer)
 		requireExecutionStatus(t, executionRequest(client, a.server.URL, "POST", "/query/execute", a.developer, body), 200)
 		if owner() != before+2 {
 			t.Fatal("request ID namespaces were not isolated by user")

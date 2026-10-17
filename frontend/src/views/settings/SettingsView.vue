@@ -5,7 +5,7 @@
       <p class="text-sm text-white/45 mt-1">账号偏好与安全配置</p>
     </header>
 
-    <ConnectorSettings v-if="userStore.role === 'admin'" />
+    <ConnectorSettings />
 
     <section class="glass-card p-6">
       <h2 class="font-medium mb-4">个人资料</h2>

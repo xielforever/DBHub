@@ -36,6 +36,8 @@ type apiTest struct {
 	deps                       *Deps
 	admin, developer, readonly string
 	connID, redisID            int64
+	roleConnections            map[string]int64
+	roleRedis                  map[string]int64
 	table                      string
 }
 
@@ -46,7 +48,7 @@ func setupAPI(t *testing.T) *apiTest {
 	if dsn == "" || redisURL == "" {
 		t.Skip("real integration databases not configured")
 	}
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
 	root, e := pgxpool.New(ctx, dsn)
 	if e != nil {
 		t.Fatal(e)
@@ -130,9 +132,70 @@ func setupAPI(t *testing.T) *apiTest {
 		t.Fatal(e)
 	}
 	a.redisID = redisConn.ID
+	a.roleConnections = map[string]int64{a.admin: a.connID}
+	a.roleRedis = map[string]int64{a.admin: a.redisID}
+	for _, base := range []*db.Connection{conn, redisConn} {
+		def := a.call("POST", fmt.Sprintf("/connections/%d/publish", base.ID), a.admin, map[string]any{"visibility": "global"}, 201)
+		defID := int64(def["id"].(float64))
+		base.DefinitionRevisionID = &defID
+		base.DefinitionFamilyID = def["family_id"].(string)
+		if e = deps.Conns.Update(ctx, base); e != nil {
+			t.Fatal(e)
+		}
+		for i, token := range []string{a.developer, a.readonly} {
+			clone := *base
+			clone.ID = 0
+			clone.UserID = int64(i + 2)
+			actorCtx := context.WithValue(ctx, auth.ClaimsContextKey, &auth.Claims{Subject: clone.UserID})
+			if e = deps.Conns.Create(actorCtx, &clone); e != nil {
+				t.Fatal(e)
+			}
+			if base.Type == "redis" {
+				a.roleRedis[token] = clone.ID
+			} else {
+				a.roleConnections[token] = clone.ID
+			}
+		}
+	}
 	a.exec(a.admin, "CREATE TABLE "+a.table+" (id INT PRIMARY KEY, owner_id INT, email TEXT, secret TEXT)", 200)
 	a.exec(a.admin, "INSERT INTO "+a.table+" VALUES(1,1,'a@example.com','one'),(2,2,'b@example.com','two')", 200)
 	return a
+}
+func (a *apiTest) actor() context.Context {
+	return context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
+}
+func (a *apiTest) connectionFor(token string) int64 {
+	if id, ok := a.roleConnections[token]; ok {
+		return id
+	}
+	return a.connID
+}
+func (a *apiTest) personalFor(sourceID int64, token, password string) int64 {
+	a.t.Helper()
+	c, e := a.deps.Conns.Get(a.actor(), sourceID)
+	if e != nil {
+		a.t.Fatal(e)
+	}
+	defID := *c.DefinitionRevisionID
+	if c.Definition.Visibility != "global" {
+		d := a.call("POST", fmt.Sprintf("/connections/%d/publish", sourceID), a.admin, map[string]any{"visibility": "global"}, 201)
+		defID = int64(d["id"].(float64))
+		a.call("POST", fmt.Sprintf("/connections/%d/revision", sourceID), a.admin, map[string]any{"definition_revision_id": defID, "name": c.Name, "username": c.Username, "password": password, "confirmed": true}, 200)
+	}
+	uid := int64(2)
+	if token == a.readonly {
+		uid = 3
+	}
+	if token == a.admin {
+		return sourceID
+	}
+	var existing int64
+	_ = a.pool.QueryRow(a.actor(), `SELECT id FROM sys_connections WHERE user_id=$1 AND definition_revision_id=$2`, uid, defID).Scan(&existing)
+	if existing > 0 {
+		return existing
+	}
+	own := a.call("POST", fmt.Sprintf("/datasource-definitions/%d/connections", defID), token, map[string]any{"name": "personal-test", "username": c.Username, "password": password, "confirmed": true}, 201)
+	return int64(own["id"].(float64))
 }
 func (a *apiTest) call(method, path, token string, body any, want int) map[string]any {
 	a.t.Helper()
@@ -186,7 +249,7 @@ func testRequestID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", value[:4], value[4:6], value[6:8], value[8:10], value[10:])
 }
 func (a *apiTest) exec(token, sql string, want int) map[string]any {
-	return a.call("POST", "/query/execute", token, map[string]any{"connection_id": a.connID, "sql": sql}, want)
+	return a.call("POST", "/query/execute", token, map[string]any{"connection_id": a.connectionFor(token), "sql": sql}, want)
 }
 func TestRealHTTPBackend(t *testing.T) {
 	a := setupAPI(t)
@@ -236,11 +299,19 @@ func TestRealHTTPBackend(t *testing.T) {
 		host, port, _ := net.SplitHostPort(cfg.Addr)
 		n, _ := strconv.Atoi(port)
 		conn := &db.Connection{UserID: 1, Name: "HTTP MySQL", Type: "mysql", Host: host, Port: n, Database: cfg.DBName, Username: cfg.User, Password: cfg.Passwd, SSLMode: "disable", Environment: "dev"}
-		if e = a.deps.Conns.Create(context.Background(), conn); e != nil {
+		if e = a.deps.Conns.Create(a.actor(), conn); e != nil {
 			t.Fatal(e)
 		}
+		roMySQL := a.personalFor(conn.ID, a.readonly, cfg.Passwd)
+		devMySQL := a.personalFor(conn.ID, a.developer, cfg.Passwd)
 		run := func(sql string, token string, want int) map[string]any {
-			return a.call("POST", "/query/execute", token, map[string]any{"connection_id": conn.ID, "sql": sql}, want)
+			id := conn.ID
+			if token == a.readonly {
+				id = roMySQL
+			} else if token == a.developer {
+				id = devMySQL
+			}
+			return a.call("POST", "/query/execute", token, map[string]any{"connection_id": id, "sql": sql}, want)
 		}
 		runTx := func(sql string, id any) map[string]any {
 			return a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": conn.ID, "transaction_id": id, "sql": sql}, 200)
@@ -341,21 +412,13 @@ func TestRealHTTPBackend(t *testing.T) {
 		}
 		a.exec(a.readonly, "SELECT secret FROM "+a.table, 400)
 		a.exec(a.readonly, "SELECT * FROM "+a.table+" UNION SELECT * FROM "+a.table, 400)
-		preview := a.call("GET", fmt.Sprintf("/data/preview?connection_id=%d&schema=public&table=%s", a.connID, a.table), a.readonly, nil, 200)
+		preview := a.call("GET", fmt.Sprintf("/data/preview?connection_id=%d&schema=public&table=%s", a.connectionFor(a.readonly), a.table), a.readonly, nil, 200)
 		if preview["total"].(float64) != 1 || len(preview["rows"].([]any)) != 1 {
 			t.Fatal("preview bypassed policy")
 		}
-		shared := a.call("POST", "/query/shares", a.readonly, map[string]any{"name": "safe snapshot", "connection_id": a.connID, "sql": "SELECT * FROM " + a.table, "expire_days": 1, "include_result": true}, 200)
-		token := shared["token"].(string)
-		data := a.call("GET", "/public/query-shares/"+token, "", nil, 200)
-		if len(data["rows"].([]any)) != 1 {
-			t.Fatal("sharing bypassed policy")
-		}
-		sid := int64(shared["share"].(map[string]any)["id"].(float64))
-		a.call("DELETE", fmt.Sprintf("/query/shares/%d", sid), a.developer, nil, 404)
-		a.call("DELETE", fmt.Sprintf("/query/shares/%d", sid), a.readonly, nil, 200)
-		a.call("GET", "/public/query-shares/"+token, "", nil, 404)
-		export := a.call("POST", "/query/exports", a.readonly, map[string]any{"connection_id": a.connID, "sql": "SELECT * FROM " + a.table, "format": "json", "reason": "verify authorized snapshot"}, 200)
+		a.call("POST", "/query/shares", a.readonly, map[string]any{"name": "private snapshot", "connection_id": a.connectionFor(a.readonly), "sql": "SELECT * FROM " + a.table, "include_result": true}, 403)
+		a.call("GET", "/public/query-shares/old-token", "", nil, 404)
+		export := a.call("POST", "/query/exports", a.readonly, map[string]any{"connection_id": a.connectionFor(a.readonly), "sql": "SELECT * FROM " + a.table, "format": "json", "reason": "verify authorized snapshot"}, 200)
 		eid := int64(export["id"].(float64))
 		epath := fmt.Sprintf("/query/exports/%d", eid)
 		a.call("GET", epath+"/download", a.readonly, nil, 404)
@@ -396,27 +459,30 @@ func TestRealHTTPBackend(t *testing.T) {
 		p := a.call("POST", "/proxies", a.developer, map[string]any{"name": "test proxy", "type": "http", "host": host, "port": n, "username": "proxy-user", "password": "proxy-test-pass"}, 200)
 		id := int64(p["id"].(float64))
 		a.call("PUT", fmt.Sprintf("/proxies/%d", id), a.readonly, map[string]any{"name": "stolen"}, 403)
-		conn, password, e := a.deps.Conns.GetSecrets(context.Background(), a.connID)
+		devCtx := context.WithValue(a.actor(), auth.ClaimsContextKey, &auth.Claims{Subject: 2, Role: "developer"})
+		conn, password, e := a.deps.Conns.GetSecrets(devCtx, a.connectionFor(a.developer))
 		if e != nil {
 			t.Fatal(e)
 		}
 		a.call("POST", "/proxies/test", a.developer, map[string]any{"id": id, "target_host": conn.Host, "target_port": conn.Port}, 200)
 		a.call("POST", "/proxies/test", a.developer, map[string]any{"type": "http", "host": host, "port": n, "username": "proxy-user", "password": "wrong", "target_host": conn.Host, "target_port": conn.Port}, 400)
 		conn.ID = 0
+		conn.DefinitionRevisionID = nil
+		conn.DefinitionFamilyID = ""
 		conn.Name = "forwarded postgres"
 		conn.Password = password
 		conn.ProxyID = &id
-		if e = a.deps.Conns.Create(context.Background(), conn); e != nil {
+		if e = a.deps.Conns.Create(devCtx, conn); e != nil {
 			t.Fatal(e)
 		}
-		result := a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": conn.ID, "sql": "SELECT 42 AS forwarded"}, 200)
+		result := a.call("POST", "/query/execute", a.developer, map[string]any{"connection_id": conn.ID, "sql": "SELECT 42 AS forwarded"}, 200)
 		if result["rows"].([]any)[0].([]any)[0].(float64) != 42 {
 			t.Fatal("database did not execute through proxy")
 		}
 	})
 	t.Run("ticket-requires-review-and-executes-once", func(t *testing.T) {
 		a.t = t
-		body := map[string]any{"title": "approved update", "type": "dml", "table": a.table, "connection_id": a.connID, "sql": "UPDATE " + a.table + " SET secret='changed' WHERE id=1", "risk": "low"}
+		body := map[string]any{"title": "approved update", "type": "dml", "table": a.table, "connection_id": a.connectionFor(a.developer), "sql": "UPDATE " + a.table + " SET secret='changed' WHERE id=1", "risk": "low"}
 		created := a.call("POST", "/tickets", a.developer, body, 200)
 		id := int64(created["id"].(float64))
 		path := fmt.Sprintf("/tickets/%d", id)
@@ -442,8 +508,8 @@ func TestRealHTTPBackend(t *testing.T) {
 	t.Run("presence-ai-settings-queue-cancellation", func(t *testing.T) {
 		a.t = t
 		a.call("POST", "/query/presence", a.admin, map[string]any{"connection_id": a.connID}, 200)
-		online := a.call("POST", "/query/presence", a.developer, map[string]any{"connection_id": a.connID}, 200)
-		if len(online["items"].([]any)) != 2 {
+		online := a.call("POST", "/query/presence", a.developer, map[string]any{"connection_id": a.connectionFor(a.developer)}, 200)
+		if len(online["items"].([]any)) != 1 {
 			t.Fatal("presence did not use real sessions")
 		}
 		if a.call("GET", "/ai/status", a.admin, nil, 200)["configured"] != false {

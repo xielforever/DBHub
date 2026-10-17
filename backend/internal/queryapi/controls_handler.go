@@ -4,12 +4,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/sqlparse"
 )
 
 func (h *Handler) Settings(w http.ResponseWriter, r *http.Request) {
@@ -42,6 +40,10 @@ func (h *Handler) SaveSettings(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) Policies(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.URL.Query().Get("connection_id"), 10, 64)
+	if _, e := h.conns.Get(r.Context(), id); e != nil {
+		httpx.Fail(w, mapNotFound(e))
+		return
+	}
 	role := claimsOf(r).Role
 	if isAdmin(claimsOf(r)) {
 		role = ""
@@ -161,65 +163,9 @@ func (h *Handler) RevokeShare(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, map[string]bool{"revoked": true})
 }
 func (h *Handler) PublicShare(w http.ResponseWriter, r *http.Request) {
-	raw, e := h.controls.ReadShare(r.Context(), r.PathValue("token"))
-	if e != nil {
-		httpx.Fail(w, httpx.NotFound("分享不存在、已撤销或已过期"))
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Robots-Tag", "noindex")
-	httpx.OK(w, raw)
+	httpx.Fail(w, httpx.NotFound("个人连接结果不提供公开链接"))
 }
+
 func (h *Handler) CreateShare(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name          string         `json:"name"`
-		ConnectionID  int64          `json:"connection_id"`
-		Database      string         `json:"database"`
-		SQL           string         `json:"sql"`
-		Params        map[string]any `json:"params"`
-		ExpireDays    int            `json:"expire_days"`
-		IncludeResult bool           `json:"include_result"`
-	}
-	if e := httpx.DecodeJSON(w, r, &in); e != nil {
-		httpx.Fail(w, e)
-		return
-	}
-	if strings.TrimSpace(in.Name) == "" || len(in.Name) > 200 || in.ExpireDays < 1 || in.ExpireDays > 30 || len(in.SQL) > 10000 || in.SQL == "" {
-		httpx.Fail(w, httpx.BadRequest("分享名称、SQL 或期限无效（1–30 天）"))
-		return
-	}
-	handle, conn, closeFn, e := h.openRelational(r, in.ConnectionID, in.Database)
-	if e != nil {
-		httpx.Fail(w, e)
-		return
-	}
-	defer closeFn()
-	query, args, e := sqlparse.BindNamed(in.SQL, conn.SQLDialect(), in.Params)
-	if e != nil {
-		httpx.Fail(w, httpx.BadRequest(e.Error()))
-		return
-	}
-	c := claimsOf(r)
-	query, args, e = h.applyPolicies(r.Context(), handle, c.Subject, c.Role, query, args)
-	if e != nil {
-		httpx.Fail(w, httpx.Forbidden(e.Error()))
-		return
-	}
-	payload := map[string]any{"name": in.Name, "sql": in.SQL, "params": in.Params, "database": conn.Database}
-	if in.IncludeResult {
-		res, e := target.ExecuteWithOptions(r.Context(), handle, query, true, target.ExecuteOptions{MaxRows: 100, Timeout: 15 * time.Second, Args: args})
-		if e != nil {
-			httpx.Fail(w, httpx.BadRequest("生成快照失败: "+safeErr(e)))
-			return
-		}
-		payload["columns"] = res.Columns
-		payload["rows"] = res.Rows
-	}
-	token := randomID() + randomID()
-	share, e := h.controls.CreateShare(r.Context(), c.Subject, token, in.Name, payload, time.Now().Add(time.Duration(in.ExpireDays)*24*time.Hour))
-	if e != nil {
-		httpx.Fail(w, httpx.Internal("创建分享失败", e))
-		return
-	}
-	httpx.OK(w, map[string]any{"share": share, "token": token})
+	httpx.Fail(w, httpx.Forbidden("个人连接阶段暂不支持公开结果分享"))
 }

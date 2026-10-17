@@ -96,6 +96,9 @@ func (r *TunnelRepository) GetSecrets(ctx context.Context, id int64) (*SSHTunnel
 	if err != nil {
 		return nil, err
 	}
+	if t.UserID != ActorID(ctx) {
+		return nil, ErrNotFound
+	}
 	var encPrivateKey, encPassphrase, encPassword *string
 	err = r.pool.QueryRow(ctx,
 		`SELECT private_key, passphrase, password FROM sys_ssh_tunnels WHERE id = $1`, id).

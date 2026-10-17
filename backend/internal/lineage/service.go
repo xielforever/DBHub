@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
 )
 
@@ -26,6 +27,24 @@ func NewService(lineage *db.LineageRepository, history *db.HistoryRepository, co
 
 // ParseRecentHistory 增量解析最近 limit 条成功历史，返回新增边数
 func (s *Service) ParseRecentHistory(ctx context.Context, limit int) (int, error) {
+	if db.ActorID(ctx) == 0 {
+		actors, e := s.history.ActiveActors(ctx)
+		if e != nil {
+			return 0, e
+		}
+		total := 0
+		for i := range actors {
+			if e = ctx.Err(); e != nil {
+				return total, e
+			}
+			n, err := s.ParseRecentHistory(context.WithValue(ctx, auth.ClaimsContextKey, &actors[i]), limit)
+			if err != nil {
+				return total, err
+			}
+			total += n
+		}
+		return total, nil
+	}
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
@@ -157,6 +176,21 @@ func (s *Service) ParseHistoryID(ctx context.Context, historyID int64) (int, err
 
 // BackfillFK 将外键血缘也落入缓存（按当前快照全量扫描）
 func (s *Service) BackfillFK(ctx context.Context) (int, error) {
+	if db.ActorID(ctx) == 0 {
+		actors, e := s.history.ActiveActors(ctx)
+		if e != nil {
+			return 0, e
+		}
+		total := 0
+		for i := range actors {
+			n, err := s.BackfillFK(context.WithValue(ctx, auth.ClaimsContextKey, &actors[i]))
+			if err != nil {
+				return total, err
+			}
+			total += n
+		}
+		return total, nil
+	}
 	if s.meta == nil {
 		return 0, fmt.Errorf("meta repo is nil")
 	}

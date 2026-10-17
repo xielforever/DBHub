@@ -62,7 +62,7 @@ func (r *DashboardRepository) Get(ctx context.Context, id int64) (*Dashboard, er
 		       COALESCE(u.username,'')
 		FROM sys_dashboards d
 		LEFT JOIN sys_users u ON u.id = d.owner_user_id
-		WHERE d.id=$1`, id).Scan(
+		WHERE d.id=$1 AND (d.owner_user_id=$2 OR d.visibility='shared')`, id, ActorID(ctx)).Scan(
 		&d.ID, &d.Name, &d.Description, &d.Visibility, &d.Layout, &d.OwnerUserID,
 		&d.StarredBy, &d.CreatedAt, &d.UpdatedAt, &d.OwnerName)
 	if err == pgx.ErrNoRows {
@@ -75,7 +75,7 @@ func (r *DashboardRepository) List(ctx context.Context, f DashboardFilter) ([]Da
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 20
 	}
-	conds := []string{"1=1"}
+	conds := []string{"(d.owner_user_id=" + fmt.Sprint(ActorID(ctx)) + " OR d.visibility='shared')"}
 	args := []any{}
 	add := func(tmpl string, vals ...any) {
 		for _, v := range vals {

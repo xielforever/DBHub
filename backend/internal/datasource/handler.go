@@ -68,8 +68,14 @@ var allowedTypes = map[string]bool{"mysql": true, "postgres": true, "redis": tru
 func validConnReq(in *connectionRequest) error {
 	in.Name = strings.TrimSpace(in.Name)
 	in.Host = strings.TrimSpace(in.Host)
-	if in.Name == "" {
-		return httpx.BadRequest("连接名称不能为空")
+	if in.Name == "" || len([]rune(in.Name)) > 100 {
+		return httpx.BadRequest("连接名称必填，最多 100 字符")
+	}
+	if len(in.Username) > 100 || len(in.Password) > 4096 || len(in.Host) > 253 {
+		return httpx.BadRequest("连接字段超出允许长度")
+	}
+	if in.ConnectionTimeout > 30 {
+		return httpx.BadRequest("连接超时最多 30 秒")
 	}
 	if !allowedTypes[in.Type] {
 		return httpx.BadRequest("请选择内置数据源类型或自定义 JDBC 模板")
@@ -96,6 +102,12 @@ func validConnReq(in *connectionRequest) error {
 	}
 	if in.ProxyID != nil && in.SSHTunnelID != nil {
 		return httpx.BadRequest("代理与 SSH 隧道不能同时启用")
+	}
+	if in.Environment == "" {
+		in.Environment = "dev"
+	}
+	if in.Environment != "dev" && in.Environment != "test" && in.Environment != "prod" {
+		return httpx.BadRequest("环境必须为 dev、test 或 prod")
 	}
 	if in.ConnectionTimeout <= 0 {
 		in.ConnectionTimeout = 10
@@ -140,7 +152,7 @@ func idFromPath(r *http.Request) (int64, error) {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	dbType := r.URL.Query().Get("type")
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
-	// 数据源为团队共享资源：列表对所有登录用户可见，写操作在路由中间件鉴权。
+	// 只返回当前用户的个人连接。
 	list, err := h.conns.List(r.Context(), dbType, keyword)
 	if err != nil {
 		httpx.Fail(w, httpx.Internal("查询连接列表失败", err))
@@ -158,6 +170,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var in connectionRequest
 	if err := httpx.DecodeJSON(w, r, &in); err != nil {
 		httpx.Fail(w, err)
+		return
+	}
+	if in.Type != "redis" && (strings.TrimSpace(in.Username) == "" || in.Password == "") {
+		httpx.Fail(w, httpx.BadRequest("请填写自己的数据库账号和密码"))
 		return
 	}
 	if err := h.prepareRequest(r.Context(), &in); err != nil {
@@ -208,7 +224,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	// 数据源为团队共享资源，所有登录用户均可查看元数据；口令不随详情返回。
+	// 元数据与口令归属一致，管理员也不能代用其他用户的连接。
 	conn.Capabilities = h.drivers.Capabilities(conn)
 	httpx.OK(w, conn)
 }
@@ -226,6 +242,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, err)
 		return
 	}
+	if in.Type != "redis" && strings.TrimSpace(in.Username) == "" {
+		httpx.Fail(w, httpx.BadRequest("请填写自己的数据库账号"))
+		return
+	}
 	if err := h.prepareRequest(r.Context(), &in); err != nil {
 		httpx.Fail(w, err)
 		return
@@ -235,9 +255,21 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	if !isAdmin(c) && existing.UserID != c.Subject {
+	if existing.UserID != c.Subject {
 		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "连接不存在"})
 		return
+	}
+	if existing.HasPassword && in.Password == "" && (!sameCredentialDestination(existing, &in) || existing.Database != in.Database) {
+		httpx.Fail(w, httpx.BadRequest("连接目标或账号已变化，请重新填写个人密码"))
+		return
+	}
+	if existing.Definition != nil && existing.Definition.Visibility == "global" {
+		oldConfig, _ := json.Marshal(db.ConfigOf(existing))
+		newConfig, _ := json.Marshal(db.ConfigOf(connectionOf(&in, c.Subject)))
+		if string(oldConfig) != string(newConfig) {
+			httpx.Fail(w, httpx.BadRequest("共享定义不可覆盖，请从目录确认并切换新修订"))
+			return
+		}
 	}
 	if in.SSHTunnelID != nil {
 		if err := h.checkTunnelOwner(r.Context(), *in.SSHTunnelID, c); err != nil {
@@ -279,7 +311,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	if !isAdmin(c) && existing.UserID != c.Subject {
+	if existing.UserID != c.Subject {
 		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "连接不存在"})
 		return
 	}
@@ -297,6 +329,10 @@ func (h *Handler) TestUnpersisted(w http.ResponseWriter, r *http.Request) {
 	var in connectionRequest
 	if err := httpx.DecodeJSON(w, r, &in); err != nil {
 		httpx.Fail(w, err)
+		return
+	}
+	if in.Type != "redis" && (strings.TrimSpace(in.Username) == "" || in.Password == "") {
+		httpx.Fail(w, httpx.BadRequest("请填写自己的数据库账号和密码"))
 		return
 	}
 	if err := h.prepareRequest(r.Context(), &in); err != nil {
@@ -340,7 +376,7 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, mapNotFound(err))
 			return
 		}
-		if !isAdmin(c) && (c.Role != "developer" || conn.UserID != c.Subject) {
+		if conn.UserID != c.Subject {
 			httpx.Fail(w, httpx.Forbidden("无权测试该数据源的编辑配置"))
 			return
 		}
@@ -362,7 +398,7 @@ func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 			TemplateRevisionID: draft.TemplateRevisionID, Parameters: draft.Parameters, Template: draft.template, Username: draft.Username, SSLMode: draft.SSLMode, ConnectionTimeout: draft.ConnectionTimeout,
 			SSHTunnelID: draft.SSHTunnelID, ProxyID: draft.ProxyID}
 	}
-	// 共享数据源，所有登录用户均可发起连通性测试。
+	// 测试仅使用当前用户的身份。
 	h.runTest(w, r, conn, password)
 }
 
@@ -376,7 +412,7 @@ func sameCredentialDestination(conn *db.Connection, draft *connectionRequest) bo
 		}
 	}
 	return conn.Type == draft.Type && conn.Host == draft.Host && conn.Port == draft.Port &&
-		conn.Username == draft.Username && conn.SSLMode == draft.SSLMode &&
+		conn.Database == draft.Database && conn.Username == draft.Username && conn.SSLMode == draft.SSLMode &&
 		sameID(conn.SSHTunnelID, draft.SSHTunnelID) && sameID(conn.ProxyID, draft.ProxyID)
 }
 
@@ -397,7 +433,7 @@ func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Conne
 			httpx.Fail(w, mapNotFound(err))
 			return
 		}
-		if !isAdmin(c) && t.UserID != c.Subject {
+		if t.UserID != c.Subject {
 			httpx.Fail(w, httpx.BadRequest("所选 SSH 隧道不可用"))
 			return
 		}
@@ -451,7 +487,7 @@ func (h *Handler) checkTunnelOwner(ctx context.Context, tunnelID int64, c *auth.
 	if err != nil {
 		return mapNotFound(err)
 	}
-	if !isAdmin(c) && t.UserID != c.Subject {
+	if t.UserID != c.Subject {
 		return httpx.BadRequest("所选 SSH 隧道不存在")
 	}
 	return nil
@@ -462,7 +498,7 @@ func (h *Handler) checkTunnelOwner(ctx context.Context, tunnelID int64, c *auth.
 // ListTunnels GET /api/v1/ssh-tunnels
 func (h *Handler) ListTunnels(w http.ResponseWriter, r *http.Request) {
 	c := claimsOf(r)
-	list, err := h.tunnels.List(r.Context(), c.Subject, isAdmin(c))
+	list, err := h.tunnels.List(r.Context(), c.Subject, false)
 	if err != nil {
 		httpx.Fail(w, httpx.Internal("查询隧道列表失败", err))
 		return
@@ -530,7 +566,7 @@ func (h *Handler) UpdateTunnel(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	if !isAdmin(c) && existing.UserID != c.Subject {
+	if existing.UserID != c.Subject {
 		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "隧道不存在"})
 		return
 	}
@@ -560,7 +596,7 @@ func (h *Handler) DeleteTunnel(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
-	if !isAdmin(c) && existing.UserID != c.Subject {
+	if existing.UserID != c.Subject {
 		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "隧道不存在"})
 		return
 	}
@@ -598,6 +634,12 @@ func (h *Handler) TestTunnel(w http.ResponseWriter, r *http.Request) {
 }
 
 func mapNotFound(err error) error {
+	if errors.Is(err, db.ErrCatalogDisabled) {
+		return httpx.BadRequest("数据源定义、驱动或连接规则已停用")
+	}
+	if errors.Is(err, db.ErrConnectionChanged) {
+		return httpx.Conflict(err.Error())
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return &httpx.AppError{Code: httpx.CodeNotFound, Message: "记录不存在"}
 	}
@@ -627,7 +669,7 @@ func (h *Handler) proxyForUser(ctx context.Context, id int64, c *auth.Claims) (*
 	if e != nil {
 		return nil, httpx.NotFound("代理不存在")
 	}
-	if p.UserID != c.Subject && !isAdmin(c) {
+	if p.UserID != c.Subject {
 		return nil, httpx.Forbidden("无权使用该代理")
 	}
 	return p, nil

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/netx"
@@ -42,7 +43,7 @@ type proxyRequest struct {
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.ClaimsFromContext(r.Context())
-	isAdmin := c.Role == "admin"
+	isAdmin := false
 	list, err := h.proxies.List(r.Context(), c.Subject, isAdmin)
 	if err != nil {
 		httpx.Fail(w, httpx.Internal("查询代理失败", err))
@@ -180,6 +181,15 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 	if in.TargetHost != "" {
 		destination = net.JoinHostPort(in.TargetHost, strconv.Itoa(in.TargetPort))
 	}
+	allowedTarget := &db.Connection{Host: in.TargetHost, Port: in.TargetPort, Proxy: p}
+	if p.Type == "db_proxy" {
+		allowedTarget.Host = p.Host
+		allowedTarget.Port = p.Port
+	}
+	if e := connectorruntime.ValidateDestination(allowedTarget); e != nil {
+		httpx.Fail(w, httpx.BadRequest(e.Error()))
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 	start := time.Now()
@@ -212,7 +222,7 @@ func (h *Handler) owned(r *http.Request, id int64) (*db.Proxy, error) {
 		return nil, httpx.Internal("读取代理失败", e)
 	}
 	c, _ := auth.ClaimsFromContext(r.Context())
-	if c.Role != "admin" && p.UserID != c.Subject {
+	if p.UserID != c.Subject {
 		return nil, httpx.Forbidden("只能修改自己的代理")
 	}
 	return p, nil

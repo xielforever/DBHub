@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/pkg/crypto"
 	"io"
 	"os"
@@ -28,7 +29,7 @@ func TestMetadataCommitAcknowledgementLossIsUnknown(t *testing.T) {
 	if dsn == "" {
 		t.Skip("real PostgreSQL not configured")
 	}
-	ctx := context.Background()
+	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "admin"})
 	root, e := pgxpool.New(ctx, dsn)
 	if e != nil {
 		t.Fatal(e)

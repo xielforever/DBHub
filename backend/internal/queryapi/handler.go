@@ -60,14 +60,14 @@ func (h *Handler) loadOwnedConnection(r *http.Request, connID int64) (*db.Connec
 	if err != nil {
 		return nil, "", nil, mapNotFound(err)
 	}
-	// 数据源为团队共享资源，所有登录用户均可使用；只读角色在执行引擎内禁止写语句。
+	// 仓储严格校验当前用户的个人连接，绝不回退到发布者凭据。
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
 		t, err := h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)
 		if err != nil {
 			return nil, "", nil, mapNotFound(err)
 		}
-		if !isAdmin(c) && t.UserID != c.Subject {
+		if t.UserID != c.Subject {
 			return nil, "", nil, httpx.BadRequest("所选 SSH 隧道不可用")
 		}
 		tunnel = t
@@ -394,6 +394,8 @@ func atoiDefault(s string, fallback int) int {
 func intPtr(n int) *int { return &n }
 
 func mapNotFound(err error) error {
+ if errors.Is(err,db.ErrCatalogDisabled){return httpx.BadRequest("数据源定义、驱动或连接规则已停用")}
+ if errors.Is(err,db.ErrConnectionChanged){return httpx.Conflict(err.Error())}
 	if errors.Is(err, db.ErrNotFound) {
 		return &httpx.AppError{Code: httpx.CodeNotFound, Message: "记录不存在"}
 	}

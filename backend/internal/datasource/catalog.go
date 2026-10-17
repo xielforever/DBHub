@@ -18,7 +18,7 @@ func catalogFailure(w http.ResponseWriter, e error) {
 	switch {
 	case errors.Is(e, db.ErrNotFound):
 		httpx.Fail(w, httpx.NotFound("驱动或模板不存在"))
-	case errors.Is(e, db.ErrCatalogConflict), errors.Is(e, db.ErrCatalogInUse):
+	case errors.Is(e, db.ErrCatalogConflict), errors.Is(e, db.ErrCatalogInUse), errors.Is(e, db.ErrPersonalBindingExists):
 		httpx.Fail(w, httpx.Conflict(e.Error()))
 	case errors.Is(e, db.ErrCatalogDisabled):
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
@@ -56,6 +56,7 @@ func (h *Handler) RegisterDriver(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ArtifactID string `json:"artifact_id"`
 		Name       string `json:"name"`
+		Visibility string `json:"visibility"`
 	}
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
 		httpx.Fail(w, e)
@@ -64,6 +65,11 @@ func (h *Handler) RegisterDriver(w http.ResponseWriter, r *http.Request) {
 	in.Name = strings.TrimSpace(in.Name)
 	if in.Name == "" || len([]rune(in.Name)) > 100 {
 		httpx.Fail(w, httpx.BadRequest("驱动名称必填，最多 100 字符"))
+		return
+	}
+	scope, e := scopeFor(r, in.Visibility)
+	if e != nil {
+		httpx.Fail(w, e)
 		return
 	}
 	items, e := h.available(r.Context())
@@ -75,7 +81,7 @@ func (h *Handler) RegisterDriver(w http.ResponseWriter, r *http.Request) {
 		if a.ID != in.ArtifactID || !a.Ready {
 			continue
 		}
-		d := &db.JDBCDriver{ArtifactID: a.ID, Name: in.Name, Version: a.Version, ClassName: a.ClassName, SHA256: a.SHA256, CreatedBy: claimsOf(r).Subject}
+		d := &db.JDBCDriver{ArtifactID: a.ID, Name: in.Name, Version: a.Version, ClassName: a.ClassName, SHA256: a.SHA256, CreatedBy: claimsOf(r).Subject, Visibility: scope}
 		if e = h.conns.Catalog().RegisterDriver(r.Context(), d); e != nil {
 			catalogFailure(w, e)
 			return
@@ -102,11 +108,17 @@ type templateRequest struct {
 	Dialect     string             `json:"dialect"`
 	URLTemplate string             `json:"url_template"`
 	Fields      []db.TemplateField `json:"fields"`
+	Visibility  string             `json:"visibility"`
 }
 
 func (h *Handler) PublishTemplate(w http.ResponseWriter, r *http.Request) {
 	var in templateRequest
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
+		httpx.Fail(w, e)
+		return
+	}
+	scope, e := scopeFor(r, in.Visibility)
+	if e != nil {
 		httpx.Fail(w, e)
 		return
 	}
@@ -122,6 +134,14 @@ func (h *Handler) PublishTemplate(w http.ResponseWriter, r *http.Request) {
 			catalogFailure(w, e)
 			return
 		}
+		if old.Visibility == "global" && !isAdmin(claimsOf(r)) || old.Visibility == "private" && old.CreatedBy != claimsOf(r).Subject {
+			httpx.Fail(w, httpx.NotFound("驱动配置不存在"))
+			return
+		}
+		if old.Visibility != scope {
+			httpx.Fail(w, httpx.BadRequest("修改可见范围请另建驱动配置"))
+			return
+		}
 		if old.Key != in.Key {
 			httpx.Fail(w, httpx.BadRequest("发布修订不能修改模板标识"))
 			return
@@ -132,11 +152,15 @@ func (h *Handler) PublishTemplate(w http.ResponseWriter, r *http.Request) {
 		catalogFailure(w, e)
 		return
 	}
+	if scope == "global" && d.Visibility != "global" {
+		httpx.Fail(w, httpx.BadRequest("全局配置必须引用全局驱动"))
+		return
+	}
 	if !d.Enabled {
 		catalogFailure(w, db.ErrCatalogDisabled)
 		return
 	}
-	t := &db.DatasourceTemplate{Key: in.Key, Name: strings.TrimSpace(in.Name), Product: strings.TrimSpace(in.Product), DriverID: d.ID, Driver: *d, Dialect: in.Dialect, URLTemplate: in.URLTemplate, Fields: in.Fields, CreatedBy: claimsOf(r).Subject}
+	t := &db.DatasourceTemplate{Key: in.Key, Name: strings.TrimSpace(in.Name), Product: strings.TrimSpace(in.Product), DriverID: d.ID, Driver: *d, Dialect: in.Dialect, URLTemplate: in.URLTemplate, Fields: in.Fields, CreatedBy: claimsOf(r).Subject, Visibility: scope}
 	if e = connectorruntime.ValidateTemplate(t); e != nil {
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return
@@ -226,6 +250,9 @@ func (h *Handler) prepareRequest(ctx context.Context, in *connectionRequest) err
 		if in.TemplateRevisionID != nil || len(in.Parameters) > 0 {
 			return httpx.BadRequest("原生数据源不能绑定 JDBC 模板")
 		}
+		if e := connectorruntime.ValidateDestination(connectionOf(in, db.ActorID(ctx))); e != nil {
+			return httpx.BadRequest(e.Error())
+		}
 		return nil
 	}
 	t, e := h.conns.Catalog().Template(ctx, *in.TemplateRevisionID)
@@ -257,6 +284,9 @@ func (h *Handler) prepareRequest(ctx context.Context, in *connectionRequest) err
 	}
 	if (!connectorruntime.KnownJDBCClass(t.Driver.ClassName) || t.Driver.ClassName == "org.h2.Driver") && in.SSLMode != "disable" {
 		return httpx.BadRequest("此模板的 TLS 覆盖尚未验证，请使用模板传输配置")
+	}
+	if e := connectorruntime.ValidateDestination(connectionOf(in, db.ActorID(ctx))); e != nil {
+		return httpx.BadRequest(e.Error())
 	}
 	return nil
 }

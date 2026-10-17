@@ -44,7 +44,7 @@ func templateBody(key, name, product string, driver int64, dialect, uri string, 
 		fields = append(fields, map[string]any{"name": "host", "label": "主机", "type": "string", "required": true}, map[string]any{"name": "port", "label": "端口", "type": "integer", "required": true})
 	}
 	fields = append(fields, map[string]any{"name": "database", "label": "数据库", "type": "string", "required": true})
-	return map[string]any{"template_key": key, "name": name, "product": product, "driver_id": driver, "dialect": dialect, "url_template": uri, "fields": fields}
+	return map[string]any{"visibility": "global", "template_key": key, "name": name, "product": product, "driver_id": driver, "dialect": dialect, "url_template": uri, "fields": fields}
 }
 
 func TestConnectorJDBCRealHTTP(t *testing.T) {
@@ -55,16 +55,16 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 	for _, raw := range artifacts {
 		v := raw.(map[string]any)
 		hashes[v["name"].(string)] = v["sha256"].(string)
-		d := a.call("POST", "/connector-drivers", a.admin, map[string]any{"artifact_id": v["id"], "name": v["name"]}, 201)
+		d := a.call("POST", "/connector-drivers", a.admin, map[string]any{"visibility": "global", "artifact_id": v["id"], "name": v["name"]}, 201)
 		drivers[v["name"].(string)] = int64(d["id"].(float64))
 	}
-	t.Run("admin-only-registration-and-immutable-revisions", func(t *testing.T) {
+	t.Run("trusted-registration-scopes-and-immutable-revisions", func(t *testing.T) {
 		a.t = t
-		a.call("GET", "/connector-drivers/available", a.readonly, nil, 403)
-		a.call("POST", "/connector-drivers", a.developer, map[string]any{"artifact_id": "h2-2.4.240", "name": "bad"}, 403)
-		a.call("POST", "/connector-drivers", a.admin, map[string]any{"artifact_id": "h2-2.4.240", "name": "duplicate"}, 409)
+		a.call("GET", "/connector-drivers/available", a.readonly, nil, 200)
+		a.call("POST", "/connector-drivers", a.developer, map[string]any{"visibility": "global", "artifact_id": "h2-2.4.240", "name": "bad"}, 403)
+		a.call("POST", "/connector-drivers", a.admin, map[string]any{"visibility": "global", "artifact_id": "h2-2.4.240", "name": "duplicate"}, 409)
 		a.call("POST", "/connector-drivers", a.admin, map[string]any{"artifact_id": "missing", "name": "bad"}, 400)
-		a.call("POST", "/datasource-templates", a.readonly, map[string]any{}, 403)
+		a.call("POST", "/datasource-templates", a.readonly, map[string]any{"visibility": "global"}, 403)
 	})
 	h2Body := templateBody("h2-example", "H2 结构", "H2", drivers["h2"], "", "jdbc:h2:mem:{database};DB_CLOSE_DELAY=-1", true)
 	h2Template := a.call("POST", "/datasource-templates", a.admin, h2Body, 201)
@@ -86,19 +86,21 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 	h2 := a.call("POST", "/connections", a.admin, h2Source, 201)
 	sourceID := int64(h2["id"].(float64))
 	sourcePath := fmt.Sprintf("/connections/%d", sourceID)
+	h2RO := a.personalFor(sourceID, a.readonly, password)
+	h2ROPath := fmt.Sprintf("/connections/%d", h2RO)
 	t.Run("custom-h2-connects-browses-and-collects-without-sql", func(t *testing.T) {
 		a.t = t
-		a.call("POST", sourcePath+"/test", a.readonly, nil, 200)
-		caps := a.call("GET", sourcePath+"/capabilities", a.readonly, nil, 200)
+		a.call("POST", h2ROPath+"/test", a.readonly, nil, 200)
+		caps := a.call("GET", h2ROPath+"/capabilities", a.readonly, nil, 200)
 		if caps["sql"] != false || caps["metadata"] != true {
 			t.Fatal(caps)
 		}
 		a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": sourceID, "sql": "SELECT 1"}, 400)
-		tables := a.call("GET", fmt.Sprintf("/metadata/tables?connection_id=%d&database=%s&schema=APP", sourceID, database), a.readonly, nil, 200)["items"].([]any)
+		tables := a.call("GET", fmt.Sprintf("/metadata/tables?connection_id=%d&database=%s&schema=APP", h2RO, database), a.readonly, nil, 200)["items"].([]any)
 		if len(tables) != 2 {
 			t.Fatal(tables)
 		}
-		columns := a.call("GET", fmt.Sprintf("/metadata/columns?connection_id=%d&database=%s&schema=APP&table=CONNECTOR_SAMPLE", sourceID, database), a.readonly, nil, 200)["items"].([]any)
+		columns := a.call("GET", fmt.Sprintf("/metadata/columns?connection_id=%d&database=%s&schema=APP&table=CONNECTOR_SAMPLE", h2RO, database), a.readonly, nil, 200)["items"].([]any)
 		if len(columns) != 3 || columns[0].(map[string]any)["is_primary"] != true {
 			t.Fatal(columns)
 		}
@@ -106,7 +108,7 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 		if sync["tables"] != float64(1) || sync["views"] != float64(1) {
 			t.Fatal(sync)
 		}
-		snapshot := a.call("GET", fmt.Sprintf("/assets/table?connection_id=%d&database=%s&schema=APP&table=CONNECTOR_SAMPLE", sourceID, database), a.readonly, nil, 200)["snapshot"].(map[string]any)
+		snapshot := a.call("GET", fmt.Sprintf("/assets/table?connection_id=%d&database=%s&schema=APP&table=CONNECTOR_SAMPLE", sourceID, database), a.admin, nil, 200)["snapshot"].(map[string]any)
 		status := snapshot["metadata_status"].(map[string]any)
 		if status["ddl"] != "unsupported" {
 			t.Fatal(snapshot)
@@ -135,14 +137,14 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 		a.call("DELETE", fmt.Sprintf("/connector-drivers/%d", drivers["h2"]), a.admin, nil, 409)
 		a.call("PATCH", fmt.Sprintf("/datasource-templates/%d/status", h2ID), a.admin, map[string]any{"enabled": false}, 200)
 		a.call("POST", "/connections", a.admin, h2Source, 400)
-		caps := a.call("GET", sourcePath+"/capabilities", a.readonly, nil, 200)
+		caps := a.call("GET", h2ROPath+"/capabilities", a.readonly, nil, 200)
 		if caps["metadata"] != false {
 			t.Fatal(caps)
 		}
 		a.call("PATCH", fmt.Sprintf("/datasource-templates/%d/status", h2ID), a.admin, map[string]any{"enabled": true}, 200)
 	})
 
-	original, password, e := a.deps.Conns.GetSecrets(context.Background(), a.connID)
+	original, password, e := a.deps.Conns.GetSecrets(a.actor(), a.connID)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -152,15 +154,16 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 	pg := a.call("POST", "/connections", a.admin, pgSource, 201)
 	pgID := int64(pg["id"].(float64))
 	pgPath := fmt.Sprintf("/connections/%d", pgID)
+	pgRO := a.personalFor(pgID, a.readonly, password)
 	t.Run("jdbc-postgres-parameters-types-and-saved-check", func(t *testing.T) {
 		a.t = t
 		a.call("POST", pgPath+"/test", a.admin, nil, 200)
-		got := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgID, "sql": "SELECT 1234567890123456789::bigint AS big, 1234567890.123456789::numeric(30,9) AS dec, :value::text AS param, '{\"x\":1}'::jsonb ? :key AS hit", "params": map[string]any{"value": "O'Reilly", "key": "x"}}, 200)
+		got := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgRO, "sql": "SELECT 1234567890123456789::bigint AS big, 1234567890.123456789::numeric(30,9) AS dec, :value::text AS param, '{\"x\":1}'::jsonb ? :key AS hit", "params": map[string]any{"value": "O'Reilly", "key": "x"}}, 200)
 		row := got["rows"].([]any)[0].([]any)
 		if row[0] != "1234567890123456789" || row[1] != "1234567890.123456789" || row[2] != "O'Reilly" || row[3] != true {
 			t.Fatal(row)
 		}
-		inferred := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgID, "sql": "SELECT id FROM " + a.table + " WHERE id=:id", "params": map[string]any{"id": "1"}}, 200)
+		inferred := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgRO, "sql": "SELECT id FROM " + a.table + " WHERE id=:id", "params": map[string]any{"id": "1"}}, 200)
 		if inferred["rows"].([]any)[0].([]any)[0] != "1" {
 			t.Fatal(inferred)
 		}
@@ -201,7 +204,7 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 		if success != 1 || duplicates != 11 {
 			t.Fatal(success, duplicates)
 		}
-		a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgID, "sql": "DELETE FROM " + a.table + " WHERE id=1"}, 400)
+		a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgRO, "sql": "DELETE FROM " + a.table + " WHERE id=1"}, 400)
 		got := a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": pgID, "sql": "SELECT owner_id FROM " + a.table + " WHERE id=1"}, 200)
 		if got["rows"].([]any)[0].([]any)[0] != "2" {
 			t.Fatal(got)
@@ -288,11 +291,12 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 		tpl := a.call("POST", "/datasource-templates", a.admin, body, 201)
 		source := a.call("POST", "/connections", a.admin, map[string]any{"name": "mysql-jdbc", "type": "jdbc", "template_revision_id": tpl["id"], "parameters": map[string]string{"host": host, "port": port, "database": cfg.DBName}, "username": cfg.User, "password": cfg.Passwd, "ssl_mode": "disable"}, 201)
 		id := int64(source["id"].(float64))
-		a.call("POST", fmt.Sprintf("/connections/%d/test", id), a.readonly, nil, 200)
+		myRO := a.personalFor(id, a.readonly, cfg.Passwd)
+		a.call("POST", fmt.Sprintf("/connections/%d/test", myRO), a.readonly, nil, 200)
 		table := fmt.Sprintf("jdbc_mysql_%d", time.Now().UnixNano())
 		a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": id, "sql": "CREATE TABLE " + table + " (id INT PRIMARY KEY)"}, 200)
 		defer a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": id, "sql": "DROP TABLE " + table}, 200)
-		got := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": id, "sql": "SELECT :value AS value", "params": map[string]any{"value": "真实 JDBC"}}, 200)
+		got := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": myRO, "sql": "SELECT :value AS value", "params": map[string]any{"value": "真实 JDBC"}}, 200)
 		if got["rows"].([]any)[0].([]any)[0] != "真实 JDBC" {
 			t.Fatal(got)
 		}
@@ -308,16 +312,16 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 		if got["rows"].([]any)[0].([]any)[0] != "0" {
 			t.Fatal(got)
 		}
-		a.call("GET", fmt.Sprintf("/metadata/columns?connection_id=%d&database=%s&table=%s", id, cfg.DBName, table), a.readonly, nil, 200)
+		a.call("GET", fmt.Sprintf("/metadata/columns?connection_id=%d&database=%s&table=%s", myRO, cfg.DBName, table), a.readonly, nil, 200)
 	})
 	t.Run("jdbc-null-binary-time-and-field-budget", func(t *testing.T) {
 		a.t = t
-		got := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgID, "sql": "SELECT NULL::text AS sqlnull, 'null'::jsonb AS jsonnull, decode('0102','hex') AS binary, '2024-06-01 12:00:00'::timestamp AS local_time"}, 200)
+		got := a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgRO, "sql": "SELECT NULL::text AS sqlnull, 'null'::jsonb AS jsonnull, decode('0102','hex') AS binary, '2024-06-01 12:00:00'::timestamp AS local_time"}, 200)
 		row := got["rows"].([]any)[0].([]any)
 		if row[0] != nil || row[1] != "null" || row[2].(map[string]any)["value"] != "AQI=" || row[3] != "2024-06-01 12:00:00" {
 			t.Fatal(row)
 		}
-		a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgID, "sql": "SELECT repeat('x',1100000)"}, 400)
+		a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": pgRO, "sql": "SELECT repeat('x',1100000)"}, 400)
 	})
 	t.Run("jdbc-honors-an-execution-budget-above-thirty-seconds", func(t *testing.T) {
 		a.t = t

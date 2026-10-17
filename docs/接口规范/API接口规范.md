@@ -139,8 +139,8 @@ curl http://localhost:8080/api/health
 
 ## 4. 数据源管理 (Connections)
 
-> 除标注外均需 Access Token（三通道任一）。创建连接限 `admin`、`developer`；修改和删除限管理员或连接的 developer 创建者，`readonly` 不可执行。所有已登录角色可测试已保存配置，编辑草稿的测试权限见 4.5。
-> **数据源为团队共享资源**：任何登录用户均可查看完整连接列表，并可对全部数据源执行元数据浏览、表预览与（只读）SQL；列表与使用不再按创建人过滤。`user_id` 仅记录创建者用于审计，个人可见性维度预留给后续「个人连接」类型。写操作（增删改数据源、隧道）仍在路由层按角色鉴权。
+> 除标注外均需 Access Token（三通道任一）。`/connections` 表示当前用户的个人连接，所有登录角色均可创建、修改、删除和测试自己的连接；管理员也不例外。数据库执行仍独立检查平台角色和实际数据库账号权限。
+> 公共目标通过 `/datasource-definitions` 发布，不包含用户名或密码。使用者确认修订并配置个人身份后才能操作。其他用户的个人连接统一不可访问。完整流程与迁移见[共享数据源与个人连接](../开发指南/共享数据源与个人连接验收.md)。
 
 ### 4.1 连接列表
 **GET** `/api/v1/connections?type=postgres&keyword=prod`
@@ -186,7 +186,7 @@ curl http://localhost:8080/api/health
 - **POST** `/api/v1/connections/test`：请求体同创建（用于保存前验证，口令不落库）
 - **POST** `/api/v1/connections/{id}/test`：空请求体使用已保存配置测试；携带完整连接配置时测试编辑草稿
 
-草稿测试仅限管理员或该连接的 developer 创建者。口令留空复用已保存口令；修改数据库类型、主机、端口、账号、TLS 或代理/SSH 隧道后，必须重新输入口令。草稿测试不修改配置或已保存配置的检查记录。
+草稿测试仅限该个人连接的所有者，所有登录角色均可使用。目标与账号未变化时，口令留空复用本人已保存口令；修改数据库类型、主机、端口、数据库、账号、TLS 或代理/SSH 隧道后，必须重新输入口令。草稿测试不修改配置或已保存配置的检查记录。
 
 **Response data:**
 ```json
@@ -372,8 +372,11 @@ curl http://localhost:8080/api/health
 | 能力 | admin | developer | readonly |
 | --- | --- | --- | --- |
 | 仪表盘/查看数据源 | ✅ | ✅ | ✅ |
-| 数据源/隧道增删改、测试连接 | ✅ | ✅ | ❌（403） |
-| 浏览共享数据源（库/模式/表/预览） | ✅ | ✅ | ✅ |
+| 个人连接增删改、测试连接 | ✅（本人） | ✅（本人） | ✅（本人） |
+| 全局驱动和数据源定义发布、启停 | ✅ | ❌ | ❌ |
+| 个人驱动配置与数据源定义 | ✅ | ✅ | ✅ |
+| SSH / 代理写操作 | ✅（本人） | ✅（本人） | ❌（403） |
+| 通过个人连接浏览已添加的数据源 | ✅ | ✅ | ✅ |
 | 执行 SELECT / SHOW / EXPLAIN 等查询 | ✅ | ✅ | ✅（引擎层关键字校验） |
 | 执行 INSERT/UPDATE/DDL 等写操作 | ✅ | ✅ | ❌（400 拒绝：只读角色禁止执行非查询语句） |
 | 用户与角色管理、审计日志 | ✅ | ❌ | ❌ |
@@ -396,8 +399,7 @@ curl http://localhost:8080/api/health
 
 **GET** `/api/v1/metrics/overview?days=14`
 
-登录用户均可访问；`days` 取 1~90，缺省/越界均回落到 14。管理员可见全平台数据，
-普通用户的「最近查询」仅返回本人记录。慢查询阈值固定为 `execution_time_ms > 200`。
+登录用户均可访问；`days` 取 1~90，缺省/越界均回落到 14。连接、查询历史和数据目录按当前用户返回；管理员的运行指标与操作审计另行授权。慢查询阈值固定为 `execution_time_ms > 200`。
 
 响应 `data` 结构：
 
@@ -666,7 +668,7 @@ JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`reques
 
 ## 11. 报表中心 (Reports，M3/M4)
 
-> 读：登录可用；写（创建/编辑/删除/收藏）：`admin`、`developer`，`readonly` 403；私有报表仅 owner/admin 可见。
+> 读：登录可用；写（创建/编辑/删除/收藏）：`admin`、`developer`，`readonly` 403；私有报表仅 owner 可见。
 
 ### 11.1 创建报表（M3 工作台另存为报表）
 
@@ -723,7 +725,7 @@ JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`reques
 
 ### 11.5 仪表盘 CRUD（M4-FR-02）
 
-> 读：登录可用；写：`admin`/`developer`；私有仅 owner/admin 可见；收藏任意登录用户。
+> 读：登录可用；写：`admin`/`developer`；私有仅 owner 可见；收藏任意登录用户。
 
 - **POST** `/api/v1/dashboards` `{ name(必填≤128), description?, visibility?: private|shared, layout?: [{report_id,x,y,w,h}] }` → `{ id }`
   - `layout` 为 12 栅格：`w` 1~12，`x/y/h` 可选，M4 前端简化为报表 ID 列表组合
@@ -851,38 +853,21 @@ Dashboard 响应示例：
 
 ---
 
-## 14. 工单中心（Tickets，Step24 前端 Mock，后端规划 M6）
+## 14. 工单中心（Tickets）
 
-> **前端**：独立页面 `/tickets`（`TicketView`），侧栏 `数据` 分组 `工单中心`（`Ticket`），`glass-card` + KPI 5 卡，`localStorage dbhub_tickets_v1` 持久化，`ChangeTicketPane` 复用。
+工单已落库。申请人及管理员可查看；developer 可以为自己的个人连接提交变更，readonly 不可提交。审批和实际执行均限管理员。
 
-### 14.1 组件契约（现为前端 Mock）
+| 接口 | 载荷或响应 |
+| --- | --- |
+| GET `/api/v1/tickets?status=&q=&type=&page=&page_size=` | `{items,total,page,page_size}`，按可见范围过滤 |
+| GET `/api/v1/tickets/{id}` | 工单详情及执行摘要 |
+| POST `/api/v1/tickets` | `{title,type,table,database,connection_id,sql,risk,reason}`，返回工单；必须指定本人的连接 |
+| POST `/api/v1/tickets/{id}/status` | `{status:'approved'|'rejected'}`，仅能处理 pending |
+| POST `/api/v1/tickets/{id}/execute` | 原子领取 approved 工单，使用执行者本人对相同全局修订的连接，重复领取返回冲突 |
 
-**ChangeTicketPane Props / Emits**
-```ts
-props: {
-  tickets: TicketItem[]      // { id, title, type:'ddl'|'dml'|'index', table, sql, risk:'low'|'medium'|'high', status:'pending'|'approved'|'rejected'|'executed', requester, reason, created_at }
-  prefill?: { title?, table?, sql?, risk?, reason?, type? } | null
-}
-emits: (e:'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_at'>) | (e:'updateStatus', id:number, status:string)
-```
-- `prefill` 变更时 watch 自动填充表单并 `showCreate=true`
-- 列表支持状态筛选（全部/待审批/已批准/已执行/已拒绝）+ 关键字（标题/表名/SQL）+ 复制 SQL
+工单不接受 SELECT。全局目标的 `database` 不能覆盖发布的数据库。执行结果仅保留 `kind`、`affected_rows`、`duration_ms`，不提供执行者身份下的结果行或列。状态为 `pending|approved|rejected|executing|executed|failed`；失败或不确定执行不会自动重试。旧共享连接工单的迁移规则见文末 0022 说明。
 
-**TicketView 交互**
-- `GET /tickets?table=&db=&title=&sql=&risk=`：资产血缘一键建单入口；`incoming` 横幅 + `一键建单` 预填 `ALTER TABLE {{table}}`
-- 头部操作：加载示例、清空已办（仅保留 pending/approved）
-
-### 14.2 规划后端（M6 预留，详见 DB 设计 2.10）
-
-- **GET** `/api/v1/tickets?status=&q=&page=&page_size=` → `{ items, total }`
-- **POST** `/api/v1/tickets` `{ title, type, table, sql, risk, reason }` → `{ id }`（记审计）
-- **POST** `/api/v1/tickets/{id}/status` `{ status:'approved'|'rejected'|'executed' }`（`admin/developer` 审批，`readonly` 403）
-- 审计：创建、审批、执行均记 `sys_audit_logs`，字段 `resource_type=ticket`
-
-### 14.3 关联链路
-
-- 资产血缘 `DataLineagePane @create-ticket` → `router.push /tickets?table=&db=&title=` → 工单中心预填
-- 未来：工单执行将联动 `sys_query_history` 与 `sys_meta_snapshots` 变更对比
+资产血缘入口可通过 `/tickets?table=&db=&title=&sql=&risk=` 预填变更申请。
 
 ---
 
@@ -899,20 +884,20 @@ emits: (e:'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_
 
 ## 连接器目录、自定义数据源与能力
 
-所有接口使用 `Authorization: Bearer <access_token>`，沿用统一 envelope。驱动与模板写入仅 admin，写入接受严格 JSON、记审计；普通登录用户只读模板与驱动摘要，不返回路径或凭据。
+所有接口使用 `Authorization: Bearer <access_token>`，沿用统一 envelope。驱动和连接规则支持 `visibility=private|global`，新增默认 private。所有登录用户可登记已安装制品的个人配置，仅当前 admin 可全局发布和管理全局版本。严格 JSON、审计和引用保护保留，不返回路径或凭据。
 
 | 方法/路径（/api/v1） | 行为 |
 | --- | --- |
-| GET /connector-drivers/available | admin 读取 JDBC 服务实际可加载、校验通过的制品 |
+| GET /connector-drivers/available | 登录用户读取 JDBC 服务实际可加载、校验通过的制品 |
 | GET /connector-drivers | 已登记驱动摘要列表 |
-| POST /connector-drivers | admin 登记 `{ "artifact_id":"postgresql-42.7.7", "name":"PostgreSQL JDBC" }`；重复制品 409 |
-| PATCH /connector-drivers/{id}/status | admin `{ "enabled": false }`；停用阻止新会话，不重派已有执行 |
-| DELETE /connector-drivers/{id} | admin 删除未引用版本，引用中返回 409 |
+| POST /connector-drivers | 登记 `{ "artifact_id":"postgresql-42.7.7", "name":"PostgreSQL JDBC", "visibility":"private" }`；同范围重复制品 409 |
+| PATCH /connector-drivers/{id}/status | 个人所有者或全局 admin `{ "enabled": false }`；停用阻止新会话 |
+| DELETE /connector-drivers/{id} | 个人所有者或全局 admin 删除未引用版本，引用中返回 409 |
 | GET /datasource-templates | 登录用户读取模板列表；admin 可包含停用版本 |
-| POST /datasource-templates | admin 发布第一个不可变修订 |
-| PUT /datasource-templates/{id} | admin 按相同 key 发布新修订，不改旧实例 |
-| PATCH /datasource-templates/{id}/status | admin 启停指定修订 |
-| DELETE /datasource-templates/{id} | admin 删除未引用修订，引用中返回 409 |
+| POST /datasource-templates | 个人所有者或全局 admin 发布首个不可变修订 |
+| PUT /datasource-templates/{id} | 个人所有者或全局 admin 按相同 key 和范围追加修订，不改旧实例 |
+| PATCH /datasource-templates/{id}/status | 个人所有者或全局 admin 启停指定修订 |
+| DELETE /datasource-templates/{id} | 个人所有者或全局 admin 删除未引用修订，引用中返回 409 |
 | GET /connections/{id}/capabilities | 取得配置绑定和实际实现的能力，不触发目标 SQL |
 
 模板请求示例：
@@ -940,3 +925,27 @@ JDBC 实例沿用 /connections CRUD 和测试接口，扩展如下字段：
 JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确小数和大整数以无损文本返回，二进制以显式编码返回，响应可附列类型。JDBC 的连接结果与兼容性分开，原生矩阵不自动授予 JDBC 已验证状态。元数据不支持的 DDL/统计由 metadata_status 标识，不以 0 或空文本冒充已读取；采集仍整轮原子发布。
 
 结构采集的 `status` 为 `succeeded|failed|busy|skipped|unknown`。`unknown` 表示元数据库提交确认丢失，可能已经发布；客户端提示刷新数据目录核实，不能将其表述为失败并保留旧快照。JDBC 默认只对实例配置库提供元数据，响应 `metadata_status` 记录不支持的 DDL/统计；完整采集单独检查 `collect`。
+
+
+## 共享数据源定义与个人绑定（0022）
+
+所有路由位于 `/api/v1`，需要登录。定义和凭据分别存储；全局写操作仅当前管理员可执行。
+
+| 路由 | 行为 |
+| --- | --- |
+| GET `/datasource-definitions` | 全局及本人私有的最新可见修订，附当前用户 `my_connection_id`、`my_revision_id` |
+| POST `/datasource-definitions` | `{name,description,visibility,config}`；config 只允许目标字段，拒绝认证字段 |
+| POST `/datasource-definitions/{id}/revisions` | 追加修订；旧绑定不变，相同内容的重复发布返回已有修订 |
+| PATCH `/datasource-definitions/{id}/status` | `{enabled}`；仅影响指定修订的新操作 |
+| POST `/connections/{id}/publish` | 从本人的连接复制去凭据定义，`{visibility,description}`；代理与 SSH 暂不随定义发布 |
+| POST `/datasource-definitions/{id}/connections` | `{name,username,password,confirmed:true}`；创建个人绑定，重复返回 409 |
+| POST `/datasource-definitions/{id}/connections?test=true` | 同样的个人身份载荷，测试但不保存或改写检查记录 |
+| POST `/connections/{id}/revision` | `{definition_revision_id,name,username,password,confirmed:true}`；确认同一逻辑源的修订并重新输入凭据 |
+
+`/connections` 响应新增 `definition_revision_id`、`definition_family_id` 和 `definition` 摘要。全局关系型定义须指定库或服务；数据库选择和采集固定到发布的库，不能通过 API 覆盖。编辑公共绑定不能覆盖目标字段；修改身份或目标会使旧采集与检查失效。无数据库认证的 Redis 可保留空密码，关系型连接须明确填写自己的账号密码。
+
+公开查询结果与报表分享入口关闭，旧令牌迁移撤销。共享报表读取时使用查看者对同一发布修订的个人连接；未配置时 `connection_id=0`，客户端提示配置。管理员审批和执行工单时也需自己的匹配连接。管理员不能下载他人的导出或查看他人的私有查询任务与历史。
+
+0022 将引用他人连接的 pending/approved 旧工单改为 rejected，要求以个人连接重新提交，并将历史执行结果收敛为不含结果行的摘要。
+
+生产环境必须配置 `DBHUB_TARGET_ALLOWLIST`；未获允许的目标、代理及 SSH 端点不可连接。被驱动配置或其他资源引用的用户删除返回 409，可先停用用户并处理配置归属。

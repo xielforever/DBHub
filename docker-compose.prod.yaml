@@ -35,6 +35,7 @@ services:
       DBHUB_AI_MODEL: ${DBHUB_AI_MODEL:-gpt-4.1-mini}
       DBHUB_AI_API_KEY: ${DBHUB_AI_API_KEY:-}
       DBHUB_JDBC_URL: ${DBHUB_JDBC_URL:-}
+      DBHUB_TARGET_ALLOWLIST: ${DBHUB_TARGET_ALLOWLIST:-}
       DBHUB_JDBC_TOKEN: ${DBHUB_JDBC_TOKEN:-}
     expose: ["8080"]
   frontend:

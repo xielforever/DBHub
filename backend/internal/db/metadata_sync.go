@@ -22,6 +22,9 @@ type MetadataSync struct {
 }
 
 func (r *MetadataRepository) BeginSync(ctx context.Context, connectionID int64, version time.Time) (*MetadataSync, error) {
+	if e := requireConnection(ctx, r.pool, connectionID); e != nil {
+		return nil, e
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err

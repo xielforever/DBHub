@@ -51,6 +51,6 @@ func (r *QueryControls) ReviewExport(ctx context.Context, id, uid int64, status 
 func (r *QueryControls) DownloadExport(ctx context.Context, id, uid int64, admin bool) (string, json.RawMessage, error) {
 	var format string
 	var raw []byte
-	e := r.pool.QueryRow(ctx, `SELECT format,payload FROM sys_export_requests WHERE id=$1 AND (user_id=$2 OR $3) AND status='approved'`, id, uid, admin).Scan(&format, &raw)
+	e := r.pool.QueryRow(ctx, `SELECT format,payload FROM sys_export_requests WHERE id=$1 AND (user_id=$2 OR $3) AND status='approved'`, id, uid, false).Scan(&format, &raw)
 	return format, raw, e
 }

@@ -85,6 +85,9 @@ func (r *ProxyRepository) GetSecrets(ctx context.Context, id int64) (*Proxy, err
 	if err != nil {
 		return nil, err
 	}
+	if p.UserID != ActorID(ctx) {
+		return nil, ErrNotFound
+	}
 	var encPwd string
 	if err := r.pool.QueryRow(ctx, `SELECT password FROM sys_proxies WHERE id=$1`, id).Scan(&encPwd); err != nil {
 		return nil, err

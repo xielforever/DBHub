@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,9 +14,11 @@ import (
 var ErrCatalogConflict = errors.New("驱动或模板已存在")
 var ErrCatalogInUse = errors.New("该版本仍被引用，不能删除")
 var ErrCatalogDisabled = errors.New("驱动或模板未就绪或已停用")
+var ErrPersonalBindingExists = errors.New("已添加该数据源，请在我的连接中修改账号或确认新修订")
 
 type JDBCDriver struct {
 	ID         int64     `json:"id"`
+	Visibility string    `json:"visibility"`
 	ArtifactID string    `json:"artifact_id"`
 	Name       string    `json:"name"`
 	Version    string    `json:"version"`
@@ -34,6 +37,7 @@ type TemplateField struct {
 }
 type DatasourceTemplate struct {
 	ID          int64           `json:"id"`
+	Visibility  string          `json:"visibility"`
 	Key         string          `json:"template_key"`
 	Revision    int             `json:"revision"`
 	Name        string          `json:"name"`
@@ -57,6 +61,9 @@ func catalogError(e error) error {
 	}
 	if errors.As(e, &p) {
 		if p.Code == "23505" {
+			if p.ConstraintName == "connection_user_definition" {
+				return ErrPersonalBindingExists
+			}
 			return ErrCatalogConflict
 		}
 		if p.Code == "23503" {
@@ -66,7 +73,10 @@ func catalogError(e error) error {
 	return e
 }
 func (r *ConnectorCatalog) Drivers(ctx context.Context) ([]JDBCDriver, error) {
-	rows, e := r.pool.Query(ctx, `SELECT row_to_json(d) FROM sys_jdbc_drivers d ORDER BY id`)
+	if ActorID(ctx) == 0 {
+		return nil, ErrNotFound
+	}
+	rows, e := r.pool.Query(ctx, `SELECT row_to_json(d) FROM sys_jdbc_drivers d WHERE d.visibility='global' OR d.created_by=$1 ORDER BY id`, ActorID(ctx))
 	if e != nil {
 		return nil, e
 	}
@@ -86,8 +96,11 @@ func (r *ConnectorCatalog) Drivers(ctx context.Context) ([]JDBCDriver, error) {
 	return out, rows.Err()
 }
 func (r *ConnectorCatalog) Driver(ctx context.Context, id int64) (*JDBCDriver, error) {
+	if ActorID(ctx) == 0 {
+		return nil, ErrNotFound
+	}
 	var raw []byte
-	e := r.pool.QueryRow(ctx, `SELECT row_to_json(d) FROM sys_jdbc_drivers d WHERE id=$1`, id).Scan(&raw)
+	e := r.pool.QueryRow(ctx, `SELECT row_to_json(d) FROM sys_jdbc_drivers d WHERE id=$1 AND (d.visibility='global' OR d.created_by=$2)`, id, ActorID(ctx)).Scan(&raw)
 	if e != nil {
 		return nil, catalogError(e)
 	}
@@ -96,10 +109,13 @@ func (r *ConnectorCatalog) Driver(ctx context.Context, id int64) (*JDBCDriver, e
 	return &d, e
 }
 func (r *ConnectorCatalog) RegisterDriver(ctx context.Context, d *JDBCDriver) error {
-	return catalogError(r.pool.QueryRow(ctx, `INSERT INTO sys_jdbc_drivers(artifact_id,name,version,class_name,sha256,created_by)VALUES($1,$2,$3,$4,$5,$6) RETURNING id,enabled,created_at`, d.ArtifactID, d.Name, d.Version, d.ClassName, d.SHA256, d.CreatedBy).Scan(&d.ID, &d.Enabled, &d.CreatedAt))
+	return catalogError(r.pool.QueryRow(ctx, `INSERT INTO sys_jdbc_drivers(artifact_id,name,version,class_name,sha256,created_by,visibility)VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id,enabled,created_at`, d.ArtifactID, d.Name, d.Version, d.ClassName, d.SHA256, d.CreatedBy, d.Visibility).Scan(&d.ID, &d.Enabled, &d.CreatedAt))
 }
 func (r *ConnectorCatalog) Templates(ctx context.Context, all bool) ([]DatasourceTemplate, error) {
-	rows, e := r.pool.Query(ctx, `SELECT to_jsonb(t)||jsonb_build_object('driver',to_jsonb(d)) FROM sys_datasource_templates t JOIN sys_jdbc_drivers d ON d.id=t.driver_id WHERE ($1 OR (t.enabled AND d.enabled)) ORDER BY t.template_key,t.revision DESC`, all)
+	if ActorID(ctx) == 0 {
+		return nil, ErrNotFound
+	}
+	rows, e := r.pool.Query(ctx, `SELECT to_jsonb(t)||jsonb_build_object('driver',to_jsonb(d)) FROM sys_datasource_templates t JOIN sys_jdbc_drivers d ON d.id=t.driver_id WHERE (t.visibility='global' OR t.created_by=$2) AND (d.visibility='global' OR d.created_by=$2) AND ($1 OR t.created_by=$2 OR (t.enabled AND d.enabled)) ORDER BY t.template_key,t.revision DESC`, all, ActorID(ctx))
 	if e != nil {
 		return nil, e
 	}
@@ -119,8 +135,11 @@ func (r *ConnectorCatalog) Templates(ctx context.Context, all bool) ([]Datasourc
 	return out, rows.Err()
 }
 func (r *ConnectorCatalog) Template(ctx context.Context, id int64) (*DatasourceTemplate, error) {
+	if ActorID(ctx) == 0 {
+		return nil, ErrNotFound
+	}
 	var raw []byte
-	e := r.pool.QueryRow(ctx, `SELECT to_jsonb(t)||jsonb_build_object('driver',to_jsonb(d)) FROM sys_datasource_templates t JOIN sys_jdbc_drivers d ON d.id=t.driver_id WHERE t.id=$1`, id).Scan(&raw)
+	e := r.pool.QueryRow(ctx, `SELECT to_jsonb(t)||jsonb_build_object('driver',to_jsonb(d)) FROM sys_datasource_templates t JOIN sys_jdbc_drivers d ON d.id=t.driver_id WHERE t.id=$1 AND (t.visibility='global' OR t.created_by=$2) AND (d.visibility='global' OR d.created_by=$2)`, id, ActorID(ctx)).Scan(&raw)
 	if e != nil {
 		return nil, catalogError(e)
 	}
@@ -134,11 +153,16 @@ func (r *ConnectorCatalog) Publish(ctx context.Context, t *DatasourceTemplate, a
 		return e
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('dbhub-template:'||$1))`, t.Key); e != nil {
+	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('dbhub-template:'||$1))`, fmt.Sprintf("%s:%s:%d", t.Key, t.Visibility, func() int64 {
+		if t.Visibility == "global" {
+			return 0
+		}
+		return ActorID(ctx)
+	}())); e != nil {
 		return e
 	}
 	var previous int
-	e = tx.QueryRow(ctx, `SELECT COALESCE(max(revision),0) FROM sys_datasource_templates WHERE template_key=$1`, t.Key).Scan(&previous)
+	e = tx.QueryRow(ctx, `SELECT COALESCE(max(revision),0) FROM sys_datasource_templates WHERE template_key=$1 AND visibility=$2 AND (visibility='global' OR created_by=$3)`, t.Key, t.Visibility, ActorID(ctx)).Scan(&previous)
 	if e != nil {
 		return e
 	}
@@ -161,18 +185,18 @@ func (r *ConnectorCatalog) Publish(ctx context.Context, t *DatasourceTemplate, a
 		return e
 	}
 	t.Revision = previous + 1
-	e = tx.QueryRow(ctx, `INSERT INTO sys_datasource_templates(template_key,revision,name,product,driver_id,dialect,url_template,fields,created_by)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)RETURNING id,enabled,created_at`, t.Key, t.Revision, t.Name, t.Product, t.DriverID, t.Dialect, t.URLTemplate, string(fields), t.CreatedBy).Scan(&t.ID, &t.Enabled, &t.CreatedAt)
+	e = tx.QueryRow(ctx, `INSERT INTO sys_datasource_templates(template_key,revision,name,product,driver_id,dialect,url_template,fields,created_by,visibility)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)RETURNING id,enabled,created_at`, t.Key, t.Revision, t.Name, t.Product, t.DriverID, t.Dialect, t.URLTemplate, string(fields), t.CreatedBy, t.Visibility).Scan(&t.ID, &t.Enabled, &t.CreatedAt)
 	if e != nil {
 		return catalogError(e)
 	}
 	return tx.Commit(ctx)
 }
 func (r *ConnectorCatalog) SetEnabled(ctx context.Context, kind string, id int64, enabled bool) error {
-	query := `UPDATE sys_jdbc_drivers SET enabled=$2 WHERE id=$1`
+	query := `UPDATE sys_jdbc_drivers SET enabled=$2 WHERE id=$1 AND ((visibility='private' AND created_by=$3) OR (visibility='global' AND $4))`
 	if kind == "template" {
-		query = `UPDATE sys_datasource_templates SET enabled=$2 WHERE id=$1`
+		query = `UPDATE sys_datasource_templates SET enabled=$2 WHERE id=$1 AND ((visibility='private' AND created_by=$3) OR (visibility='global' AND $4))`
 	}
-	tag, e := r.pool.Exec(ctx, query, id, enabled)
+	tag, e := r.pool.Exec(ctx, query, id, enabled, ActorID(ctx), ActorAdmin(ctx))
 	if e != nil {
 		return catalogError(e)
 	}
@@ -182,11 +206,11 @@ func (r *ConnectorCatalog) SetEnabled(ctx context.Context, kind string, id int64
 	return nil
 }
 func (r *ConnectorCatalog) Delete(ctx context.Context, kind string, id int64) error {
-	query := `DELETE FROM sys_jdbc_drivers WHERE id=$1`
+	query := `DELETE FROM sys_jdbc_drivers WHERE id=$1 AND ((visibility='private' AND created_by=$2) OR (visibility='global' AND $3))`
 	if kind == "template" {
-		query = `DELETE FROM sys_datasource_templates WHERE id=$1`
+		query = `DELETE FROM sys_datasource_templates WHERE id=$1 AND ((visibility='private' AND created_by=$2) OR (visibility='global' AND $3))`
 	}
-	tag, e := r.pool.Exec(ctx, query, id)
+	tag, e := r.pool.Exec(ctx, query, id, ActorID(ctx), ActorAdmin(ctx))
 	if e != nil {
 		return catalogError(e)
 	}

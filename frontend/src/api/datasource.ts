@@ -3,6 +3,7 @@
  */
 import request from '../utils/request'
 import type { DatasourceTemplate } from './connector'
+import type { SourceDefinition } from './source-catalog'
 
 export interface Capabilities {sql: boolean;format: boolean;metadata: boolean;collect: boolean;keys: boolean;transactions: boolean;enforced_read_only: boolean;reason?: string}
 export function sourceLabel(c: ConnectionItem) {return c.template?.product || ({mysql:'MySQL',postgres:'PostgreSQL',redis:'Redis',jdbc:'自定义 JDBC'}[c.type] ?? c.type)}
@@ -12,6 +13,9 @@ export type EnvKind = 'dev' | 'test' | 'prod'
 
 export interface ConnectionItem {
   id: number
+  definition_revision_id?: number
+  definition_family_id?: string
+  definition?: SourceDefinition
   user_id: number
   ssh_tunnel_id: number | null
   proxy_id: number | null

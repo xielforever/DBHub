@@ -29,7 +29,7 @@ func connectionPayload(c *db.Connection, password string) map[string]any {
 
 func TestDatasourceReliability(t *testing.T) {
 	a := setupAPI(t)
-	ctx := context.Background()
+	ctx := a.actor()
 	original, password, err := a.deps.Conns.GetSecrets(ctx, a.connID)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestDatasourceReliability(t *testing.T) {
 
 	t.Run("saved-check-survives-reload-and-draft-uses-saved-password", func(t *testing.T) {
 		a.t = t
-		tested := a.call("POST", path+"/test", a.readonly, nil, 200)
+		tested := a.call("POST", path+"/test", a.admin, nil, 200)
 		if tested["recorded"] != true {
 			t.Fatal("saved check was not recorded")
 		}
@@ -57,8 +57,8 @@ func TestDatasourceReliability(t *testing.T) {
 		if draft["ok"] != true || draft["recorded"] != false {
 			t.Fatal("draft must use saved secret without publishing a check")
 		}
-		a.call("POST", path+"/test", a.developer, payload, 403)
-		a.call("POST", path+"/test", a.readonly, payload, 403)
+		a.call("POST", path+"/test", a.developer, payload, 404)
+		a.call("POST", path+"/test", a.readonly, payload, 404)
 		after := a.call("GET", path, a.admin, nil, 200)["last_check"].(map[string]any)
 		if after["checked_at"] != check["checked_at"] {
 			t.Fatal("draft changed saved check")
@@ -108,6 +108,8 @@ func TestDatasourceReliability(t *testing.T) {
 	})
 	t.Run("concurrent-edit-loads-credentials-from-one-revision", func(t *testing.T) {
 		probe := *original
+		probe.DefinitionRevisionID = nil
+		probe.DefinitionFamilyID = ""
 		probe.ID, probe.Name, probe.Host, probe.Password = 0, "revision-probe", "a.invalid", "password-a"
 		if err := a.deps.Conns.Create(ctx, &probe); err != nil {
 			t.Fatal(err)
@@ -155,6 +157,7 @@ func TestDatasourceReliability(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		payload["password"] = password
 		payload["host"], payload["port"] = "127.0.0.1", 1
 		updated := a.call("PUT", path, a.admin, payload, 200)
 		if updated["last_check"] != nil {
@@ -165,7 +168,7 @@ func TestDatasourceReliability(t *testing.T) {
 			t.Fatal("old configuration check accepted")
 		}
 		a.call("POST", path+"/test", a.admin, nil, 400)
-		failed := a.call("GET", path, a.readonly, nil, 200)["last_check"].(map[string]any)
+		failed := a.call("GET", path, a.admin, nil, 200)["last_check"].(map[string]any)
 		if failed["ok"] != false || failed["error"] == "" || failed["checked_at"] == "" {
 			t.Fatal("failed check was lost on reload")
 		}
@@ -187,7 +190,7 @@ func TestDatasourceReliability(t *testing.T) {
 
 func TestMetadataSyncReliability(t *testing.T) {
 	a := setupAPI(t)
-	ctx := context.Background()
+	ctx := a.actor()
 	conn, _, err := a.deps.Conns.GetSecrets(ctx, a.connID)
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +309,11 @@ func TestMetadataSyncReliability(t *testing.T) {
 		}
 		defer a.pool.Exec(ctx, "DROP ROLE "+roleSQL)
 		limited := *conn
+		limited.DefinitionRevisionID = nil
+		limited.DefinitionFamilyID = ""
 		limited.ID = 0
+		limited.DefinitionRevisionID = nil
+		limited.DefinitionFamilyID = ""
 		limited.Name = "limited-sync"
 		limited.Username = role
 		limited.Password = "SyncProbePassword!9"
@@ -372,17 +379,17 @@ func TestMetadataSyncReliability(t *testing.T) {
 			}
 			deadline := time.Now().Add(5 * time.Second)
 			for {
-				probe, err := a.deps.Meta.BeginSync(ctx, a.connID, current.UpdatedAt)
-				if errors.Is(err, db.ErrSyncBusy) {
+				var held bool
+				err = a.pool.QueryRow(ctx, `WITH expected AS (SELECT hashtextextended(current_schema()||':dbhub:metadata-sync:'||$1::bigint::text,0) AS k)
+                SELECT EXISTS(SELECT 1 FROM pg_locks l,expected e WHERE l.locktype='advisory' AND l.granted AND l.objsubid=1
+                AND l.classid=((e.k>>32)&4294967295)::oid AND l.objid=(e.k&4294967295)::oid)`, a.connID).Scan(&held)
+				if held {
 					break
-				}
-				if probe != nil {
-					probe.Close()
 				}
 				if err != nil || time.Now().After(deadline) {
 					cancel()
 					lock.Rollback(ctx)
-					t.Fatal("HTTP collection did not acquire lock")
+					t.Fatal("HTTP collection did not acquire lock", err)
 				}
 				time.Sleep(10 * time.Millisecond)
 			}

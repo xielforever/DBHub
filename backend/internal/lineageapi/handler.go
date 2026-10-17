@@ -69,6 +69,12 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	connID, _ := strconv.ParseInt(q.Get("connection_id"), 10, 64)
+	if connID > 0 {
+		if _, e := h.conns.Get(r.Context(), connID); e != nil {
+			httpx.Fail(w, httpx.NotFound("个人连接不存在"))
+			return
+		}
+	}
 	dbName := strings.TrimSpace(q.Get("database"))
 	schema := strings.TrimSpace(q.Get("schema"))
 	table := strings.TrimSpace(q.Get("table"))

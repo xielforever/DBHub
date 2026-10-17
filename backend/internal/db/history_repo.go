@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"github.com/user/dbhub/internal/auth"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -59,7 +60,7 @@ func (r *HistoryRepository) List(ctx context.Context, userID int64, isAdmin bool
 	} else if statusFilter == "failed" {
 		statusArg = "0"
 	}
-	args := []any{userID, isAdmin, connectionID, statusArg}
+	args := []any{ActorID(ctx), false, connectionID, statusArg}
 
 	where := `WHERE ($2 OR h.user_id = $1)
 		AND ($3 = 0 OR h.connection_id = $3)
@@ -173,7 +174,7 @@ func (r *HistoryRepository) ConnectionRank(ctx context.Context, days, limit int)
 		SELECT h.connection_id, COALESCE(c.name, '#' || h.connection_id), COUNT(*) AS n
 		FROM sys_query_history h
 		LEFT JOIN sys_connections c ON c.id = h.connection_id
-		WHERE h.created_at >= CURRENT_DATE - ($1::int - 1)
+		WHERE `+connectionScope(ctx, "h.connection_id")+` AND h.created_at >= CURRENT_DATE - ($1::int - 1)
 		GROUP BY h.connection_id, c.name
 		ORDER BY n DESC
 		LIMIT $2`, days, limit)
@@ -196,8 +197,8 @@ func (r *HistoryRepository) ConnectionRank(ctx context.Context, days, limit int)
 func (r *HistoryRepository) TodayStats(ctx context.Context) (todayQueries int64, activeUsers int64, err error) {
 	err = r.pool.QueryRow(ctx, `
 		SELECT
-			(SELECT COUNT(*) FROM sys_query_history WHERE created_at >= CURRENT_DATE),
-			(SELECT COUNT(DISTINCT user_id) FROM sys_query_history WHERE created_at >= CURRENT_DATE)
+			(SELECT COUNT(*) FROM sys_query_history WHERE user_id=`+fmt.Sprint(ActorID(ctx))+` AND created_at >= CURRENT_DATE),
+			(SELECT COUNT(DISTINCT user_id) FROM sys_query_history WHERE user_id=`+fmt.Sprint(ActorID(ctx))+` AND created_at >= CURRENT_DATE)
 	`).Scan(&todayQueries, &activeUsers)
 	return
 }
@@ -212,7 +213,7 @@ func (r *HistoryRepository) RecentQueries(ctx context.Context, userID int64, isA
 		LEFT JOIN sys_connections c ON c.id = h.connection_id
 		WHERE $2 OR h.user_id = $1
 		ORDER BY h.id DESC
-		LIMIT $3`, userID, isAdmin, limit)
+		LIMIT $3`, ActorID(ctx), false, limit)
 	if err != nil {
 		return nil, fmt.Errorf("查询最近执行记录失败: %w", err)
 	}
@@ -254,7 +255,7 @@ func (r *HistoryRepository) SearchBySQL(ctx context.Context, userID int64, isAdm
 		  AND ($2 OR h.user_id = $1)
 		  AND h.sql_text ILIKE $3
 		ORDER BY h.id DESC
-		LIMIT $4`, userID, isAdmin, "%"+keyword+"%", limit)
+		LIMIT $4`, ActorID(ctx), false, "%"+keyword+"%", limit)
 	if err != nil {
 		return nil, fmt.Errorf("检索查询历史失败: %w", err)
 	}
@@ -266,6 +267,24 @@ func (r *HistoryRepository) SearchBySQL(ctx context.Context, userID int64, isAdm
 			return nil, err
 		}
 		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// ActiveActors supplies explicit principals for the internal metadata-only lineage worker.
+func (r *HistoryRepository) ActiveActors(ctx context.Context) ([]auth.Claims, error) {
+	rows, e := r.pool.Query(ctx, `SELECT u.id,u.username,r.code FROM sys_users u JOIN sys_roles r ON r.id=u.role_id WHERE u.is_active ORDER BY u.id`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []auth.Claims{}
+	for rows.Next() {
+		var c auth.Claims
+		if e = rows.Scan(&c.Subject, &c.Username, &c.Role); e != nil {
+			return nil, e
+		}
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }

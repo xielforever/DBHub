@@ -146,6 +146,12 @@ try:
         mysql_card.get_by_role('button',name='编辑数据源',exact=True).click()
         dialog.get_by_label('主机',exact=True).fill('127.0.0.1')
         dialog.get_by_label('端口',exact=True).fill('1')
+        with page.expect_response(lambda r:r.url.endswith(f"/connections/{mysql_item['id']}") and r.request.method=='PUT') as rejected:
+            dialog.get_by_role('button',name='保存',exact=True).click()
+        assert rejected.value.status==400
+        expect(dialog).to_be_visible()
+        passed('a changed target cannot retain a password without explicit re-entry')
+        dialog.get_by_label('密码',exact=True).fill(values['MYSQL_PASSWORD'])
         dialog.get_by_role('button',name='保存',exact=True).click()
         expect(dialog).not_to_be_visible()
         expect(mysql_card.get_by_role('status')).to_have_count(0)
@@ -158,20 +164,32 @@ try:
         expect(mysql_card.get_by_role('status')).to_contain_text('连接测试失败')
         passed('failed checks survive a page reload')
 
-        # 保存编辑表单时空口令仍保留原凭据，恢复地址后可重新连接。
+        # 恢复目标同样要求重新输入个人口令；地址不变时编辑别名可以留空。
         mysql_card.get_by_role('button',name='编辑数据源',exact=True).click()
         dialog.get_by_label('主机',exact=True).fill('mysql')
         dialog.get_by_label('端口',exact=True).fill('3306')
+        dialog.get_by_label('密码',exact=True).fill(values['MYSQL_PASSWORD'])
         dialog.get_by_role('button',name='保存',exact=True).click()
         expect(dialog).not_to_be_visible()
         mysql_card.get_by_role('button',name='测试连接 '+mysql_item['name'],exact=True).click()
         expect(mysql_card.get_by_role('status')).to_contain_text('MySQL')
-        passed('saving an empty password preserves the working stored credential')
+        passed('restoring a target requires the user to provide their own password')
+        mysql_card.get_by_role('button',name='编辑数据源',exact=True).click()
+        renamed=mysql_item['name']+' renamed'
+        dialog.get_by_label('数据源名称',exact=True).fill(renamed)
+        expect(dialog.get_by_label('密码',exact=True)).to_have_value('')
+        dialog.get_by_role('button',name='保存',exact=True).click()
+        expect(dialog).not_to_be_visible()
+        mysql_card=page.locator('article').filter(has=page.get_by_role('heading',name=renamed,exact=True))
+        mysql_card.get_by_role('button',name='测试连接 '+renamed,exact=True).click()
+        expect(mysql_card.get_by_role('status')).to_contain_text('MySQL')
+        passed('an unchanged destination can retain the personal credential when editing its alias')
         assert not errors
         context.close()
         browser.close()
     (out/'versions-checks.json').write_text(json.dumps({'scope':'datasource-version-ui','checks':checks,'page_errors':errors,'contract_fixtures':['unverified MariaDB profile only']},ensure_ascii=False,indent=2))
 finally:
+    (out/'versions-fixture-families.json').write_text(json.dumps({'families':[item.get('definition_family_id') for item in created if item.get('definition_family_id')]}))
     for item in created:
         api('DELETE',f"/connections/{item['id']}")
     if browser_token:

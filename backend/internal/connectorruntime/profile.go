@@ -16,6 +16,8 @@ var profileKey = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,79}$`)
 var databaseName = regexp.MustCompile(`^[\pL\pN_.-]{1,80}$`)
 var placeholder = regexp.MustCompile(`\{([a-z][a-z0-9_]{0,40})\}`)
 var forbiddenURL = regexp.MustCompile(`(?i)(password|user(?:name)?|token|secret|init|runscript|socketfactory|trace_level[^=]*)\s*=`)
+var networkTemplate = regexp.MustCompile(`^jdbc:[A-Za-z0-9_:@.-]+//\{host\}:\{port\}(?:/\{[a-z][a-z0-9_]{0,40}\}){1,4}$`)
+var secretTemplateField = regexp.MustCompile(`(?i)(user|pass|pwd|token|secret|credential|auth|cert|key)`)
 var hostName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$`)
 
 func ValidateTemplate(t *db.DatasourceTemplate) error {
@@ -38,7 +40,7 @@ func ValidateTemplate(t *db.DatasourceTemplate) error {
 		expected = "jdbc:h2:mem:{database};DB_CLOSE_DELAY=-1"
 		needed = map[string]string{"database": "string"}
 	default:
-		if !strings.HasPrefix(t.URLTemplate, "jdbc:") || !strings.Contains(t.URLTemplate, "//{host}:{port}") || len(t.URLTemplate) > 2048 || strings.ContainsAny(t.URLTemplate, "\r\n\t\"' ") || forbiddenURL.MatchString(t.URLTemplate) {
+		if !networkTemplate.MatchString(t.URLTemplate) || !strings.HasPrefix(t.URLTemplate, "jdbc:") || !strings.Contains(t.URLTemplate, "//{host}:{port}") || len(t.URLTemplate) > 2048 || strings.ContainsAny(t.URLTemplate, "\r\n\t\"' ") || forbiddenURL.MatchString(t.URLTemplate) {
 			return fmt.Errorf("通用 JDBC 模板必须使用网络端点占位字段，且不能包含凭据或执行属性")
 		}
 		expected = t.URLTemplate
@@ -47,7 +49,7 @@ func ValidateTemplate(t *db.DatasourceTemplate) error {
 			if match[1] == "port" {
 				kind = "integer"
 			}
-			if match[1] == "username" || match[1] == "password" || match[1] == "token" || match[1] == "secret" {
+			if secretTemplateField.MatchString(match[1]) {
 				return fmt.Errorf("凭据必须独立输入")
 			}
 			needed[match[1]] = kind

@@ -132,6 +132,12 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 	var execErr error
 	defer func() { finish(execErr) }()
+	if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
+		execErr = err
+		receipt.Status, receipt.Message = "rejected", "个人连接配置或授权已变化，未发送 SQL。"
+		respond(409, receipt.Message, nil)
+		return
+	}
 	settings, settingErr := h.controls.Settings(ctx, c.Subject)
 	if settingErr != nil {
 		execErr = settingErr
@@ -151,6 +157,9 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	var executionStarted time.Time
 	opt.BeforeExecute = func() error {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
 			return err
 		}
 		if err := h.controls.StartExecution(ctx, c.Subject, in.RequestID); err != nil {
@@ -200,7 +209,11 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		} else if time.Since(tx.LastUsed) > 5*time.Minute {
 			execErr = fmt.Errorf("事务已过期")
 		} else {
-			result, execErr = run(tx.Handle)
+			if !tx.Handle.Conn.UpdatedAt.Equal(conn.UpdatedAt) {
+				execErr = db.ErrConnectionChanged
+			} else {
+				result, execErr = run(tx.Handle)
+			}
 			tx.Queries++
 			tx.LastUsed = time.Now()
 		}

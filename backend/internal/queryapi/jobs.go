@@ -205,7 +205,7 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 	out := []Job{}
 	for i := len(h.jobs.items) - 1; i >= 0 && len(out) < 100; i-- {
 		j := h.jobs.items[i]
-		if j.UserID == c.Subject || isAdmin(c) {
+		if j.UserID == c.Subject {
 			out = append(out, *j)
 		}
 	}
@@ -216,7 +216,7 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	h.jobs.mu.Lock()
 	defer h.jobs.mu.Unlock()
 	for _, j := range h.jobs.items {
-		if j.ID == r.PathValue("id") && (j.UserID == c.Subject || isAdmin(c)) {
+		if j.ID == r.PathValue("id") && (j.UserID == c.Subject) {
 			if j.Finished == nil {
 				j.cancel()
 			}

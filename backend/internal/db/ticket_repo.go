@@ -69,7 +69,7 @@ func (r *TicketRepository) Get(ctx context.Context, id int64) (*Ticket, error) {
 		       COALESCE(t.reason,''), t.created_at, t.updated_at,t.executed_by,t.executed_at,t.execution_result,COALESCE(t.execution_error,'')
 		FROM sys_tickets t
 		LEFT JOIN sys_users u ON u.id = t.requester_id
-		WHERE t.id = $1`, id).Scan(
+		WHERE t.id = $1 AND (t.requester_id=$2 OR $3)`, id, ActorID(ctx), ActorAdmin(ctx)).Scan(
 		&t.ID, &t.Title, &t.Type, &t.TableName, &t.DatabaseName, &connID,
 		&t.SQLText, &t.Risk, &t.Status, &t.RequesterID, &t.Requester,
 		&t.Reason, &t.CreatedAt, &t.UpdatedAt, &t.ExecutedBy, &t.ExecutedAt, &t.ExecutionResult, &t.ExecutionError)
@@ -87,7 +87,7 @@ func (r *TicketRepository) List(ctx context.Context, f TicketFilter) ([]Ticket, 
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 20
 	}
-	conds := []string{"1=1"}
+	conds := []string{"(t.requester_id=" + fmt.Sprint(ActorID(ctx)) + " OR " + fmt.Sprint(ActorAdmin(ctx)) + ")"}
 	args := []any{}
 	add := func(tmpl string, vals ...any) {
 		for _, v := range vals {

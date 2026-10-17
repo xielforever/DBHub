@@ -100,8 +100,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("目标数据源不存在或不支持 SQL"))
 		return
 	}
-	if _, err = sqlparse.Parse(in.SQL, conn.SQLDialect()); err != nil {
-		httpx.Fail(w, httpx.BadRequest(err.Error()))
+	statement, parseErr := sqlparse.Parse(in.SQL, conn.SQLDialect())
+	if parseErr != nil {
+		httpx.Fail(w, httpx.BadRequest(parseErr.Error()))
+		return
+	}
+	if statement.ReadOnly {
+		httpx.Fail(w, httpx.BadRequest("变更工单不执行查询，请使用自己的数据工作台"))
+		return
+	}
+	if conn.Definition != nil && conn.Definition.Visibility == "global" && in.Database != "" && in.Database != conn.Database {
+		httpx.Fail(w, httpx.BadRequest("工单数据库必须与发布修订一致"))
 		return
 	}
 	t := &db.Ticket{
@@ -217,8 +226,14 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conn, password, e := h.conns.GetSecrets(r.Context(), *ticket.ConnectionID)
+	if errors.Is(e, db.ErrNotFound) {
+		personalID, resolveErr := h.conns.ResolvePersonal(r.Context(), *ticket.ConnectionID)
+		if resolveErr == nil {
+			conn, password, e = h.conns.GetSecrets(r.Context(), personalID)
+		}
+	}
 	if e != nil {
-		httpx.Fail(w, httpx.BadRequest("工单目标连接不可用"))
+		httpx.Fail(w, httpx.BadRequest("请先为工单目标的相同修订配置本人的连接"))
 		return
 	}
 	if ticket.DatabaseName != "" {
@@ -243,13 +258,18 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	var result *target.ExecResult
 	if execErr == nil {
 		defer handle.Close()
-		result, execErr = target.ExecuteWithOptions(ctx, handle, ticket.SQLText, false, target.ExecuteOptions{Timeout: 30 * time.Second, MaxRows: 100, AllowUnsafeWrite: true})
+		result, execErr = target.ExecuteWithOptions(ctx, handle, ticket.SQLText, false, target.ExecuteOptions{Timeout: 30 * time.Second, MaxRows: 100, AllowUnsafeWrite: true, BeforeExecute: func() error { return h.conns.ValidateCurrent(ctx, conn) }})
+	}
+	// An approver's database identity must not become a result-data channel to
+	// the requester, including DML RETURNING and vendor utility statements.
+	if result != nil {
+		result = &target.ExecResult{Kind: result.Kind, AffectedRows: result.AffectedRows, DurationMS: result.DurationMS}
 	}
 	message := ""
 	if execErr != nil {
 		message = "目标数据库执行失败，请检查 SQL 与数据库状态"
 	}
-	cleanup, done := context.WithTimeout(context.Background(), 5*time.Second)
+	cleanup, done := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer done()
 	history := &db.QueryHistory{ConnectionID: conn.ID, UserID: claimsOf(r).Subject, DatabaseName: conn.Database, SQLText: ticket.SQLText, Status: 1}
 	duration := int(time.Since(start).Milliseconds())

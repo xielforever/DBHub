@@ -52,7 +52,7 @@ type QueryPolicy struct {
 }
 
 func (r *QueryControls) Policies(ctx context.Context, cid int64, role string) ([]QueryPolicy, error) {
-	rows, e := r.pool.Query(ctx, `SELECT id,connection_id,database_name,schema_name,table_name,role_code,column_permissions,row_conditions FROM sys_query_policies WHERE connection_id=$1 AND ($2='' OR role_code=$2) ORDER BY id`, cid, role)
+	rows, e := r.pool.Query(ctx, `SELECT id,connection_id,database_name,schema_name,table_name,role_code,column_permissions,row_conditions FROM sys_query_policies WHERE (connection_id=$1 OR connection_id IN (SELECT publisher.id FROM sys_connections mine JOIN sys_source_definitions d ON d.id=mine.definition_revision_id JOIN sys_connections publisher ON publisher.definition_revision_id=d.id AND publisher.user_id=d.owner_id WHERE mine.id=$1 AND mine.user_id=$3 AND d.visibility='global')) AND ($2='' OR role_code=$2) ORDER BY id`, cid, role, ActorID(ctx))
 	if e != nil {
 		return nil, e
 	}
@@ -80,7 +80,7 @@ func (r *QueryControls) SavePolicy(ctx context.Context, p *QueryPolicy, uid int6
 	return r.pool.QueryRow(ctx, `INSERT INTO sys_query_policies(connection_id,database_name,schema_name,table_name,role_code,column_permissions,row_conditions,updated_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(connection_id,database_name,schema_name,table_name,role_code) DO UPDATE SET column_permissions=$6,row_conditions=$7,updated_by=$8,updated_at=NOW() RETURNING id`, p.ConnectionID, p.Database, p.Schema, p.Table, p.Role, string(cols), string(conds), uid).Scan(&p.ID)
 }
 func (r *QueryControls) DeletePolicy(ctx context.Context, id int64) error {
-	tag, e := r.pool.Exec(ctx, `DELETE FROM sys_query_policies WHERE id=$1`, id)
+	tag, e := r.pool.Exec(ctx, `DELETE FROM sys_query_policies WHERE id=$1 AND `+connectionScope(ctx, "connection_id"), id)
 	if e == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}

@@ -32,13 +32,13 @@ type Report struct {
 
 // ReportFilter 列表过滤
 type ReportFilter struct {
-	Keyword     string
-	OwnerID     int64 // 仅我的
-	StarredBy   int64 // 仅收藏
-	Visibility  string
+	Keyword      string
+	OwnerID      int64 // 仅我的
+	StarredBy    int64 // 仅收藏
+	Visibility   string
 	ConnectionID int64
-	Offset      int
-	Limit       int
+	Offset       int
+	Limit        int
 }
 
 type ReportRepository struct {
@@ -66,13 +66,13 @@ func (r *ReportRepository) Create(ctx context.Context, rep *Report) error {
 func (r *ReportRepository) Get(ctx context.Context, id int64) (*Report, error) {
 	rep := &Report{}
 	err := r.pool.QueryRow(ctx, `
-		SELECT r.id, r.name, r.description, r.connection_id, r.database_name, r.sql_text,
+		SELECT r.id, r.name, r.description, `+reportConnection(ctx)+`, r.database_name, r.sql_text,
 		       r.chart_type, r.chart_config, r.visibility, r.owner_user_id,
 		       COALESCE(r.starred_by,'{}'), r.created_at, r.updated_at,
 		       COALESCE(u.username,'')
 		FROM sys_reports r
 		LEFT JOIN sys_users u ON u.id = r.owner_user_id
-		WHERE r.id = $1`, id).Scan(
+		WHERE r.id = $1 AND (r.owner_user_id=$2 OR r.visibility='shared')`, id, ActorID(ctx)).Scan(
 		&rep.ID, &rep.Name, &rep.Description, &rep.ConnectionID, &rep.DatabaseName, &rep.SQLText,
 		&rep.ChartType, &rep.ChartConfig, &rep.Visibility, &rep.OwnerUserID,
 		&rep.StarredBy, &rep.CreatedAt, &rep.UpdatedAt, &rep.OwnerName)
@@ -86,7 +86,7 @@ func (r *ReportRepository) List(ctx context.Context, f ReportFilter) ([]Report, 
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 20
 	}
-	conds := []string{"1=1"}
+	conds := []string{"(r.owner_user_id=" + fmt.Sprint(ActorID(ctx)) + " OR r.visibility='shared')"}
 	args := []any{}
 	add := func(tmpl string, vals ...any) {
 		for _, v := range vals {
@@ -117,7 +117,7 @@ func (r *ReportRepository) List(ctx context.Context, f ReportFilter) ([]Report, 
 		return nil, 0, fmt.Errorf("统计报表失败: %w", err)
 	}
 	q := fmt.Sprintf(`
-		SELECT r.id, r.name, r.description, r.connection_id, r.database_name, r.sql_text,
+		SELECT r.id, r.name, r.description, `+reportConnection(ctx)+`, r.database_name, r.sql_text,
 		       r.chart_type, r.chart_config, r.visibility, r.owner_user_id,
 		       COALESCE(r.starred_by,'{}'), r.created_at, r.updated_at,
 		       COALESCE(u.username,''),
@@ -190,4 +190,10 @@ func (r *ReportRepository) SetStar(ctx context.Context, id int64, userID int64, 
 		UPDATE sys_reports SET starred_by = array_remove(COALESCE(starred_by,'{}'), $2)
 		WHERE id=$1`, id, userID)
 	return err
+}
+
+// A shared report is a definition; its viewer never inherits the owner's identity.
+func reportConnection(ctx context.Context) string {
+	actor := fmt.Sprint(ActorID(ctx))
+	return "CASE WHEN r.owner_user_id=" + actor + " THEN r.connection_id ELSE COALESCE((SELECT mine.id FROM sys_connections mine JOIN sys_connections src ON src.id=r.connection_id WHERE mine.user_id=" + actor + " AND mine.definition_revision_id=src.definition_revision_id),0) END"
 }

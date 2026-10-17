@@ -267,6 +267,7 @@ with sync_playwright() as p:
         assert sum(method=='POST' and path.endswith('/query/execute') for method,path in calls)==before+1
         passed('production target requires confirmation; cancel sends no SQL and confirm sends once')
     finally:
+        (out/'phase1-fixture-families.json').write_text(json.dumps({'families':[confirmation['definition_family_id']] if confirmation.get('definition_family_id') else []}))
         request('DELETE', f"/connections/{confirmation['id']}")
     context.close()
 
@@ -284,11 +285,13 @@ with sync_playwright() as p:
             page.locator('button[type=submit]').click()
             page.wait_for_url('**/dashboard')
             browser_token = page.evaluate("localStorage.getItem('dbhub_access_token')")
+            personal = request('POST', '/connections', {'name':username+' personal PostgreSQL', 'type':'postgres', 'host':'postgres', 'port':5432, 'database':values['POSTGRES_DB'], 'username':values['POSTGRES_USER'], 'password':values['POSTGRES_PASSWORD'], 'ssl_mode':'disable', 'environment':'dev'}, (201,), token_override=browser_token)
+            request('GET', f"/connections/{ids['postgres']}", expected=(404,), token_override=browser_token)
             for path in ('/users','/metrics/query','/metrics/query?format=prometheus'):
                 request('GET', path, expected=(403,), token_override=browser_token)
             page.goto(frontend+'/users', wait_until='networkidle')
             expect(page).to_have_url(frontend+'/dashboard')
-            open_sql('postgres', 'SELECT id,name FROM dbhub_cloud_demo ORDER BY id')
+            open_sql('postgres', 'SELECT id,name FROM dbhub_cloud_demo ORDER BY id', connection=personal['id'])
             response, payload, _ = execute()
             assert response.status == 200 and payload['data']['rows'][0] == [1,'Cloud alpha']
             if role == 'readonly':
@@ -319,14 +322,15 @@ if health['env'] == 'production':
     user = request('POST', '/users', {'username':username, 'password':password, 'role':'developer'}, (201,))
     try:
         probe_token = request('POST', '/auth/login', {'username':username, 'password':password})['access_token']
+        probe_connection = request('POST', '/connections', {'name':username+' personal PostgreSQL', 'type':'postgres', 'host':'postgres', 'port':5432, 'database':values['POSTGRES_DB'], 'username':values['POSTGRES_USER'], 'password':values['POSTGRES_PASSWORD'], 'ssl_mode':'disable', 'environment':'dev'}, (201,), token_override=probe_token)
         request('PUT', '/query/settings', {'timeout_ms':90000, 'max_rows':1000, 'block_unsafe_write':True}, token_override=probe_token)
         started = time.monotonic()
-        actual = request('POST', '/query/execute', {'connection_id':ids['postgres'], 'sql':'SELECT pg_sleep(62) AS proxy_wait', 'timeout_ms':90000}, token_override=probe_token, timeout=100)
+        actual = request('POST', '/query/execute', {'connection_id':probe_connection['id'], 'sql':'SELECT pg_sleep(62) AS proxy_wait', 'timeout_ms':90000}, token_override=probe_token, timeout=100)
         assert time.monotonic()-started >= 61 and actual['kind']=='query' and len(actual['rows'])==1
         passed('production proxy preserves a real 62-second query beyond the default 60-second timeout')
         before = request('GET', '/metrics/query')
         probe_id = str(uuid.uuid4())
-        receipt = request('POST', '/query/execute', {'request_id':probe_id, 'connection_id':ids['postgres'], 'sql':'SELECT pg_sleep(3)', 'timeout_ms':1000}, (400,), token_override=probe_token)
+        receipt = request('POST', '/query/execute', {'request_id':probe_id, 'connection_id':probe_connection['id'], 'sql':'SELECT pg_sleep(3)', 'timeout_ms':1000}, (400,), token_override=probe_token)
         assert receipt['status']=='unknown'
         assert request('GET', '/query/executions/'+probe_id, token_override=probe_token)['status']=='unknown'
         after = request('GET', '/metrics/query')

@@ -13,7 +13,7 @@ import (
 
 func (h *Handler) ListExports(w http.ResponseWriter, r *http.Request) {
 	c := claimsOf(r)
-	items, e := h.controls.ListExports(r.Context(), c.Subject, isAdmin(c))
+	items, e := h.controls.ListExports(r.Context(), c.Subject, false)
 	if e != nil {
 		httpx.Fail(w, httpx.Internal("读取导出申请失败", e))
 		return
@@ -63,7 +63,7 @@ func (h *Handler) CreateExport(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Forbidden(e.Error()))
 		return
 	}
-	result, e := target.ExecuteWithOptions(ctx, handle, query, true, target.ExecuteOptions{MaxRows: 1000, Timeout: 30 * time.Second, Args: args})
+	result, e := target.ExecuteWithOptions(ctx, handle, query, true, target.ExecuteOptions{MaxRows: 1000, Timeout: 30 * time.Second, Args: args, BeforeExecute: func() error { return h.conns.ValidateCurrent(ctx, conn) }})
 	if e != nil {
 		execErr = e
 		httpx.Fail(w, httpx.BadRequest("生成导出快照失败: "+safeErr(e)))
@@ -100,7 +100,7 @@ func (h *Handler) ReviewExport(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) DownloadExport(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	c := claimsOf(r)
-	format, raw, e := h.controls.DownloadExport(r.Context(), id, c.Subject, isAdmin(c))
+	format, raw, e := h.controls.DownloadExport(r.Context(), id, c.Subject, false)
 	if e != nil {
 		httpx.Fail(w, httpx.NotFound("导出不存在、未批准或无权限"))
 		return

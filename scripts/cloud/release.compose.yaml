@@ -35,6 +35,8 @@ services:
       timeout: 3s
       retries: 30
   backend:
+    environment:
+      DBHUB_TARGET_ALLOWLIST: postgres:5432,mysql:3306,redis:6379
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

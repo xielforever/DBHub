@@ -25,10 +25,10 @@ func (r *ConnectionRepository) SaveCheck(ctx context.Context, connectionID int64
 		return false, err
 	}
 	tag, err := r.pool.Exec(ctx, `INSERT INTO sys_connection_checks(connection_id,config_updated_at,started_at,result)
-		SELECT id,updated_at,$3,$4::jsonb FROM sys_connections WHERE id=$1 AND updated_at=$2 FOR SHARE
+		SELECT id,updated_at,$3,$4::jsonb FROM sys_connections WHERE id=$1 AND updated_at=$2 AND user_id=$5 FOR SHARE
 		ON CONFLICT(connection_id) DO UPDATE SET config_updated_at=EXCLUDED.config_updated_at,
 		started_at=EXCLUDED.started_at,result=EXCLUDED.result
 		WHERE sys_connection_checks.config_updated_at <> EXCLUDED.config_updated_at
-		OR sys_connection_checks.started_at <= EXCLUDED.started_at`, connectionID, version, result.StartedAt, string(raw))
+		OR sys_connection_checks.started_at <= EXCLUDED.started_at`, connectionID, version, result.StartedAt, string(raw), ActorID(ctx))
 	return tag.RowsAffected() > 0, err
 }

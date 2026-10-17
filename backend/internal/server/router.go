@@ -112,29 +112,37 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("GET /api/v1/connections/compatibility",
 			middleware.Chain(http.HandlerFunc(dsH.CompatibilityMatrix), requireAuth))
 		mux.Handle("POST /api/v1/connections",
-			middleware.Chain(http.HandlerFunc(dsH.Create), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.Create), requireAuth, auditMW))
 		mux.Handle("POST /api/v1/connections/test",
 			middleware.Chain(http.HandlerFunc(dsH.TestUnpersisted), requireAuth, auditMW))
 		mux.Handle("GET /api/v1/connections/{id}",
 			middleware.Chain(http.HandlerFunc(dsH.Get), requireAuth))
 		mux.Handle("PUT /api/v1/connections/{id}",
-			middleware.Chain(http.HandlerFunc(dsH.Update), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.Update), requireAuth, auditMW))
 		mux.Handle("DELETE /api/v1/connections/{id}",
-			middleware.Chain(http.HandlerFunc(dsH.Delete), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.Delete), requireAuth, auditMW))
 		mux.Handle("POST /api/v1/connections/{id}/test",
 			middleware.Chain(http.HandlerFunc(dsH.TestPersisted), requireAuth, auditMW))
 
-		mux.Handle("GET /api/v1/connector-drivers/available", middleware.Chain(http.HandlerFunc(dsH.AvailableDrivers), requireAuth, requireAdmin))
+		mux.Handle("GET /api/v1/connector-drivers/available", middleware.Chain(http.HandlerFunc(dsH.AvailableDrivers), requireAuth))
 		mux.Handle("GET /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.Drivers), requireAuth))
-		mux.Handle("POST /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.RegisterDriver), requireAuth, requireAdmin, auditMW))
+		mux.Handle("POST /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.RegisterDriver), requireAuth, auditMW))
 		mux.Handle("GET /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.Templates), requireAuth))
-		mux.Handle("POST /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, requireAdmin, auditMW))
-		mux.Handle("PUT /api/v1/datasource-templates/{id}", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, requireAdmin, auditMW))
-		mux.Handle("PATCH /api/v1/connector-drivers/{id}/status", middleware.Chain(dsH.SetCatalogStatus("driver"), requireAuth, requireAdmin, auditMW))
-		mux.Handle("PATCH /api/v1/datasource-templates/{id}/status", middleware.Chain(dsH.SetCatalogStatus("template"), requireAuth, requireAdmin, auditMW))
-		mux.Handle("DELETE /api/v1/connector-drivers/{id}", middleware.Chain(dsH.DeleteCatalog("driver"), requireAuth, requireAdmin, auditMW))
-		mux.Handle("DELETE /api/v1/datasource-templates/{id}", middleware.Chain(dsH.DeleteCatalog("template"), requireAuth, requireAdmin, auditMW))
+		mux.Handle("POST /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/datasource-templates/{id}", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, auditMW))
+		mux.Handle("PATCH /api/v1/connector-drivers/{id}/status", middleware.Chain(dsH.SetCatalogStatus("driver"), requireAuth, auditMW))
+		mux.Handle("PATCH /api/v1/datasource-templates/{id}/status", middleware.Chain(dsH.SetCatalogStatus("template"), requireAuth, auditMW))
+		mux.Handle("DELETE /api/v1/connector-drivers/{id}", middleware.Chain(dsH.DeleteCatalog("driver"), requireAuth, auditMW))
+		mux.Handle("DELETE /api/v1/datasource-templates/{id}", middleware.Chain(dsH.DeleteCatalog("template"), requireAuth, auditMW))
 		mux.Handle("GET /api/v1/connections/{id}/capabilities", middleware.Chain(http.HandlerFunc(dsH.Capabilities), requireAuth))
+
+		mux.Handle("GET /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.Definitions), requireAuth))
+		mux.Handle("POST /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
+		mux.Handle("PATCH /api/v1/datasource-definitions/{id}/status", middleware.Chain(http.HandlerFunc(dsH.DefinitionStatus), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/datasource-definitions/{id}/connections", middleware.Chain(http.HandlerFunc(dsH.AddPersonal), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/connections/{id}/publish", middleware.Chain(http.HandlerFunc(dsH.PublishConnection), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/connections/{id}/revision", middleware.Chain(http.HandlerFunc(dsH.UpgradePersonal), requireAuth, auditMW))
 
 		// SSH 隧道（已废弃，保留兼容，M5 迁移至代理）
 		mux.Handle("GET /api/v1/ssh-tunnels",

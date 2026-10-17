@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"os"
@@ -39,13 +38,21 @@ func TestVersionCompatibilityHTTP(t *testing.T) {
 		}
 		port, _ := strconv.Atoi(rawPort)
 		conn := &db.Connection{UserID: 1, Name: "version-mysql", Type: "mysql", Host: host, Port: port, Database: cfg.DBName, Username: cfg.User, Password: cfg.Passwd, SSLMode: "disable", Environment: "dev", ConnectionTimeout: 3}
-		if err := a.deps.Conns.Create(context.Background(), conn); err != nil {
+		if err := a.deps.Conns.Create(a.actor(), conn); err != nil {
 			t.Fatal(err)
 		}
 		id = conn.ID
 	}
 	for _, token := range []string{a.admin, a.developer, a.readonly} {
-		result := a.call("POST", fmt.Sprintf("/connections/%d/test", id), token, nil, 200)
+		actual := id
+		if token != a.admin {
+			_, password, e := a.deps.Conns.GetSecrets(a.actor(), id)
+			if e != nil {
+				t.Fatal(e)
+			}
+			actual = a.personalFor(id, token, password)
+		}
+		result := a.call("POST", fmt.Sprintf("/connections/%d/test", actual), token, nil, 200)
 		compatibility, ok := result["compatibility"].(map[string]any)
 		if result["ok"] != true || !ok || compatibility["engine"] != kind || compatibility["version"] == "" || compatibility["message"] == "" {
 			t.Fatal("connection test lost version identity or compatibility boundary")

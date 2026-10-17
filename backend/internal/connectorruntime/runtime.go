@@ -98,6 +98,12 @@ func (r *Runtime) OpenRelational(ctx context.Context, c *db.Connection, password
 	if c.Type == "redis" {
 		return nil, connector.Unsupported("Redis 请使用键值操作")
 	}
+	if c.Definition != nil && c.Definition.Visibility == "global" && c.Database != c.Definition.Config.Database {
+		return nil, connector.Unsupported("共享定义已固定数据库，请确认新的数据源修订后再切换")
+	}
+	if e := ValidateDestination(c); e != nil {
+		return nil, e
+	}
 	key := c.Type + ".native"
 	spec := r.spec(c, password, t)
 	if c.Type == "jdbc" {
@@ -105,6 +111,11 @@ func (r *Runtime) OpenRelational(ctx context.Context, c *db.Connection, password
 		var e error
 		spec.JDBC, e = BuildJDBCSpec(c)
 		if e != nil {
+			return nil, e
+		}
+	}
+	if t != nil {
+		if e := ValidateDestination(&db.Connection{Host: t.Host, Port: t.Port}); e != nil {
 			return nil, e
 		}
 	}
@@ -121,6 +132,14 @@ func (r *Runtime) OpenRelational(ctx context.Context, c *db.Connection, password
 func (r *Runtime) OpenRedis(ctx context.Context, c *db.Connection, password string, t *db.SSHTunnel) (*RedisClient, error) {
 	if c == nil || c.Type != "redis" {
 		return nil, connector.Unsupported("不是键值数据源")
+	}
+	if e := ValidateDestination(c); e != nil {
+		return nil, e
+	}
+	if t != nil {
+		if e := ValidateDestination(&db.Connection{Host: t.Host, Port: t.Port}); e != nil {
+			return nil, e
+		}
 	}
 	d, _ := r.registry.Resolve("redis.native")
 	s, e := d.Open(ctx, r.spec(c, password, t))
@@ -234,6 +253,9 @@ func Databases(ctx context.Context, r *RelDB) ([]DatabaseItem, error) {
 	m, e := reader(r)
 	if e != nil {
 		return nil, e
+	}
+	if r.Conn.Definition != nil && r.Conn.Definition.Visibility == "global" {
+		return []DatabaseItem{{Name: r.Conn.Database}}, nil
 	}
 	return m.Databases(ctx)
 }
