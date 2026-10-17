@@ -76,7 +76,7 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 		t.Fatal(e)
 	}
 	applied, e := Migrate(ctx, pool)
-	if e != nil || len(applied) != 1 {
+	if e != nil || len(applied) != 2 || applied[0] != "0022_personal_connections.sql" || applied[1] != "0023_definition_binding_index.sql" {
 		t.Fatal("legacy upgrade failed", applied, e)
 	}
 	var invalid int

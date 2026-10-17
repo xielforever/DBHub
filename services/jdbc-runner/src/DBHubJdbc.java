@@ -141,7 +141,35 @@ public final class DBHubJdbc {
             Connection c=future.get(budget,TimeUnit.MILLISECONDS);
             if(abandoned.get()){c.close();throw new Problem(504,"deadline","建连超时");}
             opened.compareAndSet(c,null);String id=UUID.randomUUID().toString();SESSIONS.put(id,new Session(c,a,q));return obj("session_id",id,"protocol",1,"lease_ms",300000);
-        } catch(Exception e){abandoned.set(true);if(future!=null)future.cancel(true);Connection orphan=opened.getAndSet(null);if(orphan!=null){ABORT.execute(()->{try{orphan.close();}catch(Exception ignored){}finally{SESSION_SLOTS.release();}});}else SESSION_SLOTS.release();if(e instanceof RejectedExecutionException)throw new Problem(503,"resource_exhausted","JDBC 建连并发已满");if(e instanceof TimeoutException)throw new Problem(504,"deadline","建连超时");throw new Problem(400,"authentication","目标连接失败，请检查地址、TLS 与凭据");}
+        } catch(Exception e){abandoned.set(true);if(future!=null)future.cancel(true);Connection orphan=opened.getAndSet(null);if(orphan!=null){ABORT.execute(()->{try{orphan.close();}catch(Exception ignored){}finally{SESSION_SLOTS.release();}});}else SESSION_SLOTS.release();if(e instanceof RejectedExecutionException)throw new Problem(503,"resource_exhausted","JDBC 建连并发已满");throw connectionFailure(e);}
+    }
+
+    // Open failures have no dispatched user SQL. Preserve typed causes and
+    // protocol codes for diagnostics without returning vendor text or URLs.
+    static Problem connectionFailure(Throwable failure) {
+        SQLException sql=null;boolean tls=false,dns=false,timeout=false,network=false;
+        Set<Throwable> seen=Collections.newSetFromMap(new IdentityHashMap<>());
+        for(Throwable e=failure;e!=null&&seen.size()<32&&seen.add(e);e=e.getCause()) {
+            if(e instanceof Problem p)return p;
+            if(e instanceof javax.net.ssl.SSLException||e instanceof java.security.cert.CertificateException)tls=true;
+            if(e instanceof UnknownHostException)dns=true;
+            if(e instanceof TimeoutException||e instanceof SocketTimeoutException||e instanceof SQLTimeoutException)timeout=true;
+            if(e instanceof ConnectException||e instanceof NoRouteToHostException||e instanceof SocketException)network=true;
+            if(e instanceof SQLException s){sql=s;if(Objects.toString(s.getMessage(),"").startsWith("The server does not support SSL."))tls=true;}
+        }
+        String state=sql==null?"":Objects.toString(sql.getSQLState(),"");
+        if(!state.matches("[A-Z0-9]{5}"))state="";
+        int vendor=sql==null?0:sql.getErrorCode();
+        String kind="connection_failed",message="目标连接失败，原因尚未确定";
+        if(tls||vendor==3159){kind="tls_failed";message="TLS 握手或证书验证失败";}
+        else if(timeout){kind="deadline";message="建连超时";}
+        else if(state.startsWith("28")||vendor==1045||vendor==1698){kind="authentication_failed";message="数据库身份验证失败";}
+        else if(state.equals("42501")||Set.of(1044,1142,1143,1227).contains(vendor)){kind="permission_denied";message="数据库账号权限不足";}
+        else if(state.equals("3D000")||vendor==1049){kind="database_not_found";message="目标数据库或服务不存在";}
+        else if(state.equals("53300")||vendor==1040||vendor==1203){kind="resource_exhausted";message="数据库连接容量已满";}
+        else if(dns){kind="dns_failed";message="无法解析目标主机名";}
+        else if(network||state.startsWith("08")){kind="network_unreachable";message="无法连接目标网络端点";}
+        return new Problem(kind.equals("deadline")?504:400,kind,message,state,false);
     }
     static void close(String id,Session s){if(!SESSIONS.remove(id,s))return;s.cancelled=true;ABORT.execute(()->{try{try{s.connection.abort(Runnable::run);}catch(Exception ignored){}try{s.connection.close();}catch(Exception ignored){}}finally{SESSION_SLOTS.release();}});}
 

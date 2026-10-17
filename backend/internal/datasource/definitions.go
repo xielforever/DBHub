@@ -2,6 +2,7 @@ package datasource
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/user/dbhub/internal/db"
@@ -27,6 +28,31 @@ func (h *Handler) Definitions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.OK(w, map[string]any{"items": items, "total": len(items)})
+}
+
+func (h *Handler) DefinitionRevisions(w http.ResponseWriter, r *http.Request) {
+	id, e := idFromPath(r)
+	if e != nil {
+		httpx.Fail(w, e)
+		return
+	}
+	page, size := 1, 20
+	for key, dest := range map[string]*int{"page": &page, "page_size": &size} {
+		if value := r.URL.Query().Get(key); value != "" {
+			n, err := strconv.Atoi(value)
+			if err != nil || n < 1 || (key == "page_size" && n > 100) || (key == "page" && n > 1000000) {
+				httpx.Fail(w, httpx.BadRequest("修订分页参数无效"))
+				return
+			}
+			*dest = n
+		}
+	}
+	items, total, e := h.conns.DefinitionRevisions(r.Context(), id, size, (page-1)*size)
+	if e != nil {
+		catalogFailure(w, e)
+		return
+	}
+	httpx.OK(w, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
 }
 func (h *Handler) validateDefinition(r *http.Request, d *db.SourceDefinition) error {
 	d.Name = strings.TrimSpace(d.Name)
@@ -136,7 +162,9 @@ func (h *Handler) DefinitionStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Enabled *bool `json:"enabled"`
+		Enabled          *bool  `json:"enabled"`
+		Confirmed        bool   `json:"confirmed"`
+		ExpectedBindings *int64 `json:"expected_binding_count"`
 	}
 	if e = httpx.DecodeJSON(w, r, &in); e != nil {
 		httpx.Fail(w, e)
@@ -146,7 +174,11 @@ func (h *Handler) DefinitionStatus(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("enabled 必填"))
 		return
 	}
-	if e = h.conns.SetDefinitionEnabled(r.Context(), id, *in.Enabled); e != nil {
+	if !*in.Enabled && !in.Confirmed {
+		httpx.Fail(w, httpx.BadRequest(db.ErrDefinitionConfirmation.Error()))
+		return
+	}
+	if e = h.conns.SetDefinitionEnabled(r.Context(), id, *in.Enabled, in.ExpectedBindings); e != nil {
 		catalogFailure(w, e)
 		return
 	}

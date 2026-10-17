@@ -14,6 +14,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
+	"github.com/user/dbhub/internal/connector"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/netx"
 )
@@ -93,7 +94,7 @@ func OpenRelational(ctx context.Context, conn *db.Connection, password string, t
 		return nil, fmt.Errorf("不支持的关系型数据库类型")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("目标数据库连接失败（请检查地址、TLS 与凭据）")
+		return nil, &connector.Error{Kind: "connection_failed", Message: "目标数据库连接失败（请检查地址、TLS 与凭据）", Cause: err}
 	}
 	success = true
 	return r, nil
@@ -140,7 +141,7 @@ func OpenRedis(ctx context.Context, conn *db.Connection, password string, tunnel
 	defer cancel()
 	if err = cli.Ping(check).Err(); err != nil {
 		r.Close()
-		return nil, fmt.Errorf("Redis 连接失败（请检查地址、TLS 与凭据）")
+		return nil, &connector.Error{Kind: "connection_failed", Message: "Redis 连接失败（请检查地址、TLS 与凭据）", Cause: err}
 	}
 	return r, nil
 }
@@ -172,7 +173,7 @@ func ProbeRedis(ctx context.Context, r *RedisClient) (*TestInfo, error) {
 		if strings.HasPrefix(e.Error(), "NOPERM ") {
 			return &TestInfo{Type: "redis", Compatibility: Compatibility{Engine: "redis", Product: "Redis", Status: "unknown", Message: "连接已建立，但账号无权读取版本信息；兼容性尚未确认。"}}, nil
 		}
-		return nil, fmt.Errorf("读取 Redis 版本失败")
+		return nil, &connector.Error{Kind: "connection_failed", Message: "读取 Redis 版本失败", Cause: e}
 	}
 	server := infoMap(info)
 	version, product := server["redis_version"], ""
@@ -195,7 +196,7 @@ func ProbeRelational(ctx context.Context, r *RelDB) (*TestInfo, error) {
 		e = r.sqlConn.QueryRowContext(ctx, "SELECT VERSION(), @@version_comment").Scan(&version, &comment)
 	}
 	if e != nil {
-		return nil, fmt.Errorf("读取数据库版本失败")
+		return nil, &connector.Error{Kind: "connection_failed", Message: "读取数据库版本失败", Cause: e}
 	}
 	return &TestInfo{Type: r.Conn.Type, Version: version, Compatibility: classifyCompatibility(r.Conn.Type, version, comment, "")}, nil
 }

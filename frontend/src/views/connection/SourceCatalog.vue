@@ -14,11 +14,13 @@
           <button v-if="!d.my_connection_id" class="liquid-button text-xs" :disabled="!d.enabled" @click="openIdentity(d)">添加到我的连接</button>
           <button v-else-if="d.my_revision_id !== d.id" class="liquid-button text-xs" :disabled="!d.enabled" @click="openIdentity(d)">查看并切换修订</button>
           <button v-else class="ghost-button text-xs" :disabled="!d.enabled" @click="openConnection(d)">打开我的连接</button>
-          <template v-if="canManage(d)"><button class="ghost-button text-xs" @click="openRevision(d)">新修订</button><button class="ghost-button text-xs" :disabled="busy" @click="toggle(d)">{{ d.enabled ? '停用此修订' : '启用此修订' }}</button></template>
+          <button class="ghost-button text-xs" @click="openHistory(d)">修订记录</button>
+          <button v-if="canManage(d)" class="ghost-button text-xs" @click="openRevision(d)">新修订</button>
         </div>
       </article>
     </div>
     <p v-if="!loading && !filtered.length" class="glass-card p-8 text-center text-sm text-white/45">暂无可见的数据源定义。你可以新建个人数据源，或等待管理员发布。</p>
+    <SourceRevisionDialog v-model="historyOpen" :source="historySource" @changed="load" />
 
     <el-dialog v-model="identityOpen" :title="selected?.my_connection_id ? '确认新修订与个人身份' : '添加到我的连接'" width="min(92vw, 560px)" :close-on-click-modal="false" class="glass-dialog" @closed="clearIdentity">
       <div v-if="selected" class="space-y-4">
@@ -30,6 +32,7 @@
         </el-form>
         <el-checkbox v-model="identity.confirmed" class="identity-confirm" aria-label="确认连接目标">我已确认地址、数据库和修订，使用自己的数据库账号</el-checkbox>
         <p v-if="testText" role="status" class="text-sm break-words" :class="testOK ? 'text-emerald-300' : 'text-rose-300'">{{ testText }}</p>
+        <ConnectionDiagnosis :diagnostic="testDiagnostic" />
       </div>
       <template #footer><div class="flex flex-wrap justify-between gap-2"><button class="ghost-button" :disabled="busy || !identityReady" @click="testIdentity">{{ busy ? '处理中…' : '测试我的连接' }}</button><button class="liquid-button" :disabled="busy || !identityReady" @click="saveIdentity">{{ selected?.my_connection_id ? '确认并切换' : '保存我的连接' }}</button></div></template>
     </el-dialog>
@@ -61,10 +64,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { sourceCatalogApi, type DefinitionPayload, type PersonalIdentity, type SourceDefinition } from '../../api/source-catalog'
 import { connectorApi, type DatasourceTemplate } from '../../api/connector'
 import { useUserStore } from '../../stores/user'
+import SourceRevisionDialog from './SourceRevisionDialog.vue'
+import ConnectionDiagnosis from './ConnectionDiagnosis.vue'
+import { ApiRequestError } from '../../utils/request'
+import type { ConnectionDiagnostic, TestResult } from '../../api/datasource'
 
 const emit = defineEmits<{ added: [] }>()
 const user = useUserStore(), router = useRouter()
@@ -72,23 +79,26 @@ const isAdmin = computed(() => user.role === 'admin')
 const canManage = (d: SourceDefinition) => d.visibility === 'private' && d.owner_id === user.user?.id || d.visibility === 'global' && isAdmin.value
 const items = ref<SourceDefinition[]>([]), keyword = ref(''), loading = ref(false), busy = ref(false)
 const templates = ref<DatasourceTemplate[]>([])
+const historyOpen = ref(false), historySource = ref<SourceDefinition>()
+function openHistory(d: SourceDefinition) { historySource.value = d; historyOpen.value = true }
 const filtered = computed(() => items.value.filter(d => `${d.name} ${endpoint(d)}`.toLowerCase().includes(keyword.value.toLowerCase())))
 const endpoint = (d: SourceDefinition) => `${d.config.host}${d.config.port ? ':' + d.config.port : ''} / ${d.config.database || d.config.parameters?.database || ''}`
 async function load() { loading.value = true; try { items.value = (await sourceCatalogApi.list()).items } finally { loading.value = false } }
 onMounted(() => { void load().catch(() => {}); void connectorApi.templates().then(r => { templates.value = r.items }).catch(() => {}) })
 const selected = ref<SourceDefinition>(), identityOpen = ref(false), testText = ref(''), testOK = ref(false)
+const testDiagnostic = ref<ConnectionDiagnostic>()
 const emptyIdentity = (): PersonalIdentity => ({ name: '', username: '', password: '', confirmed: false })
 const identity = reactive(emptyIdentity())
 const identityReady = computed(() => identity.confirmed && !!identity.name.trim() && !!selected.value && (selected.value.config.type === 'redis' || !!identity.username.trim() && !!identity.password))
-watch(() => JSON.stringify(identity), () => { testText.value = '' })
-function clearIdentity() { Object.assign(identity, emptyIdentity()); selected.value = undefined; testText.value = '' }
+watch(() => JSON.stringify(identity), () => { testText.value = ''; testDiagnostic.value = undefined })
+function clearIdentity() { Object.assign(identity, emptyIdentity()); selected.value = undefined; testText.value = ''; testDiagnostic.value = undefined }
 function openIdentity(d: SourceDefinition) { clearIdentity(); selected.value = d; identity.name = d.name; identityOpen.value = true }
 function openConnection(d: SourceDefinition) { if (d.my_connection_id) void router.push({ path: '/query', query: { connection: String(d.my_connection_id) } }) }
 async function testIdentity() {
   if (!selected.value || busy.value) return
-  busy.value = true; const snapshot = JSON.stringify(identity), id = selected.value.id
-  try { const result = await sourceCatalogApi.test(id, { ...identity }); if (snapshot === JSON.stringify(identity) && selected.value?.id === id) { testOK.value = result.ok; testText.value = result.ok ? '个人连接测试成功' : result.error || '测试失败' } }
-  catch { if (snapshot === JSON.stringify(identity) && selected.value?.id === id) { testOK.value = false; testText.value = '个人连接测试失败，请检查账号、密码和目标地址' } }
+  busy.value = true; testDiagnostic.value = undefined; const snapshot = JSON.stringify(identity), id = selected.value.id
+  try { const result = await sourceCatalogApi.test(id, { ...identity }); if (snapshot === JSON.stringify(identity) && selected.value?.id === id && identityOpen.value) { testOK.value = result.ok; testText.value = result.ok ? '个人连接测试成功' : result.error || '测试失败' } }
+  catch (error) { if (snapshot === JSON.stringify(identity) && selected.value?.id === id && identityOpen.value) { const result = error instanceof ApiRequestError ? error.data as TestResult | undefined : undefined; testOK.value = false; testText.value = result?.error || '个人连接测试失败，请检查账号、密码和目标地址'; testDiagnostic.value = result?.diagnostic } }
   finally { busy.value = false }
 }
 async function saveIdentity() {
@@ -111,11 +121,6 @@ async function saveRevision() {
   busy.value = true
   try { const config = { ...revision.config }; if (config.type === 'jdbc') config.parameters = { ...revisionParameters }; else { delete config.template_revision_id; delete config.parameters }; if (revisionId.value) await sourceCatalogApi.revise(revisionId.value, { ...revision, config }); else await sourceCatalogApi.create({ ...revision, config }); revisionOpen.value = false; await load(); ElMessage.success('定义已保存，使用者需配置自己的数据库账号') }
   catch { /* API displays the failure */ } finally { busy.value = false }
-}
-async function toggle(d: SourceDefinition) {
-  if (busy.value) return
-  if (d.enabled) { try { await ElMessageBox.confirm('停用此修订后，绑定它的连接无法发起新操作。已经发送的操作可能继续完成。', '停用修订', { type: 'warning' }) } catch { return } }
-  busy.value = true; try { await sourceCatalogApi.status(d.id, !d.enabled); await load() } catch { /* API displays the failure */ } finally { busy.value = false }
 }
 </script>
 

@@ -934,9 +934,10 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 | 路由 | 行为 |
 | --- | --- |
 | GET `/datasource-definitions` | 全局及本人私有的最新可见修订，附当前用户 `my_connection_id`、`my_revision_id` |
+| GET `/datasource-definitions/{id}/revisions?page=1&page_size=20` | 可见历史修订、相对上一可见版本的 `changes`；管理者另获 `binding_count`；每页最大 100 |
 | POST `/datasource-definitions` | `{name,description,visibility,config}`；config 只允许目标字段，拒绝认证字段 |
 | POST `/datasource-definitions/{id}/revisions` | 追加修订；旧绑定不变，相同内容的重复发布返回已有修订 |
-| PATCH `/datasource-definitions/{id}/status` | `{enabled}`；仅影响指定修订的新操作 |
+| PATCH `/datasource-definitions/{id}/status` | 启用 `{enabled:true}`；停用 `{enabled:false,confirmed:true,expected_binding_count:N}`，人数变化返回 409；仅影响指定修订的新操作 |
 | POST `/connections/{id}/publish` | 从本人的连接复制去凭据定义，`{visibility,description}`；代理与 SSH 暂不随定义发布 |
 | POST `/datasource-definitions/{id}/connections` | `{name,username,password,confirmed:true}`；创建个人绑定，重复返回 409 |
 | POST `/datasource-definitions/{id}/connections?test=true` | 同样的个人身份载荷，测试但不保存或改写检查记录 |
@@ -947,5 +948,7 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 公开查询结果与报表分享入口关闭，旧令牌迁移撤销。共享报表读取时使用查看者对同一发布修订的个人连接；未配置时 `connection_id=0`，客户端提示配置。管理员审批和执行工单时也需自己的匹配连接。管理员不能下载他人的导出或查看他人的私有查询任务与历史。
 
 0022 将引用他人连接的 pending/approved 旧工单改为 rejected，要求以个人连接重新提交，并将历史执行结果收敛为不含结果行的摘要。
+
+连接检查失败的 `data.diagnostic` 增加固定的 `{code,title,hint,action}`。已保存检查会持久化，草稿检查不保存；成功时不返回失败诊断。分类包括认证、权限、数据库不存在、TLS、DNS、网络、超时、容量、驱动服务、目标策略、配置、取消和未知原因，不回显底层异常。完整分类和修订管理契约见[数据源修订与连接诊断](../开发指南/数据源修订与连接诊断验收.md)。
 
 生产环境必须配置 `DBHUB_TARGET_ALLOWLIST`；未获允许的目标、代理及 SSH 端点不可连接。被驱动配置或其他资源引用的用户删除返回 409，可先停用用户并处理配置归属。

@@ -86,6 +86,13 @@ export interface SSHTunnelPayload {
   password?: string
 }
 
+export interface ConnectionDiagnostic {
+  code: string
+  title: string
+  hint: string
+  action: 'update_credentials' | 'review_target' | 'contact_admin' | 'retry_check'
+}
+
 export interface TestResult {
   ok: boolean
   type: string
@@ -93,6 +100,7 @@ export interface TestResult {
   elapsed_ms: number
   compatibility?: VersionCompatibility
   error?: string
+  diagnostic?: ConnectionDiagnostic
   started_at?: string
   checked_at?: string
   recorded?: boolean

@@ -283,7 +283,7 @@ func TestPersonalConnectionIsolation(t *testing.T) {
 		if result["rows"].([]any)[0].([]any)[0] != reader || contacts.Load() != 0 {
 			t.Fatal("old identity was silently rebound")
 		}
-		a.call("PATCH", fmt.Sprintf("/datasource-definitions/%d/status", defID), a.admin, map[string]any{"enabled": false}, 200)
+		a.call("PATCH", fmt.Sprintf("/datasource-definitions/%d/status", defID), a.admin, map[string]any{"enabled": false, "confirmed": true, "expected_binding_count": 3}, 200)
 		a.call("POST", "/query/execute", a.developer, map[string]any{"connection_id": devID, "sql": "SELECT 1"}, 400)
 		a.call("PATCH", fmt.Sprintf("/datasource-definitions/%d/status", defID), a.admin, map[string]any{"enabled": true}, 200)
 	})
@@ -293,7 +293,7 @@ func TestPersonalConnectionIsolation(t *testing.T) {
 		if e := a.deps.Conns.Catalog().SetEnabled(ctx, "driver", driverID, false); e == nil {
 			t.Fatal("demoted publisher could disable a global driver")
 		}
-		if e := a.deps.Conns.SetDefinitionEnabled(ctx, defID, false); e == nil {
+		if e := a.deps.Conns.SetDefinitionEnabled(ctx, defID, false, nil); e == nil {
 			t.Fatal("demoted publisher could disable a global definition")
 		}
 	})

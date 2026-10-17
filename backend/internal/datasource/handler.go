@@ -448,9 +448,11 @@ func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Conne
 	result := db.ConnectionCheck{OK: err == nil, Type: conn.Type, ElapsedMS: duration,
 		StartedAt: start.UTC(), CheckedAt: time.Now().UTC()}
 	if err != nil {
+		diagnostic := target.DiagnoseConnectionError(err)
+		result.Diagnostic = &diagnostic
 		h.log.Warn("数据源连接测试失败",
-			"user_id", c.Subject, "type", conn.Type, "host", conn.Host, "elapsed_ms", duration, "error", err)
-		result.Error = "连接测试失败: " + safeErr(err)
+			"user_id", c.Subject, "connection_id", conn.ID, "type", conn.Type, "elapsed_ms", duration, "error_code", diagnostic.Code)
+		result.Error = "连接测试失败: " + diagnostic.Title
 	} else {
 		result.Version = info.Version
 		result.Compatibility, _ = json.Marshal(info.Compatibility)
@@ -646,19 +648,9 @@ func mapNotFound(err error) error {
 	return httpx.Internal("数据访问失败", err)
 }
 
-// safeErr 清洗驱动错误文案，避免 DSN/口令片段回显；仅保留首行。
+// safeErr exposes only platform-authored diagnostic text.
 func safeErr(err error) string {
-	msg := strings.SplitN(err.Error(), "\n", 2)[0]
-	for _, key := range []string{"password=", "passwd=", "pwd="} {
-		if idx := strings.Index(strings.ToLower(msg), key); idx >= 0 {
-			return "目标主机拒绝连接或认证失败"
-		}
-	}
-	const max = 160
-	if len(msg) > max {
-		return msg[:max]
-	}
-	return msg
+	return target.DiagnoseConnectionError(err).Title
 }
 
 func (h *Handler) proxyForUser(ctx context.Context, id int64, c *auth.Claims) (*db.Proxy, error) {

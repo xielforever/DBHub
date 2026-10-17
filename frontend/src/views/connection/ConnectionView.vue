@@ -82,6 +82,7 @@
             最近检查：{{ compatibilityText(connectionChecks[conn.id]!) }}
             <span v-if="connectionChecks[conn.id]!.checked_at" class="block text-white/40">{{ checkTime(connectionChecks[conn.id]!.checked_at) }} · {{ connectionChecks[conn.id]!.elapsed_ms }} ms</span>
           </p>
+          <ConnectionDiagnosis :diagnostic="connectionChecks[conn.id]?.diagnostic" :can-update-credentials="canEdit(conn)" @recover="openCredentials(conn)" />
 
           <button v-if="userStore.role === 'admin' && conn.definition?.visibility !== 'global' && !conn.proxy_id && !conn.ssh_tunnel_id" class="ghost-button text-xs" :disabled="publishing" @click="publishDefinition(conn)">发布数据源定义</button>
           <div class="flex items-center gap-2 pt-2 border-t border-white/10">
@@ -131,6 +132,8 @@
       :width="dialogWidth"
       :close-on-click-modal="false"
       class="glass-dialog"
+      @closed="clearFormSecrets"
+      @opened="focusRecoveryPassword"
     >
       <el-form label-position="top" class="space-y-1">
         <p class="text-xs text-white/45 mb-3">基本信息</p>
@@ -181,7 +184,9 @@
           </el-form-item>
           <el-form-item label="密码">
             <el-input
+              ref="passwordInput"
               v-model="connForm.password"
+              autocomplete="new-password"
               type="password"
               show-password
               :placeholder="connForm.id && !connForm.password ? '已保存，留空表示不修改' : 'AES-256-GCM 加密存储'"
@@ -220,6 +225,7 @@
             <span v-if="versionInfo(formTest).tested_version && versionInfo(formTest).status === 'branch_verified'">实测版本 {{ versionInfo(formTest).tested_version }}。</span>
           </template>
         </p>
+        <ConnectionDiagnosis :diagnostic="formTest?.diagnostic" />
       </el-form>
 
       <template #footer>
@@ -270,6 +276,7 @@ import { ApiRequestError } from '../../utils/request'
 import { connectorApi, type DatasourceTemplate } from '../../api/connector'
 import SourceCatalog from './SourceCatalog.vue'
 import { sourceCatalogApi } from '../../api/source-catalog'
+import ConnectionDiagnosis from './ConnectionDiagnosis.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -388,6 +395,11 @@ const emptyConnForm = (): ConnForm => ({
 })
 const connDialog = ref(false)
 const connForm = reactive<ConnForm>(emptyConnForm())
+const passwordInput = ref<{focus: () => void}>()
+const focusPasswordOnOpen = ref(false)
+function clearFormSecrets() { connForm.password = ''; formTest.value = null; focusPasswordOnOpen.value = false }
+function openCredentials(c: ConnectionItem) { openEdit(c); focusPasswordOnOpen.value = true }
+function focusRecoveryPassword() { if (focusPasswordOnOpen.value) passwordInput.value?.focus(); focusPasswordOnOpen.value = false }
 const publicTargetLocked = computed(() => connections.value.find(c => c.id === connForm.id)?.definition?.visibility === 'global')
 const saving = ref(false)
 const testing = ref(false)
@@ -411,6 +423,7 @@ function onTemplateChange() {
   if (selectedTemplate.value && !['org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.value.driver.class_name)) connForm.ssl_mode = 'disable'
 }
 function openCreate() {
+  focusPasswordOnOpen.value = false
   activeTab.value = 'mine'
   formTest.value = null
   Object.assign(connForm, emptyConnForm())
@@ -418,6 +431,7 @@ function openCreate() {
   connDialog.value = true
 }
 function openEdit(c: ConnectionItem) {
+  focusPasswordOnOpen.value = false
   formTest.value = null
   Object.assign(connForm, {
     id: c.id,
@@ -496,11 +510,11 @@ async function testUnsaved() {
   const snapshot = JSON.stringify({ id, payload: payloadOf() })
   try {
     const res = id ? await connectionApi.testSaved(id, payloadOf()) : await connectionApi.test(payloadOf())
-    if (snapshot !== JSON.stringify({ id: connForm.id, payload: payloadOf() })) return
+    if (!connDialog.value || snapshot !== JSON.stringify({ id: connForm.id, payload: payloadOf() })) return
     formTest.value = res
     showTestMessage(res)
   } catch (error) {
-    if (snapshot === JSON.stringify({ id: connForm.id, payload: payloadOf() }) && error instanceof ApiRequestError && error.data) {
+    if (connDialog.value && snapshot === JSON.stringify({ id: connForm.id, payload: payloadOf() }) && error instanceof ApiRequestError && error.data) {
       formTest.value = error.data as TestResult
     }
     /* 拦截器已提示 */

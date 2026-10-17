@@ -234,6 +234,121 @@ try:
         assert all(d['id'] != private_driver['id'] for d in api('GET', '/connector-drivers', bearer=ro_token)['items'])
         passed('readonly users configure their own identity while platform write restrictions remain enforced')
         passed('a second user and administrator cannot use another personal binding or private driver')
+
+        # A real failed JDBC login is persisted and repaired with the credential
+        # owner's own form. No mocked connection result is used in this flow.
+        saved = api('GET', f"/connections/{test_source['id']}", bearer=test_token)
+        credential_payload = {key: saved[key] for key in ['name', 'type', 'host', 'port', 'database', 'username', 'ssl_mode', 'connection_timeout', 'environment', 'template_revision_id', 'parameters']}
+        credential_payload['password'] = 'IncorrectFixtureCredential9!'
+        api('PUT', f"/connections/{test_source['id']}", credential_payload, bearer=test_token)
+        test.goto(frontend+'/connections', wait_until='networkidle')
+        card = test.locator('article').filter(has=test.get_by_role('heading', name=saved['name'], exact=True))
+        with test.expect_response(lambda r: r.url.endswith(f"/connections/{test_source['id']}/test")) as response:
+            card.get_by_role('button', name='测试连接 '+saved['name'], exact=True).click()
+        assert response.value.status == 400
+        assert response.value.json()['data']['diagnostic']['code'] == 'authentication_failed'
+        expect(card.get_by_test_id('connection-diagnosis')).to_contain_text('核对本人的数据库账号')
+        passed('real JDBC authentication failures provide safe categorized recovery guidance')
+        test.reload(wait_until='networkidle')
+        card = test.locator('article').filter(has=test.get_by_role('heading', name=saved['name'], exact=True))
+        expect(card.get_by_role('button', name='更新我的凭据', exact=True)).to_be_visible()
+        assert_no_overflow(test)
+        test.screenshot(path=str(out/'connection-diagnosis-mobile.png'), animations='disabled')
+        passed('failure diagnosis survives reload and fits the mobile connection card')
+        card.get_by_role('button', name='更新我的凭据', exact=True).click()
+        dialog = test.get_by_role('dialog', name='编辑数据源')
+        expect(dialog.get_by_label('密码', exact=True)).to_have_value('')
+        expect(dialog.get_by_label('密码', exact=True)).to_be_focused()
+        dialog.get_by_label('密码', exact=True).fill(fixture['reader_password'])
+        with test.expect_response(lambda r: r.url.endswith(f"/connections/{test_source['id']}/test")) as response:
+            dialog.get_by_role('button', name='测试连接', exact=True).click()
+        assert response.value.status == 200
+        expect(dialog.get_by_test_id('connection-diagnosis')).to_have_count(0)
+        with test.expect_response(lambda r: r.url.endswith(f"/connections/{test_source['id']}") and r.request.method == 'PUT') as response:
+            dialog.get_by_role('button', name='保存', exact=True).click()
+        assert response.value.status == 200
+        expect(dialog).not_to_be_visible()
+        expect(test.get_by_role('button', name='更新我的凭据', exact=True)).to_have_count(0)
+        passed('credential recovery focuses an empty personal password field and clears stale failures')
+
+        # Publish an unbound future target, keeping both real user bindings on
+        # revision 2. The historical revision now needs management in the UI.
+        page.goto(frontend+'/connections', wait_until='networkidle')
+        page.get_by_role('tab', name='数据源目录', exact=True).click()
+        card = page.locator('article').filter(has=page.get_by_role('heading', name=source_name, exact=True))
+        card.get_by_role('button', name='新修订', exact=True).click()
+        dialog = page.get_by_role('dialog', name='发布数据源新修订')
+        dialog.get_by_label('主机', exact=True).fill('inventory-future.example.test')
+        dialog.get_by_label('说明', exact=True).fill('目标迁移由使用者确认')
+        with page.expect_response(lambda r: r.url.endswith('/revisions') and r.request.method == 'POST') as response:
+            dialog.get_by_role('button', name='发布新修订', exact=True).click()
+        assert response.value.status == 201
+        latest = response.value.json()['data']
+        assert latest['revision'] == 3
+        card = page.locator('article').filter(has=page.get_by_role('heading', name=source_name, exact=True))
+        card.get_by_role('button', name='修订记录', exact=True).click()
+        history = page.get_by_role('dialog', name='数据源修订记录')
+        expect(history.locator('article')).to_have_count(3)
+        old = history.locator('article[data-revision="2"]')
+        expect(old.get_by_test_id('binding-count')).to_have_text('绑定 2 个个人连接')
+        expect(history.locator('article[data-revision="3"]')).to_contain_text('inventory-future.example.test')
+        expect(history.locator('article[data-revision="3"]')).to_contain_text('之前：postgres')
+        assert_no_overflow(page)
+        expect(history.get_by_role('button', name='下一页', exact=True)).to_be_in_viewport()
+        page.screenshot(path=str(out/'source-revisions-desktop.png'), animations='disabled')
+        passed('administrators inspect historical bindings and actual target differences across revisions')
+
+        test.goto(frontend+'/connections', wait_until='networkidle')
+        test.get_by_role('tab', name='数据源目录', exact=True).click()
+        test.locator('article').filter(has=test.get_by_role('heading', name=source_name, exact=True)).get_by_role('button', name='修订记录', exact=True).click()
+        personal_history = test.get_by_role('dialog', name='数据源修订记录')
+        expect(personal_history.locator('article')).to_have_count(3)
+        expect(personal_history.get_by_test_id('binding-count')).to_have_count(0)
+        expect(personal_history.get_by_role('button', name='停用此修订', exact=True)).to_have_count(0)
+        expect(personal_history.locator('article[data-revision="2"]')).to_contain_text('我的连接正在使用')
+        assert_no_overflow(test)
+        expect(personal_history.get_by_role('button', name='下一页', exact=True)).to_be_in_viewport()
+        test.screenshot(path=str(out/'source-revisions-mobile.png'), animations='disabled')
+        passed('mobile users see their pinned revision and differences without management counts or controls')
+
+        mutations = []
+        page.on('request', lambda r: mutations.append(r.url) if r.method == 'PATCH' and '/datasource-definitions/' in r.url else None)
+        old.get_by_role('button', name='停用此修订', exact=True).click()
+        confirmation = page.get_by_role('dialog', name='确认停用影响')
+        expect(confirmation).to_contain_text('影响 2 个个人连接')
+        with page.expect_response(lambda r: '/datasource-definitions/' in r.url and '/revisions' in r.url and r.request.method == 'GET') as response:
+            confirmation.get_by_role('button', name='取消', exact=True).click()
+        assert response.value.status == 200
+        assert not mutations
+        passed('canceling a historical revision stop sends no mutation')
+
+        # A new binding arrives after the impact count was displayed.
+        admin_binding = api('POST', f"/datasource-definitions/{new_definition['id']}/connections", {'username': values['POSTGRES_USER'], 'password': values['POSTGRES_PASSWORD'], 'confirmed': True}, 201)
+        old.get_by_role('button', name='停用此修订', exact=True).click()
+        with page.expect_response(lambda r: r.url.endswith(f"/datasource-definitions/{new_definition['id']}/status") and r.request.method == 'PATCH') as response:
+            page.get_by_role('dialog', name='确认停用影响').get_by_role('button', name='确认停用', exact=True).click()
+        assert response.value.status == 409
+        expect(old.get_by_test_id('binding-count')).to_have_text('绑定 3 个个人连接')
+        expect(old.get_by_role('button', name='停用此修订', exact=True)).to_be_visible()
+        passed('a changed binding count rejects stale stop confirmation and refreshes the impact')
+
+        old.get_by_role('button', name='停用此修订', exact=True).click()
+        confirmation = page.get_by_role('dialog', name='确认停用影响')
+        expect(confirmation).to_contain_text('影响 3 个个人连接')
+        with page.expect_response(lambda r: r.url.endswith(f"/datasource-definitions/{new_definition['id']}/status") and r.request.method == 'PATCH') as response:
+            confirmation.get_by_role('button', name='确认停用', exact=True).click()
+        assert response.value.status == 200
+        expect(old.get_by_role('button', name='启用此修订', exact=True)).to_be_visible()
+        expect(history.locator('article[data-revision="3"]')).to_contain_text('可用')
+        api('POST', '/query/execute', {'connection_id': test_source['id'], 'sql': 'SELECT current_user'}, 400, bearer=test_token)
+        passed('confirmed stop blocks the historical personal bindings and preserves other revisions')
+        with page.expect_response(lambda r: r.url.endswith(f"/datasource-definitions/{new_definition['id']}/status") and r.request.method == 'PATCH') as response:
+            old.get_by_role('button', name='启用此修订', exact=True).click()
+        assert response.value.status == 200
+        result = api('POST', '/query/execute', {'connection_id': test_source['id'], 'sql': 'SELECT current_user'}, bearer=test_token)
+        assert result['rows'][0][0] == fixture['reader']
+        assert api('GET', f"/connections/{test_source['id']}", bearer=test_token)['definition_revision_id'] == new_definition['id']
+        passed('reenabling a historical revision restores the original database identity without rebinding')
         browser.close()
     assert not errors, 'browser page errors occurred'
     passed('desktop and mobile complete without browser page errors')

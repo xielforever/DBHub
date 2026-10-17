@@ -3,19 +3,21 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"github.com/user/dbhub/internal/connector"
 	"time"
 )
 
 // ConnectionCheck 只保存连通性与版本结果，禁止保存配置、凭据或原始驱动错误。
 type ConnectionCheck struct {
-	OK            bool            `json:"ok"`
-	Type          string          `json:"type"`
-	Version       string          `json:"version"`
-	ElapsedMS     int64           `json:"elapsed_ms"`
-	Compatibility json.RawMessage `json:"compatibility,omitempty"`
-	Error         string          `json:"error,omitempty"`
-	StartedAt     time.Time       `json:"started_at"`
-	CheckedAt     time.Time       `json:"checked_at"`
+	OK            bool                  `json:"ok"`
+	Type          string                `json:"type"`
+	Version       string                `json:"version"`
+	ElapsedMS     int64                 `json:"elapsed_ms"`
+	Compatibility json.RawMessage       `json:"compatibility,omitempty"`
+	Error         string                `json:"error,omitempty"`
+	Diagnostic    *connector.Diagnostic `json:"diagnostic,omitempty"`
+	StartedAt     time.Time             `json:"started_at"`
+	CheckedAt     time.Time             `json:"checked_at"`
 }
 
 // SaveCheck 忽略旧配置的结果，且较早开始的慢测试不能覆盖更新的检查。

@@ -1,12 +1,12 @@
 package connectorruntime
 
 import (
-	"fmt"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/user/dbhub/internal/connector"
 	"github.com/user/dbhub/internal/db"
 )
 
@@ -18,7 +18,7 @@ func ValidateDestination(c *db.Connection) error {
 	}
 	check := func(host string, port int) error {
 		if strings.TrimSpace(host) == "" || strings.ContainsAny(host, "/\\@?#;=\r\n\t ") || port < 1 || port > 65535 {
-			return fmt.Errorf("目标地址或端口无效")
+			return &connector.Error{Kind: "invalid_config", Message: "目标地址或端口无效"}
 		}
 		rules := strings.TrimSpace(os.Getenv("DBHUB_TARGET_ALLOWLIST"))
 		if rules == "" && os.Getenv("APP_ENV") != "production" {
@@ -30,7 +30,7 @@ func ValidateDestination(c *db.Connection) error {
 				return nil
 			}
 		}
-		return fmt.Errorf("目标地址未获平台允许，请联系管理员配置 DBHUB_TARGET_ALLOWLIST")
+		return &connector.Error{Kind: "target_denied", Message: "目标地址未获平台允许，请联系管理员配置 DBHUB_TARGET_ALLOWLIST"}
 	}
 	if e := check(c.Host, c.Port); e != nil {
 		return e

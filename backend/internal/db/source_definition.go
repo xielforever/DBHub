@@ -156,12 +156,37 @@ func (r *ConnectionRepository) SaveDefinition(ctx context.Context, d *SourceDefi
 	}
 	return tx.Commit(ctx)
 }
-func (r *ConnectionRepository) SetDefinitionEnabled(ctx context.Context, id int64, enabled bool) error {
-	tag, e := r.pool.Exec(ctx, `UPDATE sys_source_definitions SET enabled=$2 WHERE id=$1 AND ((visibility='private' AND owner_id=$3) OR (visibility='global' AND $4))`, id, enabled, ActorID(ctx), ActorAdmin(ctx))
-	if e == nil && tag.RowsAffected() == 0 {
+func (r *ConnectionRepository) SetDefinitionEnabled(ctx context.Context, id int64, enabled bool, expectedBindings *int64) error {
+	tx, e := r.pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	// Bind/rebind takes a shared lock on the definition. Holding this exclusive
+	// lock makes the impact check and stop atomic with admission of new bindings.
+	d, e := scanDefinition(tx.QueryRow(ctx, `SELECT to_jsonb(d) FROM sys_source_definitions d WHERE id=$1 FOR UPDATE`, id))
+	if e != nil {
+		return e
+	}
+	if !canManageDefinition(ctx, d) {
 		return ErrNotFound
 	}
-	return e
+	if !enabled {
+		if expectedBindings == nil || *expectedBindings < 0 {
+			return ErrDefinitionConfirmation
+		}
+		var count int64
+		if e = tx.QueryRow(ctx, `SELECT count(*) FROM sys_connections WHERE definition_revision_id=$1`, id).Scan(&count); e != nil {
+			return e
+		}
+		if count != *expectedBindings {
+			return ErrDefinitionImpactChanged
+		}
+	}
+	if _, e = tx.Exec(ctx, `UPDATE sys_source_definitions SET enabled=$2 WHERE id=$1`, id, enabled); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 
 // ResolvePersonal is for an explicitly authorized shared report/ticket. It finds

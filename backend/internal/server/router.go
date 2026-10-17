@@ -137,6 +137,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("GET /api/v1/connections/{id}/capabilities", middleware.Chain(http.HandlerFunc(dsH.Capabilities), requireAuth))
 
 		mux.Handle("GET /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.Definitions), requireAuth))
+		mux.Handle("GET /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.DefinitionRevisions), requireAuth))
 		mux.Handle("POST /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
 		mux.Handle("POST /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
 		mux.Handle("PATCH /api/v1/datasource-definitions/{id}/status", middleware.Chain(http.HandlerFunc(dsH.DefinitionStatus), requireAuth, auditMW))

@@ -17,10 +17,10 @@ import (
 func catalogFailure(w http.ResponseWriter, e error) {
 	switch {
 	case errors.Is(e, db.ErrNotFound):
-		httpx.Fail(w, httpx.NotFound("驱动或模板不存在"))
-	case errors.Is(e, db.ErrCatalogConflict), errors.Is(e, db.ErrCatalogInUse), errors.Is(e, db.ErrPersonalBindingExists):
+		httpx.Fail(w, httpx.NotFound("配置不存在或不可访问"))
+	case errors.Is(e, db.ErrCatalogConflict), errors.Is(e, db.ErrCatalogInUse), errors.Is(e, db.ErrPersonalBindingExists), errors.Is(e, db.ErrDefinitionImpactChanged):
 		httpx.Fail(w, httpx.Conflict(e.Error()))
-	case errors.Is(e, db.ErrCatalogDisabled):
+	case errors.Is(e, db.ErrCatalogDisabled), errors.Is(e, db.ErrDefinitionConfirmation):
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 	default:
 		var ce *connector.Error
