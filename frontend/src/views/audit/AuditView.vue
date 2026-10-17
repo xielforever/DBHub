@@ -5,6 +5,14 @@
       <p class="text-sm text-white/45 mt-1">关联平台用户、配置的数据库账号与数据源修订；查看执行回执区分失败和结果待确认。</p>
     </header>
 
+    <div v-if="delivery || deliveryError" role="status" class="glass-panel px-4 py-3 text-sm" :class="deliveryError || !delivery?.ready || delivery?.last_error ? 'text-amber-200' : 'text-white/60'">
+      <p v-if="deliveryError">暂时无法读取审计写入状态，请稍后刷新。</p>
+      <template v-else-if="delivery">
+      <p>{{ !delivery.ready ? '审计存储不可用或队列已满，新的审计操作已暂停。' : delivery.pending ? '审计记录已保存，正在等待落库。' : '审计写入正常' }}</p>
+      <p class="text-xs mt-1">待写入 {{ delivery.pending }} / {{ delivery.capacity }}<span v-if="delivery.oldest"> · 最早待写入 {{ fmtTime(delivery.oldest) }}</span><span v-if="delivery.last_delivered"> · 最近落库 {{ fmtTime(delivery.last_delivered) }}</span> · 本次启动写入失败 {{ delivery.delivery_failures }} 次 · 存储失败 {{ delivery.storage_failures }} 次</p>
+      </template>
+    </div>
+
     <!-- 筛选栏 -->
     <div class="glass-panel p-4 flex flex-wrap items-center gap-3">
       <div class="w-full sm:w-36 shrink-0">
@@ -94,11 +102,12 @@
                   class="px-2 py-0.5 rounded-full text-xs whitespace-nowrap"
                   :class="a.status === 1 ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'"
                 >
-                  {{ outcomes[a.context?.outcome || ''] || (a.status === 1 ? '成功' : '失败') }}
+                  {{ outcomes[a.context?.outcome || ''] || (a.status === 1 ? '成功' : '失败') }}{{ a.context?.response_failed && a.context?.outcome !== 'unknown' ? '（响应未确认）' : '' }}
                 </span>
                 <p v-if="a.error_message" class="text-[11px] text-rose-300/70 mt-1 max-w-[200px] truncate" :title="a.error_message">
                   {{ a.error_message }}
                 </p>
+                <details class="text-xs text-white/45 mt-1"><summary class="cursor-pointer">请求详情</summary><p>{{ a.context?.route }}</p><p v-if="a.context?.http_status">HTTP {{ a.context.http_status }}</p><p v-if="a.context?.auth_failure">{{ denialLabels[a.context.auth_failure] || a.context.auth_failure }}</p><p v-if="a.context?.transaction_id" class="break-all">事务 {{ a.context.transaction_id }}</p><p v-if="a.context?.job_id" class="break-all">任务 {{ a.context.job_id }}</p><p v-if="a.context?.export_id">导出 #{{ a.context.export_id }}</p><p class="break-all">事件 {{ a.event_id || '历史记录' }}</p></details>
               </td>
               <td class="px-5 py-3.5 text-right text-white/45 text-xs whitespace-nowrap">{{ a.duration_ms ?? '—' }} ms</td>
             </tr>
@@ -122,15 +131,18 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from 'lucide-vue-next'
-import { adminApi, type AuditLog } from '../../api/admin'
+import { adminApi, type AuditLog, type AuditDelivery } from '../../api/admin'
 
 const logs = ref<AuditLog[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+const delivery = ref<AuditDelivery>()
+const deliveryError = ref(false)
+const denialLabels: Record<string,string> = {missing_token:'缺少认证令牌',invalid_token:'认证令牌无效或过期',user_unavailable:'用户不可用',invalid_session:'会话已失效',session_unavailable:'会话服务不可用',insufficient_role:'角色权限不足'}
 
 const filters = reactive({
   days: 7,
@@ -140,8 +152,11 @@ const filters = reactive({
   username: '', database_account: '', outcome: '',
 })
 
-const outcomes: Record<string, string> = {succeeded: '执行成功', failed: '执行失败', unknown: '结果待确认', rejected: '请求拒绝', duplicate: '重复请求', conflict: '请求冲突', completed: '操作完成', access_updated: '范围已更新', profile_updated: '资料已更新', revision_published: '修订已发布', revision_status_updated: '修订状态已更新'}
+const outcomes: Record<string, string> = {begun: '事务已开启', committed: '事务已提交', rolled_back: '事务已回滚', cancel_requested: '已请求取消', already_finished: '任务已结束', export_pending: '导出待审批', export_approved: '导出已批准', export_rejected: '导出已拒绝', download_response: '已返回下载响应', succeeded: '执行成功', failed: '执行失败', unknown: '结果待确认', rejected: '请求拒绝', duplicate: '重复请求', conflict: '请求冲突', completed: '操作完成', access_updated: '范围已更新', profile_updated: '资料已更新', revision_published: '修订已发布', revision_status_updated: '修订状态已更新'}
 const actionLabels: Record<string, string> = {
+  REFRESH: '刷新会话', LOGOUT: '退出登录', AUTH_DENIED: '访问拒绝',
+  TRANSACTION_BEGIN: '开启事务', TRANSACTION_COMMIT: '提交事务', TRANSACTION_ROLLBACK: '回滚事务',
+  QUERY_CANCEL: '取消查询', EXPORT_CREATE: '申请导出', EXPORT_REVIEW: '审批导出', EXPORT_DOWNLOAD: '下载导出',
   LOGIN: '登录',
   CHANGE_PASSWORD: '修改密码',
   CREATE: '新建',
@@ -151,6 +166,7 @@ const actionLabels: Record<string, string> = {
   QUERY: '执行 SQL',
 }
 const resourceLabels: Record<string, string> = {
+  TRANSACTION: '事务', QUERY_JOB: '查询任务', EXPORT: '数据导出',
   AUTH: '认证',
   CONNECTION: '数据源',
   SSH_TUNNEL: 'SSH 隧道',
@@ -162,7 +178,7 @@ const resourceLabels: Record<string, string> = {
 async function reload() {
   loading.value = true
   try {
-    const res = await adminApi.auditLogs({
+    const [records,state] = await Promise.allSettled([adminApi.auditLogs({
       days: filters.days,
       resource_type: filters.resource_type,
       action: filters.action,
@@ -170,14 +186,23 @@ async function reload() {
       username: filters.username, database_account: filters.database_account, outcome: filters.outcome,
       page: page.value,
       page_size: pageSize,
-    })
-    logs.value = res.items
-    total.value = res.total
+    }), adminApi.auditDelivery()])
+    deliveryError.value = state.status === 'rejected'
+    if(state.status === 'fulfilled') delivery.value = state.value
+    if(records.status === 'fulfilled') {
+      logs.value = records.value.items
+      total.value = records.value.total
+    }
   } finally {
     loading.value = false
   }
 }
-onMounted(reload)
+let deliveryTimer: ReturnType<typeof setInterval> | undefined
+onMounted(() => {
+  void reload()
+  deliveryTimer = setInterval(() => { void adminApi.auditDelivery().then(value => {delivery.value=value; deliveryError.value=false}).catch(() => {deliveryError.value=true}) },10000)
+})
+onUnmounted(() => { if(deliveryTimer) clearInterval(deliveryTimer) })
 
 function fmtTime(s: string) {
   return new Date(s).toLocaleString('zh-CN', {

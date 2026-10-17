@@ -149,6 +149,8 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, optional bool) 
 
 func httpStatusForCode(code int) int {
 	switch {
+	case code >= 50300 && code < 50400:
+		return http.StatusServiceUnavailable
 	case code >= 50000:
 		return http.StatusInternalServerError
 	case code >= 42900 && code < 43000:

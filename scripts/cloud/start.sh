@@ -7,7 +7,7 @@ python3 - <<'PY'
 import time,urllib.request
 for _ in range(60):
  try:
-  with urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=2) as response: assert response.status==200
+  with urllib.request.urlopen('http://127.0.0.1:8080/api/ready',timeout=2) as response: assert response.status==200
   with urllib.request.urlopen('http://127.0.0.1:5173/',timeout=2) as response: assert response.status==200
   print('DBHub services ready')
   break

@@ -73,3 +73,5 @@ JDBC 生产镜像的隔离验收：先按连接器指南提供公共 CA bundle �
 指定用户／用户组授权、目录与关联审计的验收使用 `DBHUB_AUDIENCE_BROWSER=1 python3 scripts/cloud/personal-browser-check.py`。浏览器会安装在临时容器 `dbhub-personal-browser`，数据库和目录夹具在 finally 中清理；完成全部浏览器检查后可删除此容器以回收空间。
 
 本地 openGauss 演示使用 `python3 scripts/cloud/opengauss-demo-check.py`，仅串行启动一个固定摘要的社区 6.0.0 PG 模式单节点，限制 1.5 GiB 内存和 2 核 CPU，完成后清理容器、临时数据、凭据和本轮新增镜像。脚本不启动商业 GaussDB，也不替代主备／分布式及 TLS 验收；它要求既有 Cloud 后端和当前 JDBC 服务已启动。不要在其他 Go 测试执行期间重建 backend/JDBC。完整接口和边界见[数据源授权、目录与 openGauss 验收](../../docs/开发指南/数据源授权目录与openGauss验收.md)。
+
+审计采用执行前持久化和数据库幂等补写。Cloud 队列保存在状态目录的 `audit/`，替换容器时保留该目录；生产 Compose 使用 UID 65532 可写的 `backend-audit` 命名卷。队列满或本地存储故障会暂停新的审计操作，`/api/ready` 返回 503；管理员页面可查看积压。覆盖、故障恢复和独立浏览器验收见[审计覆盖与可靠写入](../../docs/开发指南/审计覆盖与可靠写入.md)。

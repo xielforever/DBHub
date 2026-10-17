@@ -18,9 +18,28 @@ type Data struct {
 	Driver             string `json:"driver,omitempty"`
 	TargetOpened       bool   `json:"target_opened,omitempty"`
 	ExecutionRequestID string `json:"execution_request_id,omitempty"`
+	TransactionID      string `json:"transaction_id,omitempty"`
+	JobID              string `json:"job_id,omitempty"`
+	ExportID           int64  `json:"export_id,omitempty"`
+	HTTPStatus         int    `json:"http_status,omitempty"`
+	ResponseFailed     bool   `json:"response_failed,omitempty"`
+	AuthFailure        string `json:"auth_failure,omitempty"`
+	Route              string `json:"route,omitempty"`
 	Outcome            string `json:"outcome,omitempty"`
 }
 type key struct{}
+type checkpointKey struct{}
+
+func WithCheckpoint(ctx context.Context, fn func() error) context.Context {
+	return context.WithValue(ctx, checkpointKey{}, fn)
+}
+func Checkpoint(ctx context.Context) error {
+	if fn, ok := ctx.Value(checkpointKey{}).(func() error); ok {
+		return fn()
+	}
+	return nil
+}
+
 type Snapshot struct {
 	mu   sync.Mutex
 	data Data
@@ -36,5 +55,11 @@ func Update(ctx context.Context, fn func(*Data)) {
 		defer s.mu.Unlock()
 		fn(&s.data)
 	}
+}
+func Read(ctx context.Context) Data {
+	if s, ok := ctx.Value(key{}).(*Snapshot); ok {
+		return s.Read()
+	}
+	return Data{}
 }
 func (s *Snapshot) Read() Data { s.mu.Lock(); defer s.mu.Unlock(); return s.data }

@@ -61,7 +61,28 @@ func (h *Handler) loadOwnedConnection(r *http.Request, connID int64) (*db.Connec
 	if err != nil {
 		return nil, "", nil, mapNotFound(err)
 	}
-	auditctx.Update(r.Context(), func(d *auditctx.Data) {
+	auditConnection(r.Context(), conn, false)
+	if err := auditctx.Checkpoint(r.Context()); err != nil {
+		return nil, "", nil, httpx.New(50300, "审计存储暂不可用", err)
+	}
+	// 仓储严格校验当前用户的个人连接，绝不回退到发布者凭据。
+	var tunnel *db.SSHTunnel
+	if conn.SSHTunnelID != nil {
+		t, err := h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)
+		if err != nil {
+			return nil, "", nil, mapNotFound(err)
+		}
+		if t.UserID != c.Subject {
+			return nil, "", nil, httpx.BadRequest("所选 SSH 隧道不可用")
+		}
+		tunnel = t
+	}
+	return conn, password, tunnel, nil
+}
+
+func auditConnection(ctx context.Context, conn *db.Connection, opened bool) {
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.TargetOpened = opened
 		d.ConnectionID = conn.ID
 		d.SourceFamilyID = conn.DefinitionFamilyID
 		d.DatabaseAccount = conn.Username
@@ -76,19 +97,6 @@ func (h *Handler) loadOwnedConnection(r *http.Request, connID int64) (*db.Connec
 			d.Driver = conn.Template.Driver.ArtifactID
 		}
 	})
-	// 仓储严格校验当前用户的个人连接，绝不回退到发布者凭据。
-	var tunnel *db.SSHTunnel
-	if conn.SSHTunnelID != nil {
-		t, err := h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)
-		if err != nil {
-			return nil, "", nil, mapNotFound(err)
-		}
-		if t.UserID != c.Subject {
-			return nil, "", nil, httpx.BadRequest("所选 SSH 隧道不可用")
-		}
-		tunnel = t
-	}
-	return conn, password, tunnel, nil
 }
 
 func (h *Handler) openRelational(r *http.Request, connID int64, database string) (*target.RelDB, *db.Connection, func(), error) {

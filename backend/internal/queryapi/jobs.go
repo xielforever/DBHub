@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/httpx"
 )
 
@@ -22,6 +23,7 @@ type Job struct {
 	Finished     *time.Time `json:"finished_at,omitempty"`
 	Error        string     `json:"error,omitempty"`
 	cancel       context.CancelFunc
+	audit        auditctx.Data
 }
 type jobs struct {
 	mu        sync.Mutex
@@ -51,7 +53,7 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 		return nil, nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	job := &Job{ID: randomID(), UserID: user, ConnectionID: connection, SQL: sql, Status: "pending", Created: time.Now(), cancel: cancel}
+	job := &Job{ID: randomID(), UserID: user, ConnectionID: connection, SQL: sql, Status: "pending", Created: time.Now(), cancel: cancel, audit: auditctx.Read(ctx)}
 	m.mu.Lock()
 	pending := 0
 	userPending := 0
@@ -217,9 +219,29 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	defer h.jobs.mu.Unlock()
 	for _, j := range h.jobs.items {
 		if j.ID == r.PathValue("id") && (j.UserID == c.Subject) {
+			auditctx.Update(r.Context(), func(d *auditctx.Data) {
+				d.JobID = j.ID
+				d.ConnectionID = j.ConnectionID
+				d.SourceFamilyID = j.audit.SourceFamilyID
+				d.DefinitionID = j.audit.DefinitionID
+				d.Revision = j.audit.Revision
+				d.DatabaseAccount = j.audit.DatabaseAccount
+				d.Driver = j.audit.Driver
+			})
+			if err := auditctx.Checkpoint(r.Context()); err != nil {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "rejected" })
+				httpx.Fail(w, httpx.New(50300, "审计存储暂不可用", err))
+				return
+			}
 			if j.Finished == nil {
 				j.cancel()
 			}
+			auditctx.Update(r.Context(), func(d *auditctx.Data) {
+				d.Outcome = "cancel_requested"
+				if j.Finished != nil {
+					d.Outcome = "already_finished"
+				}
+			})
 			httpx.OK(w, map[string]any{"id": j.ID, "cancelled": true})
 			return
 		}

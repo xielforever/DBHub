@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-17",
+  "scope": [
+    "transaction cancellation and export operation audit",
+    "authentication and authorization denial coverage",
+    "durable write-ahead audit journal",
+    "idempotent retry and process recovery",
+    "private persistent volume and readiness"
+  ],
+  "go": {
+    "command": "go test -race -count=1 -p=4 -timeout 300s -json ./...",
+    "passed_test_items": 201,
+    "passed_test_packages": 14,
+    "skipped": [
+      "TestJournalCrashHelper",
+      "TestVersionMatrixTarget",
+      "TestOpenGaussDemoHTTP"
+    ],
+    "skip_notes": {
+      "TestJournalCrashHelper": "helper is executed in four subprocess crash scenarios; direct standalone entry skips",
+      "TestVersionMatrixTarget": "full native version matrix not configured or rerun",
+      "TestOpenGaussDemoHTTP": "ephemeral demo destroyed after its earlier acceptance"
+    },
+    "vet": "passed",
+    "result_sha256": "3da0f087eb3258bab64f501dfd45abce2a49acf67393dead8282d542bf8161e0"
+  },
+  "frontend": {
+    "state_tests_passed": 14,
+    "type_check": "passed",
+    "production_build": "passed",
+    "warning": "existing large bundle warning",
+    "test_log_sha256": "aeb7498b21be0c2c7f1066723475290f72e17d12eb4db2b7bdba53aea4ec4146",
+    "build_log_sha256": "c890143383c22d65376e7b141c0b991382804379b46e1137cda2fd3790a87f4e"
+  },
+  "browser": {
+    "checks": [
+      "administrator reads the real delivery status and audit list",
+      "transaction filtering shows real session identity event ID route and outcome",
+      "denied read requests are visible with safe authentication reasons",
+      "audit status filters and details fit a 390 pixel mobile viewport",
+      "queue fixture displays retained events waiting for delivery",
+      "full queue fixture explains admission has paused",
+      "failed status polling does not leave a stale healthy indicator",
+      "real delivery status recovers without browser page errors"
+    ],
+    "page_errors": [],
+    "mocked_checks": [
+      "queue fixture displays retained events waiting for delivery",
+      "full queue fixture explains admission has paused",
+      "failed status polling does not leave a stale healthy indicator"
+    ],
+    "owned_connection_removed": true,
+    "owned_user_and_sources_removed": true,
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "log_sha256": "70e15c5d59774038fbe777d146617808204d52dc8710d56b109975f3cb49e934",
+    "backend_note": "browser normal flows and UI states were checked before final Go-only guards and metadata escaping; final full Go suite covers the changed failure paths; frontend unchanged"
+  },
+  "runtime": {
+    "image": "dbhub-backend:audit-reliable",
+    "checks": [
+      "non-root read-only production container starts with a private writable audit volume and passes readiness",
+      "replacement container reuses the volume and reacquires the journal lock",
+      "production rejects a relative audit directory before starting services"
+    ],
+    "image_id": "sha256:6a356d26f281374185427b7c0e1af38801c5047d25b75f628c0ebcf8c241bce1",
+    "owned_volume_removed": true,
+    "owned_container_removed": true
+  },
+  "cleanup": {
+    "temporary_browser_containers_removed": true,
+    "temporary_production_container_and_volume_removed": true,
+    "owned_browser_users_remaining": 0,
+    "owned_browser_connections_remaining": 0,
+    "owned_browser_definitions_remaining": 0,
+    "orphan_families_remaining": 0,
+    "pending_cloud_audit_files": 0,
+    "superseded_owned_image_removed": true,
+    "only_owned_build_cache_entries_pruned": true,
+    "free_root_disk_gib": 4.02
+  },
+  "source_fingerprints": {
+    "backend_go_and_migrations_sha256": "783a4497b71fa48c4ae72ab4e1bfa3a903093aba1cfd5b36a4428d4c03be2369",
+    "audit_frontend_sha256": "f86eb9c9e93ab9d8c709d2770d94b5c0d818cce47bf5c8b194f10fa2589cac38",
+    "browser_script_sha256": "47c035ca4fa9f58f04fe8e7450d0046d249d690c6bf98679459e1bd6ae0c867f",
+    "backend_tests_sha256": "d45d8197d68f1395669d204158353c33291510995ea17169e05ccf8612acedd8"
+  },
+  "screenshots": [
+    {
+      "path": "images/audit-reliable-desktop.png",
+      "sha256": "8240fb8485d2ed133ab44f97e2d290ab4671f471b7f13e5ea582bbc7ce22c8ed"
+    },
+    {
+      "path": "images/audit-reliable-mobile.png",
+      "sha256": "a1a8535c046396aef9b8e75576864c07f8acd6b8cebf9b716e58929649eed907"
+    }
+  ],
+  "limitations": [
+    "persistent volume loss can lose events not yet inserted into PostgreSQL",
+    "no atomic transaction with the target business database",
+    "no tamper-proof or row-level audit",
+    "no automatic audit archive or retention cleanup",
+    "no before/after authorization policy diff",
+    "background transaction reclamation is outside this HTTP operation audit scope",
+    "per-instance journal and queue status; each replica requires its own persistent volume",
+    "commercial GaussDB and full native version matrix not rerun"
+  ],
+  "http_invalid_metadata_probe": {
+    "invalid_account_http_status": 400,
+    "escaped_account_audit": true,
+    "credential_excluded": true,
+    "pending": 0
+  }
+}

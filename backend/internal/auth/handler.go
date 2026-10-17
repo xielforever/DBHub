@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/httpx"
 )
@@ -92,6 +93,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		h.log.Warn("更新登录时间失败", "user_id", user.ID)
 	}
 	w.Header().Set("X-Audit-User-Id", strconv.FormatInt(user.ID, 10))
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ActorID = user.ID; d.ActorUsername = user.Username; d.ActorRole = user.Role })
 	httpx.OK(w, tokenData(pair, user))
 }
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
@@ -114,6 +116,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		sessionFailure(w, e)
 		return
 	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ActorID = user.ID; d.ActorUsername = user.Username; d.ActorRole = user.Role })
 	pair, e := issuePairForSession(h.secret, user, h.accessTTL, h.refreshTTL, claims.SessionID)
 	if e != nil {
 		httpx.Fail(w, httpx.Internal("签发令牌失败", e))

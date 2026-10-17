@@ -24,7 +24,8 @@ export interface UserItem {
 
 export interface UserGroup {id: number; name: string; description: string; version: number; member_ids: number[]; updated_at: string}
 export interface AuditLog {
- context: {actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; outcome?: string}
+ context: {actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; transaction_id?: string; job_id?: string; export_id?: number; http_status?: number; response_failed?: boolean; auth_failure?: string; route?: string; outcome?: string}
+  event_id?: string
   id: number
   user_id: number | null
   connection_id: number | null
@@ -42,6 +43,8 @@ export interface AuditLog {
   username: string
 }
 
+export interface AuditDelivery {ready: boolean; pending: number; capacity: number; oldest?: string; last_delivered?: string; delivery_failures: number; storage_failures: number; last_error?: string}
+
 interface Paged<T> {
   items: T[]
   total: number
@@ -50,6 +53,7 @@ interface Paged<T> {
 }
 
 export const adminApi = {
+ auditDelivery: () => request.get<unknown, AuditDelivery>('/audit-logs/delivery'),
  groups: (params: {keyword?: string; page: number; page_size: number}) => request.get<unknown, Paged<UserGroup>>('/user-groups', {params}),
  saveGroup: (id: number, payload: {name: string; description: string; member_ids: number[]; expected_version: number}) => {
   const body = {name: payload.name, description: payload.description, member_ids: payload.member_ids, expected_version: payload.expected_version}

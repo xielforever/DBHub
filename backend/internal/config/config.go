@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,8 @@ type Config struct {
 	CORSOrigins               []string
 	AIBaseURL, AIKey, AIModel string
 	JDBCURL, JDBCToken        string
+	AuditDir                  string
+	AuditMaxPending           int
 }
 
 // AdminConfig 引导管理员账号配置。
@@ -50,17 +53,32 @@ type AdminConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		JDBCURL: os.Getenv("DBHUB_JDBC_URL"), JDBCToken: os.Getenv("DBHUB_JDBC_TOKEN"),
-		Env:            getenv("APP_ENV", "development"),
-		Port:           getenv("PORT", "8080"),
-		LogLevel:       getenv("LOG_LEVEL", "info"),
-		DatabaseURL:    os.Getenv("DATABASE_URL"),
-		MetaDBMaxConns: int32(getenvInt("META_DB_MAX_CONNS", 10)),
-		RedisURL:       os.Getenv("REDIS_URL"),
-		AIBaseURL:      getenv("DBHUB_AI_BASE_URL", "https://api.openai.com/v1"), AIKey: os.Getenv("DBHUB_AI_API_KEY"), AIModel: getenv("DBHUB_AI_MODEL", "gpt-4.1-mini"),
+		Env:             getenv("APP_ENV", "development"),
+		Port:            getenv("PORT", "8080"),
+		LogLevel:        getenv("LOG_LEVEL", "info"),
+		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		MetaDBMaxConns:  int32(getenvInt("META_DB_MAX_CONNS", 10)),
+		RedisURL:        os.Getenv("REDIS_URL"),
+		AuditDir:        getenv("DBHUB_AUDIT_DIR", ".dbhub/audit"),
+		AuditMaxPending: getenvInt("DBHUB_AUDIT_MAX_PENDING", 10000),
+		AIBaseURL:       getenv("DBHUB_AI_BASE_URL", "https://api.openai.com/v1"), AIKey: os.Getenv("DBHUB_AI_API_KEY"), AIModel: getenv("DBHUB_AI_MODEL", "gpt-4.1-mini"),
 		Admin: AdminConfig{
 			Username: getenv("APP_ADMIN_USERNAME", "admin"),
 			Password: getenv("APP_ADMIN_PASSWORD", "admin123"),
 		},
+	}
+	if raw := os.Getenv("DBHUB_AUDIT_MAX_PENDING"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, errors.New("DBHUB_AUDIT_MAX_PENDING 必须是整数")
+		}
+		cfg.AuditMaxPending = value
+	}
+	if cfg.AuditMaxPending < 1 || cfg.AuditMaxPending > 100000 {
+		return nil, errors.New("DBHUB_AUDIT_MAX_PENDING 必须在 1–100000 之间")
+	}
+	if cfg.IsProduction() && !filepath.IsAbs(os.Getenv("DBHUB_AUDIT_DIR")) {
+		return nil, errors.New("生产环境必须配置绝对路径 DBHUB_AUDIT_DIR，并挂载持久化存储")
 	}
 
 	if cfg.JDBCURL != "" && len(cfg.JDBCToken) < 32 {

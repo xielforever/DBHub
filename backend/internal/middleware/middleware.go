@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/httpx"
 )
@@ -78,6 +79,7 @@ func Recoverer(log *slog.Logger) Middleware {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if rec := recover(); rec != nil {
+					auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "unknown" })
 					rid, _ := r.Context().Value(RequestIDKey).(string)
 					log.Error("panic 恢复",
 						"request_id", rid,
@@ -135,6 +137,7 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := extractAccessToken(r)
 			if tokenStr == "" {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "missing_token" })
 				_, hasCookie := r.Cookie("dbhub_access_token")
 				slog.Warn("受保护接口缺少认证令牌",
 					"method", r.Method, "path", r.URL.Path,
@@ -147,16 +150,21 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 			}
 			claims, err := auth.ParseToken(secret, tokenStr, auth.TokenTypeAccess)
 			if err != nil {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "invalid_token" })
 				httpx.Fail(w, httpx.New(httpx.CodeUnauthorized, "认证令牌无效或已过期", err))
 				return
 			}
 			user, e := users.FindByUsername(r.Context(), claims.Username)
 			if e != nil || user.ID != claims.Subject {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "user_unavailable" })
 				httpx.Fail(w, httpx.Unauthorized("用户不可用"))
 				return
 			}
+			auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ActorID = user.ID; d.ActorUsername = user.Username; d.ActorRole = user.Role })
 			if e = sessions.Validate(r.Context(), claims, user); e != nil {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "session_unavailable" })
 				if errors.Is(e, auth.ErrSession) {
+					auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "invalid_session" })
 					httpx.Fail(w, httpx.Unauthorized("会话已失效"))
 				} else {
 					httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "会话服务暂不可用"})
@@ -164,6 +172,11 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 				return
 			}
 			claims.Role = user.Role
+			if err := auditctx.Checkpoint(r.Context()); err != nil {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "rejected" })
+				httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "审计存储暂不可用，请稍后重试"})
+				return
+			}
 			ctx := context.WithValue(r.Context(), auth.ClaimsContextKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -198,6 +211,7 @@ func RequireRoles(allowed ...string) Middleware {
 				return
 			}
 			if _, ok := allowedSet[claims.Role]; !ok {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "insufficient_role" })
 				httpx.Fail(w, httpx.Forbidden("当前角色无权执行此操作"))
 				return
 			}
@@ -210,6 +224,8 @@ type statusWriter struct {
 	http.ResponseWriter
 	status int
 }
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *statusWriter) WriteHeader(code int) {
 	w.status = code

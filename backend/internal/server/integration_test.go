@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/user/dbhub/internal/auditlog"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/db"
@@ -39,6 +40,7 @@ type apiTest struct {
 	roleConnections            map[string]int64
 	roleRedis                  map[string]int64
 	table                      string
+	auditDir                   string
 }
 
 func setupAPI(t *testing.T) *apiTest {
@@ -92,11 +94,17 @@ func setupAPI(t *testing.T) *apiTest {
 	}
 	deps := &Deps{UserRepo: users, Conns: db.NewConnectionRepository(pool, cipher), Tunnels: db.NewTunnelRepository(pool, cipher), Proxies: db.NewProxyRepository(pool, cipher), History: db.NewHistoryRepository(pool), Audit: db.NewAuditRepository(pool), Meta: db.NewMetadataRepository(pool), Reports: db.NewReportRepository(pool), Dashboards: db.NewDashboardRepository(pool), Shares: db.NewShareRepository(pool), Tickets: db.NewTicketRepository(pool), Lineage: db.NewLineageRepository(pool), Snippets: db.NewSnippetRepository(pool), Controls: db.NewQueryControls(pool), Sessions: auth.NewSessionStore(rc), Redis: rc}
 	appCfg := &config.Config{Env: "development", SecretKey: secret, AccessTTL: time.Hour, RefreshTTL: time.Hour}
-	a := &apiTest{t: t, pool: pool, deps: deps, table: fmt.Sprintf("dbhub_http_%d", time.Now().UnixNano())}
+	appCfg.AuditDir = t.TempDir() + "/audit"
+	deps.AuditJournal, e = auditlog.Open(appCfg.AuditDir, 10000, deps.Audit, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if e != nil {
+		t.Fatal(e)
+	}
+	a := &apiTest{t: t, pool: pool, deps: deps, table: fmt.Sprintf("dbhub_http_%d", time.Now().UnixNano()), auditDir: appCfg.AuditDir}
 	a.server = httptest.NewServer(NewRouter(appCfg, slog.New(slog.NewTextHandler(io.Discard, nil)), users, deps))
 	t.Cleanup(func() {
 		a.server.Close()
 		deps.Queries.Close()
+		_ = deps.AuditJournal.Close(context.Background())
 		pool.Close()
 		_, _ = root.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 		_, _ = root.Exec(ctx, "DROP TABLE IF EXISTS "+pgx.Identifier{a.table}.Sanitize())

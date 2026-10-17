@@ -14,7 +14,7 @@ func main() {
 		port = "8080"
 	}
 	client := &http.Client{Timeout: 2 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	response, err := client.Get("http://" + net.JoinHostPort("127.0.0.1", port) + "/api/health")
+	response, err := client.Get("http://" + net.JoinHostPort("127.0.0.1", port) + "/api/ready")
 	if err != nil {
 		os.Exit(1)
 	}

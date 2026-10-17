@@ -44,10 +44,13 @@ services:
         IMAGE_VERSION: ${BACKEND_IMAGE_VERSION}
     volumes:
       - ./backend:/app
+      - auditdata:/var/lib/dbhub/audit
     ports:
       - "${BACKEND_PORT}:${BACKEND_PORT}"
     environment:
       - APP_ENV=${APP_ENV}
+      - DBHUB_AUDIT_DIR=/var/lib/dbhub/audit
+      - DBHUB_AUDIT_MAX_PENDING=${DBHUB_AUDIT_MAX_PENDING:-10000}
       - PORT=${BACKEND_PORT}
       - LOG_LEVEL=${LOG_LEVEL}
       - APP_SECRET_KEY=${APP_SECRET_KEY}
@@ -95,6 +98,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  auditdata:
 
 networks:
   dbhub-net:

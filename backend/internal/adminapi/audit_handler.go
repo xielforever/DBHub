@@ -4,17 +4,28 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/user/dbhub/internal/auditlog"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 )
 
 // AuditHandler 审计日志查询（仅 admin）。
 type AuditHandler struct {
-	audit *db.AuditRepository
+	audit   *db.AuditRepository
+	journal *auditlog.Journal
 }
 
-func NewAuditHandler(audit *db.AuditRepository) *AuditHandler {
-	return &AuditHandler{audit: audit}
+func NewAuditHandler(audit *db.AuditRepository, journal *auditlog.Journal) *AuditHandler {
+	return &AuditHandler{audit: audit, journal: journal}
+}
+
+func (h *AuditHandler) Delivery(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.journal == nil {
+		httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "审计存储未初始化"})
+		return
+	}
+	httpx.OK(w, h.journal.Status())
 }
 
 // AuditLogs GET /api/v1/audit-logs

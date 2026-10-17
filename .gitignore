@@ -42,3 +42,4 @@ logs/
 
 # ---------- Docker 数据卷（本地持久化）----------
 .docker-volumes/
+.dbhub/

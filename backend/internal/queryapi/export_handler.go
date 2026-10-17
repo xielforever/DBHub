@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/httpx"
 	"github.com/user/dbhub/internal/sqlparse"
@@ -76,6 +77,7 @@ func (h *Handler) CreateExport(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Internal("保存导出申请失败", e))
 		return
 	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ExportID = id; d.Outcome = "export_pending" })
 	httpx.OK(w, map[string]any{"id": id, "status": "pending"})
 }
 func (h *Handler) ReviewExport(w http.ResponseWriter, r *http.Request) {
@@ -95,16 +97,27 @@ func (h *Handler) ReviewExport(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Conflict("申请已处理或不存在"))
 		return
 	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ExportID = id; d.Outcome = "export_" + in.Status })
 	httpx.OK(w, map[string]string{"status": in.Status})
 }
 func (h *Handler) DownloadExport(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	c := claimsOf(r)
-	format, raw, e := h.controls.DownloadExport(r.Context(), id, c.Subject, false)
+	format, raw, connectionID, e := h.controls.DownloadExport(r.Context(), id, c.Subject, false)
 	if e != nil {
 		httpx.Fail(w, httpx.NotFound("导出不存在、未批准或无权限"))
 		return
 	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) {
+		d.ExportID = id
+		d.ConnectionID = connectionID
+	})
+	if err := auditctx.Checkpoint(r.Context()); err != nil {
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "rejected" })
+		httpx.Fail(w, httpx.New(50300, "审计存储暂不可用", err))
+		return
+	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "download_response" })
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.OK(w, map[string]any{"format": format, "result": raw})
 }

@@ -206,6 +206,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		execErr = fmt.Errorf("事务不存在或已过期")
 	} else {
 		tx.mu.Lock()
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.TransactionID = tx.ID })
 		if h.txs.get(c.Subject, conn.ID) != tx {
 			execErr = fmt.Errorf("事务不存在或已过期")
 		} else if in.Database != "" && tx.Database != in.Database {

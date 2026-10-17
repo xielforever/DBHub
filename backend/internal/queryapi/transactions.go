@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/httpx"
 )
@@ -151,6 +152,7 @@ func (h *Handler) BeginTransaction(w http.ResponseWriter, r *http.Request) {
 	}
 	h.txs.items[txKey(c.Subject, in.ConnectionID)] = tx
 	h.txs.mu.Unlock()
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.TransactionID = tx.ID; d.Outcome = "begun" })
 	httpx.OK(w, map[string]any{"transaction_id": tx.ID, "status": "active", "connection_id": in.ConnectionID})
 }
 func (h *Handler) TransactionStatus(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +188,12 @@ func (h *Handler) FinishTransaction(commit bool) http.HandlerFunc {
 		}
 		tx.mu.Lock()
 		defer tx.mu.Unlock()
+		auditConnection(r.Context(), tx.Handle.Conn, true)
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.TransactionID = tx.ID })
+		if err := auditctx.Checkpoint(r.Context()); err != nil {
+			httpx.Fail(w, httpx.New(50300, "审计存储暂不可用", err))
+			return
+		}
 		h.txs.remove(tx)
 		defer tx.close()
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -201,9 +209,11 @@ func (h *Handler) FinishTransaction(commit bool) http.HandlerFunc {
 			e = tx.Handle.Rollback(ctx)
 		}
 		if e != nil {
+			auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "unknown" })
 			httpx.Fail(w, httpx.BadRequest("事务结束失败，连接已关闭"))
 			return
 		}
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = status })
 		httpx.OK(w, map[string]any{"transaction_id": tx.ID, "status": status, field: true})
 	}
 }

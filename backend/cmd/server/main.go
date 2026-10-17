@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"github.com/user/dbhub/internal/auditlog"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/db"
@@ -112,6 +113,11 @@ func main() {
 			Redis:      sessionRedis, Controls: db.NewQueryControls(pgPool),
 		}
 		log.Info("已接入 PostgreSQL 元数据库")
+		deps.AuditJournal, err = auditlog.Open(cfg.AuditDir, cfg.AuditMaxPending, deps.Audit, log)
+		if err != nil {
+			log.Error("初始化审计持久化队列失败", "error", err)
+			os.Exit(1)
+		}
 	} else {
 		memoryUsers, err := auth.NewMemoryStore(cfg.Admin)
 		if err != nil {
@@ -162,6 +168,9 @@ func main() {
 		os.Exit(1)
 	}
 	if pgPool != nil {
+		if err := deps.AuditJournal.Close(shutdownCtx); err != nil {
+			log.Warn("审计队列尚未写完，将在下次启动后恢复")
+		}
 		pgPool.Close()
 	}
 	log.Info("服务已安全退出")

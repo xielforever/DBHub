@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/user/dbhub/internal/auditctx"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -13,6 +15,7 @@ import (
 // AuditLog 操作审计记录。
 type AuditLog struct {
 	Context      auditctx.Data  `json:"context"`
+	EventID      string         `json:"event_id,omitempty"`
 	ID           int64          `json:"id"`
 	UserID       *int64         `json:"user_id"`
 	ConnectionID *int64         `json:"connection_id"`
@@ -41,16 +44,20 @@ func NewAuditRepository(pool *pgxpool.Pool) *AuditRepository {
 	return &AuditRepository{pool: pool}
 }
 
-// Create 写入一条审计日志（调用方通常在请求结束后调用，失败只影响日志本身）。
+// Create inserts a stable event identity; replay after an uncertain ACK is safe.
 func (r *AuditRepository) Create(ctx context.Context, a *AuditLog) error {
+	if a.EventID == "" || a.CreatedAt.IsZero() {
+		return fmt.Errorf("审计事件缺少持久化标识或时间")
+	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO sys_audit_logs
 			(user_id, connection_id, trace_id, action, resource_type, resource_name,
-			 ip_address, user_agent, status, error_message, duration_ms, params, context)
+			 ip_address, user_agent, status, error_message, duration_ms, params, context, event_id, created_at)
 		VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),
-		        NULLIF($7,'')::inet,NULLIF($8,''),$9,NULLIF($10,''),$11,$12,$13::jsonb)`,
+		        NULLIF($7,'')::inet,NULLIF($8,''),$9,NULLIF($10,''),$11,$12,$13::jsonb,$14::uuid,$15)
+		ON CONFLICT (event_id, created_at) DO NOTHING`,
 		a.UserID, a.ConnectionID, a.TraceID, a.Action, a.ResourceType, a.ResourceName,
-		a.IPAddress, a.UserAgent, a.Status, a.ErrorMessage, a.DurationMS, a.Params, auditJSON(a.Context))
+		a.IPAddress, a.UserAgent, a.Status, a.ErrorMessage, a.DurationMS, nil, auditJSON(a.Context), a.EventID, a.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -93,7 +100,7 @@ func (r *AuditRepository) List(ctx context.Context, f AuditFilter, limit, offset
 		       COALESCE(host(a.ip_address), ''), COALESCE(a.user_agent, ''),
 		       a.status, COALESCE(a.error_message, ''), a.duration_ms,
 		       COALESCE(a.params::jsonb, '{}'::jsonb), a.created_at,
-		       COALESCE(NULLIF(a.context->>'actor_username',''),u.username,''),a.context
+		       COALESCE(NULLIF(a.context->>'actor_username',''),u.username,''),a.context,COALESCE(a.event_id::text,'')
 		FROM sys_audit_logs a
 		LEFT JOIN sys_users u ON u.id = a.user_id
 		`+where+`
@@ -110,7 +117,7 @@ func (r *AuditRepository) List(ctx context.Context, f AuditFilter, limit, offset
 		var raw []byte
 		if err := rows.Scan(&a.ID, &a.UserID, &a.ConnectionID, &a.TraceID,
 			&a.Action, &a.ResourceType, &a.ResourceName, &a.IPAddress, &a.UserAgent,
-			&a.Status, &a.ErrorMessage, &a.DurationMS, &a.Params, &a.CreatedAt, &a.Username, &raw); err != nil {
+			&a.Status, &a.ErrorMessage, &a.DurationMS, &a.Params, &a.CreatedAt, &a.Username, &raw, &a.EventID); err != nil {
 			return nil, 0, err
 		}
 		if err := json.Unmarshal(raw, &a.Context); err != nil {
@@ -135,4 +142,28 @@ func nilTime(t time.Time) any {
 	return t
 }
 
-func auditJSON(d auditctx.Data) string { raw, _ := json.Marshal(d); return string(raw) }
+func auditJSON(d auditctx.Data) string {
+	// PostgreSQL JSONB rejects U+0000. Unpersisted connection tests can carry
+	// such metadata; preserve it as explicitly quoted text instead of poisoning
+	// the durable queue. This also repairs delivery of older queued snapshots.
+	d.ActorUsername = auditText(d.ActorUsername)
+	d.ActorRole = auditText(d.ActorRole)
+	d.SourceFamilyID = auditText(d.SourceFamilyID)
+	d.DatabaseAccount = auditText(d.DatabaseAccount)
+	d.Driver = auditText(d.Driver)
+	d.ExecutionRequestID = auditText(d.ExecutionRequestID)
+	d.TransactionID = auditText(d.TransactionID)
+	d.JobID = auditText(d.JobID)
+	d.AuthFailure = auditText(d.AuthFailure)
+	d.Route = auditText(d.Route)
+	d.Outcome = auditText(d.Outcome)
+	raw, _ := json.Marshal(d)
+	return string(raw)
+}
+
+func auditText(value string) string {
+	if strings.ContainsRune(value, 0) {
+		return strconv.Quote(value)
+	}
+	return value
+}
