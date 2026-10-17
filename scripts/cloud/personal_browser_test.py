@@ -15,6 +15,7 @@ prefix = fixture['prefix']
 base, frontend = 'http://backend:8080/api/v1', 'http://frontend:5173'
 token = ''
 tokens, checks, errors = [], [], []
+app_users = {}
 out = Path('/runtime/browser-artifacts'); out.mkdir(exist_ok=True)
 
 def api(method, path, body=None, want=200, bearer=None):
@@ -58,7 +59,7 @@ token = api('POST', '/auth/login', {'username': values['APP_ADMIN_USERNAME'], 'p
 tokens.append(token)
 try:
     for name, role in [(fixture['app_user'], 'developer'), (fixture['app_readonly'], 'readonly')]:
-        api('POST', '/users', {'username': name, 'password': fixture['app_password'], 'role': role}, 201)
+        app_users[name] = api('POST', '/users', {'username': name, 'password': fixture['app_password'], 'role': role}, 201)
     artifacts = api('GET', '/connector-drivers/available')['items']
     artifact = next(a for a in artifacts if a['name'] == 'postgresql')
     existing = next((d for d in api('GET', '/connector-drivers')['items'] if d['artifact_id'] == artifact['id'] and d['visibility'] == 'global'), None)
@@ -127,10 +128,12 @@ try:
         dialog.get_by_label('数据库', exact=True).fill(values['POSTGRES_DB'])
         choose(page, dialog.get_by_label('TLS', exact=True), '禁用')
         assert dialog.locator('input[type=password]').count() == 0
+        expect(dialog.get_by_role('button', name='保存数据源定义', exact=True)).to_be_in_viewport()
         with page.expect_response(lambda r: r.url.endswith('/datasource-definitions') and r.request.method == 'POST') as response:
             dialog.get_by_role('button', name='保存数据源定义', exact=True).click()
         assert response.value.status == 201; definition = response.value.json()['data']
         assert 'username' not in definition['config'] and 'password' not in definition['config']
+        expect(dialog).not_to_be_visible()
         page.screenshot(path=str(out/'personal-catalog-desktop.png'), animations='disabled')
         passed('administrators can publish an inventory target without configuring any database credentials')
 
@@ -190,7 +193,8 @@ try:
 
         page.goto(frontend+'/connections', wait_until='networkidle')
         page.get_by_role('tab', name='数据源目录', exact=True).click()
-        page.locator('article').filter(has=page.get_by_role('heading', name=source_name, exact=True)).get_by_role('button', name='新修订', exact=True).click()
+        page.locator('article').filter(has=page.get_by_role('heading', name=source_name, exact=True)).get_by_role('button', name='管理 '+source_name, exact=True).click()
+        page.get_by_role('menuitem', name='新修订', exact=True).click()
         revision_dialog = page.get_by_role('dialog', name='发布数据源新修订')
         revision_dialog.get_by_label('说明', exact=True).fill('新修订由使用者确认后切换')
         with page.expect_response(lambda r: r.url.endswith('/revisions')) as response:
@@ -276,7 +280,8 @@ try:
         page.goto(frontend+'/connections', wait_until='networkidle')
         page.get_by_role('tab', name='数据源目录', exact=True).click()
         card = page.locator('article').filter(has=page.get_by_role('heading', name=source_name, exact=True))
-        card.get_by_role('button', name='新修订', exact=True).click()
+        card.get_by_role('button', name='管理 '+source_name, exact=True).click()
+        page.get_by_role('menuitem', name='新修订', exact=True).click()
         dialog = page.get_by_role('dialog', name='发布数据源新修订')
         dialog.get_by_label('主机', exact=True).fill('inventory-future.example.test')
         dialog.get_by_label('说明', exact=True).fill('目标迁移由使用者确认')
@@ -349,6 +354,11 @@ try:
         assert result['rows'][0][0] == fixture['reader']
         assert api('GET', f"/connections/{test_source['id']}", bearer=test_token)['definition_revision_id'] == new_definition['id']
         passed('reenabling a historical revision restores the original database identity without rebinding')
+        if values.get('DBHUB_AUDIENCE_BROWSER') == '1':
+            from audience_browser_checks import run_checks
+            run_checks(page, test, fixture, values, prefix, source_name, test_source, readonly_source,
+                       test_token, ro_token, latest, new_definition, app_users, out,
+                       api, choose, passed, assert_no_overflow)
         browser.close()
     assert not errors, 'browser page errors occurred'
     passed('desktop and mobile complete without browser page errors')

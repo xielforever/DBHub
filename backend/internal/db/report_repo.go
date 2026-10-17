@@ -72,7 +72,7 @@ func (r *ReportRepository) Get(ctx context.Context, id int64) (*Report, error) {
 		       COALESCE(u.username,'')
 		FROM sys_reports r
 		LEFT JOIN sys_users u ON u.id = r.owner_user_id
-		WHERE r.id = $1 AND (r.owner_user_id=$2 OR r.visibility='shared')`, id, ActorID(ctx)).Scan(
+		WHERE r.id = $1 AND (r.owner_user_id=$2 OR r.visibility='shared') AND `+reportSourceVisible(ctx), id, ActorID(ctx)).Scan(
 		&rep.ID, &rep.Name, &rep.Description, &rep.ConnectionID, &rep.DatabaseName, &rep.SQLText,
 		&rep.ChartType, &rep.ChartConfig, &rep.Visibility, &rep.OwnerUserID,
 		&rep.StarredBy, &rep.CreatedAt, &rep.UpdatedAt, &rep.OwnerName)
@@ -86,7 +86,7 @@ func (r *ReportRepository) List(ctx context.Context, f ReportFilter) ([]Report, 
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 20
 	}
-	conds := []string{"(r.owner_user_id=" + fmt.Sprint(ActorID(ctx)) + " OR r.visibility='shared')"}
+	conds := []string{"(r.owner_user_id=" + fmt.Sprint(ActorID(ctx)) + " OR r.visibility='shared')", reportSourceVisible(ctx)}
 	args := []any{}
 	add := func(tmpl string, vals ...any) {
 		for _, v := range vals {
@@ -196,4 +196,8 @@ func (r *ReportRepository) SetStar(ctx context.Context, id int64, userID int64, 
 func reportConnection(ctx context.Context) string {
 	actor := fmt.Sprint(ActorID(ctx))
 	return "CASE WHEN r.owner_user_id=" + actor + " THEN r.connection_id ELSE COALESCE((SELECT mine.id FROM sys_connections mine JOIN sys_connections src ON src.id=r.connection_id WHERE mine.user_id=" + actor + " AND mine.definition_revision_id=src.definition_revision_id),0) END"
+}
+
+func reportSourceVisible(ctx context.Context) string {
+	return "EXISTS(SELECT 1 FROM sys_connections rs WHERE rs.id=r.connection_id AND dbhub_source_visible(rs.definition_revision_id," + fmt.Sprint(ActorID(ctx)) + "))"
 }

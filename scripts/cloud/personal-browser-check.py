@@ -71,7 +71,7 @@ GRANT SELECT,UPDATE ON public.{identifier(fixture['table'])} TO {identifier(fixt
         time.sleep(1)
     else:
         raise RuntimeError('browser runtime did not become ready; inspect the owned container logs')
-    command = ['docker', 'exec', '-e', 'DBHUB_PERSONAL_FIXTURE=/runtime/' + path.name, container,
+    command = ['docker', 'exec', '-e', 'DBHUB_AUDIENCE_BROWSER=' + os.environ.get('DBHUB_AUDIENCE_BROWSER', '0'), '-e', 'DBHUB_PERSONAL_FIXTURE=/runtime/' + path.name, container,
                'sh', '-ec', 'export http_proxy="$HTTP_PROXY" https_proxy="$HTTPS_PROXY" no_proxy="$NO_PROXY"; exec /tmp/browser-venv/bin/python /app/scripts/cloud/personal_browser_test.py']
     code = subprocess.run(command, cwd=root).returncode
 finally:
@@ -85,6 +85,7 @@ DELETE FROM sys_source_definitions WHERE name LIKE {literal(tag+'%')} OR owner_i
  (SELECT id FROM sys_users WHERE username IN ({literal(fixture['app_user'])},{literal(fixture['app_readonly'])}));
 DELETE FROM sys_datasource_templates WHERE template_key LIKE {literal(tag+'%')};
 DELETE FROM sys_jdbc_drivers WHERE name LIKE {literal(tag+'%')};
+DELETE FROM sys_user_groups WHERE name LIKE {literal(tag+'%')};
 DELETE FROM sys_users WHERE username IN ({literal(fixture['app_user'])},{literal(fixture['app_readonly'])});
 DROP OWNED BY {identifier(fixture['reader'])},{identifier(fixture['writer'])};
 DROP ROLE {identifier(fixture['reader'])};

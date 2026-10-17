@@ -1,0 +1,40 @@
+{
+  "started_at": "2026-10-17T16:00:58.310034+00:00",
+  "driver": "org.opengauss:opengauss-jdbc:6.0.0-og",
+  "product": "community openGauss",
+  "mode": "single node, PG compatibility",
+  "image": "enmotech/opengauss@sha256:6ce3ec3d591e721882c611fa26de1e56ad35ca63304c789267ed52cc6cbca70d",
+  "limits": {
+    "memory_mib": 1536,
+    "cpus": 2,
+    "pids": 256
+  },
+  "commercial_gaussdb": "unverified",
+  "server_version": "(openGauss 6.0.0 build aee4abd5) compiled at 2024-09-29 19:14:27 commit 0 last mr   on x86_64-unknown-linux-gnu, compiled by g++ (GCC) 10.3.0, 64-bit",
+  "passed_test_items": [
+    "TestOpenGaussDemoHTTP/official-driver-connection-and-version",
+    "TestOpenGaussDemoHTTP/parameters-null-and-decimal",
+    "TestOpenGaussDemoHTTP/create-insert-update-delete",
+    "TestOpenGaussDemoHTTP/metadata-and-collection",
+    "TestOpenGaussDemoHTTP/transaction-rollback-and-commit",
+    "TestOpenGaussDemoHTTP/server-readonly-and-personal-identity",
+    "TestOpenGaussDemoHTTP/database-itself-rejects-readonly-write",
+    "TestOpenGaussDemoHTTP/timeout-does-not-exhaust-service",
+    "TestOpenGaussDemoHTTP"
+  ],
+  "failed_test_items": [],
+  "test_exit_code": 0,
+  "observed_memory_usage": "1.025GiB / 1.5GiB",
+  "cleanup": {
+    "container_removed": true,
+    "data_removed": true,
+    "new_image_removed": true,
+    "fixture_secret_removed": true
+  },
+  "finished_at": "2026-10-17T16:02:09.686710+00:00",
+  "driver_sha256": "b70742a49dec51af3d6fd21a1bad884a2ea86422c29515e7e8b4c3050c7b6ca5",
+  "driver_upstream_sha1": "2447cd9de2ff2e7ae284c1407ac59a6ae121b827",
+  "image_source": "https://github.com/enmotech/enmotech-docker-opengauss/tree/master/6.0.0",
+  "capability_added": "SYS_NICE for MOT recovery mbind; no privileged mode or host networking",
+  "tls_verification": "not exercised against the demo target; driver is configured for verification when TLS is requested"
+}

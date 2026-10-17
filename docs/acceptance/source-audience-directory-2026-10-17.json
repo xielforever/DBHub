@@ -1,0 +1,127 @@
+{
+  "date": "2026-10-17",
+  "scope": [
+    "family-level datasource audience",
+    "user groups",
+    "credential-free audit correlation",
+    "directory profiles and personal preferences",
+    "official openGauss JDBC adapter"
+  ],
+  "go": {
+    "command": "go test -timeout 300s -race -p=4 -json ./...",
+    "passed_test_items": 174,
+    "passed_test_packages": 12,
+    "skipped": [
+      "TestVersionMatrixTarget",
+      "TestOpenGaussDemoHTTP"
+    ],
+    "vet": "passed",
+    "result_sha256": "9f32c1b8d799f6422c8281b45391e0e803dca1a1165ef5b56557827478b25c64",
+    "includes_final_input_validation": true
+  },
+  "additional_source_authorization_checks": {
+    "command": "go test -timeout 90s -race -json ./internal/server -run TestSourceAudienceAndDirectory",
+    "purpose": "including shared report visibility after group/family revocation",
+    "passed_test_items": 7
+  },
+  "frontend": {
+    "state_tests_passed": 14,
+    "vue_tsc": "passed",
+    "production_build": "passed",
+    "warning": "existing large bundle warning"
+  },
+  "java_diagnostics": {
+    "causes_passed": 12,
+    "unknown_sqlstate_sanitized": true
+  },
+  "browser": {
+    "checks_passed": 31,
+    "checks": [
+      "administrator uses an installed and verified globally published JDBC driver",
+      "administrator publishes reusable global connection rules in settings",
+      "publishing the inventory source shares the target without administrator credentials",
+      "administrators can publish an inventory target without configuring any database credentials",
+      "a newly invited user has no inherited administrator connections",
+      "mobile users explicitly confirm the target and test their own credentials",
+      "the saved inventory binding belongs only to the current user",
+      "JDBC SQL executes as the personal database principal and retains two workspace actions",
+      "ordinary users can add private configurations without publishing them globally",
+      "published revisions leave existing bindings unchanged until the user confirms and re-enters credentials",
+      "readonly users configure their own identity while platform write restrictions remain enforced",
+      "a second user and administrator cannot use another personal binding or private driver",
+      "real JDBC authentication failures provide safe categorized recovery guidance",
+      "failure diagnosis survives reload and fits the mobile connection card",
+      "credential recovery focuses an empty personal password field and clears stale failures",
+      "administrators inspect historical bindings and actual target differences across revisions",
+      "mobile users see their pinned revision and differences without management counts or controls",
+      "canceling a historical revision stop sends no mutation",
+      "a changed binding count rejects stale stop confirmation and refreshes the impact",
+      "confirmed stop blocks the historical personal bindings and preserves other revisions",
+      "reenabling a historical revision restores the original database identity without rebinding",
+      "administrators create a team and choose its real members in the browser",
+      "directory groups tags and maintainer contact are saved independently of target revisions",
+      "one publication supports both direct users and teams while hiding member details from consumers",
+      "directory management fits mobile and keeps its save action inside the viewport",
+      "mobile favorites are personal and recent use is based on a successful target connection",
+      "audit UI associates the platform actor personal database login driver and pinned revision",
+      "removing a team member revokes an existing connection and preserves a separate direct grant",
+      "team deletion requires an explicit impact confirmation and removes the owned fixture",
+      "revoking publication hides favorites and blocks a historical personal binding without deleting its credentials",
+      "desktop and mobile complete without browser page errors"
+    ],
+    "page_errors": [],
+    "viewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      },
+      {
+        "width": 1200,
+        "height": 900
+      }
+    ]
+  },
+  "screenshots": [
+    {
+      "path": "images/source-audience-directory-desktop.png",
+      "sha256": "58574d617654451f0b2cd333a66c9e65b372bc845f288cd8d431f9d32e8997bc"
+    },
+    {
+      "path": "images/source-audience-directory-mobile.png",
+      "sha256": "020b579cc6a37bc22c92dbea29b6326b1663a0825e3df14cdb1f15eb94a9c1b4"
+    },
+    {
+      "path": "images/source-audience-management-mobile.png",
+      "sha256": "1a480488be48aef3d217d1e04955acc18e21571d5b5f7ae80e00902dd834b51e"
+    },
+    {
+      "path": "images/source-audience-audit-desktop.png",
+      "sha256": "305e9f321854d3d3c43cb11de1ea44a5f8550b9bd5936accbe72096bcd2f25e6"
+    }
+  ],
+  "cleanup": {
+    "browser_container_removed": true,
+    "browser_owned_fixtures_removed": true,
+    "owned_browser_connections_remaining": 0,
+    "owned_browser_users_remaining": 0,
+    "owned_browser_groups_remaining": 0,
+    "orphan_source_families_remaining": 0,
+    "ephemeral_opengauss_removed": true
+  },
+  "limitations": [
+    "commercial GaussDB and HA/distributed configurations unverified",
+    "openGauss TLS and non-PG modes unverified",
+    "no rerun of the full native version matrix",
+    "operation audit is best effort after request completion",
+    "organization tenants and shared query scheduling not implemented"
+  ],
+  "implementation_sha256": {
+    "backend_go_and_migrations": "476c4599732b706c4d8d741099742059f13ee1c477e3849ae43aa818011aa891",
+    "frontend_src": "e2b37aa9dbecc05ab987012e2a1da56f3695e84f5880d2a28283bfef87aa34f9",
+    "jdbc_source_and_lock": "62c25b2ddc8c877c8e015acc297f52c23f21689845c759aec59353b15c930639"
+  }
+}

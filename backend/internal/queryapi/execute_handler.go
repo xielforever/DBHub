@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
@@ -32,6 +33,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		if outcome == "" {
 			outcome = requestOutcome(observed.status)
 		}
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = outcome })
 		h.metrics.finishRequest(outcome, time.Since(started), errors.Is(reason, context.DeadlineExceeded), errors.Is(reason, context.Canceled))
 	}()
 	w.Header().Set("Cache-Control", "no-store")
@@ -50,6 +52,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("request_id 必须为非空 UUID；同一次请求重试必须沿用原编号"))
 		return
 	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ExecutionRequestID = in.RequestID })
 	conn, password, tunnel, e := h.loadOwnedConnection(r, in.ConnectionID)
 	if e != nil {
 		httpx.Fail(w, e)
@@ -183,6 +186,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			}
 			h.metrics.finishExecution(executionOutcome, time.Since(executionStarted))
 		}()
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.TargetOpened = true })
 		rewritten, values, e := h.applyPolicies(ctx, handle, c.Subject, c.Role, query, args)
 		if e != nil {
 			return nil, e

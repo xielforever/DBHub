@@ -46,6 +46,16 @@ type SourceDefinition struct {
 	Visibility     string       `json:"visibility"`
 	Enabled        bool         `json:"enabled"`
 	Config         SourceConfig `json:"config"`
+	AccessMode     string       `json:"access_mode"`
+	AccessVersion  int64        `json:"access_version"`
+	ProfileVersion int64        `json:"profile_version"`
+	Category       string       `json:"category"`
+	Tags           []string     `json:"tags"`
+	Maintainer     string       `json:"maintainer"`
+	Contact        string       `json:"contact"`
+	Favorite       bool         `json:"favorite"`
+	LastUsedAt     *time.Time   `json:"last_used_at,omitempty"`
+	AccessDenied   bool         `json:"access_denied,omitempty"`
 	CreatedAt      time.Time    `json:"created_at"`
 	MyConnectionID *int64       `json:"my_connection_id,omitempty"`
 	MyRevisionID   *int64       `json:"my_revision_id,omitempty"`
@@ -65,34 +75,17 @@ func scanDefinition(row pgx.Row) (*SourceDefinition, error) {
 	return d, nil
 }
 
-const visibleDefinition = `(d.visibility='global' OR d.owner_id=$2)`
+const visibleDefinition = `dbhub_source_visible(d.id,$2)`
 
 func (r *ConnectionRepository) Definition(ctx context.Context, id int64) (*SourceDefinition, error) {
 	if ActorID(ctx) == 0 {
 		return nil, ErrNotFound
 	}
-	return scanDefinition(r.pool.QueryRow(ctx, `SELECT to_jsonb(d) FROM sys_source_definitions d WHERE d.id=$1 AND `+visibleDefinition, id, ActorID(ctx)))
+	return scanDefinition(r.pool.QueryRow(ctx, `SELECT to_jsonb(d)||`+familyJSON+` FROM sys_source_definitions d JOIN sys_source_families f USING(family_id) WHERE d.id=$1 AND `+visibleDefinition, id, ActorID(ctx)))
 }
 func (r *ConnectionRepository) Definitions(ctx context.Context) ([]SourceDefinition, error) {
-	if ActorID(ctx) == 0 {
-		return nil, ErrNotFound
-	}
-	rows, err := r.pool.Query(ctx, `SELECT to_jsonb(d)||jsonb_build_object('my_connection_id',c.id,'my_revision_id',c.definition_revision_id)
- FROM (SELECT DISTINCT ON(family_id) * FROM sys_source_definitions WHERE visibility='global' OR owner_id=$1 ORDER BY family_id,revision DESC) d
- LEFT JOIN sys_connections c ON c.definition_family_id=d.family_id AND c.user_id=$1 ORDER BY d.created_at DESC`, ActorID(ctx))
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []SourceDefinition{}
-	for rows.Next() {
-		d, e := scanDefinition(rows)
-		if e != nil {
-			return nil, e
-		}
-		out = append(out, *d)
-	}
-	return out, rows.Err()
+	items, _, err := r.SearchDefinitions(ctx, DirectoryFilter{Limit: 100})
+	return items, err
 }
 func canManageDefinition(ctx context.Context, d *SourceDefinition) bool {
 	return d.Visibility == "private" && d.OwnerID == ActorID(ctx) || d.Visibility == "global" && ActorAdmin(ctx)
@@ -109,6 +102,12 @@ func insertDefinition(ctx context.Context, tx pgx.Tx, d *SourceDefinition, previ
 	}
 	d.OwnerID = ActorID(ctx)
 	d.Revision = 1
+	if d.AccessMode == "" {
+		d.AccessMode = "global"
+	}
+	if d.AccessMode != "global" && d.AccessMode != "restricted" {
+		return fmt.Errorf("%w: 发布范围无效", ErrSourceInput)
+	}
 	if previous > 0 {
 		old, e := scanDefinition(tx.QueryRow(ctx, `SELECT to_jsonb(d) FROM sys_source_definitions d WHERE id=$1`, previous))
 		if e != nil {
@@ -126,6 +125,13 @@ func insertDefinition(ctx context.Context, tx pgx.Tx, d *SourceDefinition, previ
 		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('source-definition:'||$1,0))`, d.FamilyID); e != nil {
 			return e
 		}
+		var published bool
+		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_source_definitions WHERE family_id=$1::uuid AND visibility='global')`, d.FamilyID).Scan(&published); e != nil {
+			return e
+		}
+		if published && !ActorAdmin(ctx) {
+			return ErrNotFound
+		}
 		latest, e := scanDefinition(tx.QueryRow(ctx, `SELECT to_jsonb(d) FROM sys_source_definitions d WHERE family_id=$1::uuid ORDER BY revision DESC LIMIT 1`, d.FamilyID))
 		if e != nil {
 			return e
@@ -135,6 +141,11 @@ func insertDefinition(ctx context.Context, tx pgx.Tx, d *SourceDefinition, previ
 			return nil
 		}
 		if e = tx.QueryRow(ctx, `SELECT max(revision)+1 FROM sys_source_definitions WHERE family_id=$1::uuid`, d.FamilyID).Scan(&d.Revision); e != nil {
+			return e
+		}
+	}
+	if previous == 0 {
+		if e := tx.QueryRow(ctx, `INSERT INTO sys_source_families(family_id,access_mode) VALUES(gen_random_uuid(),$1) RETURNING family_id::text,access_version,profile_version`, d.AccessMode).Scan(&d.FamilyID, &d.AccessVersion, &d.ProfileVersion); e != nil {
 			return e
 		}
 	}
@@ -154,7 +165,14 @@ func (r *ConnectionRepository) SaveDefinition(ctx context.Context, d *SourceDefi
 	if e = insertDefinition(ctx, tx, d, previous); e != nil {
 		return e
 	}
-	return tx.Commit(ctx)
+	if e = tx.Commit(ctx); e != nil {
+		return e
+	}
+	saved, e := r.Definition(ctx, d.ID)
+	if e == nil {
+		*d = *saved
+	}
+	return e
 }
 func (r *ConnectionRepository) SetDefinitionEnabled(ctx context.Context, id int64, enabled bool, expectedBindings *int64) error {
 	tx, e := r.pool.Begin(ctx)
@@ -196,7 +214,7 @@ func (r *ConnectionRepository) ResolvePersonal(ctx context.Context, sourceID int
 	e := r.pool.QueryRow(ctx, `SELECT mine.id FROM sys_connections source
  JOIN sys_source_definitions d ON d.id=source.definition_revision_id
  JOIN sys_connections mine ON mine.definition_revision_id=d.id AND mine.user_id=$2
- WHERE source.id=$1 AND d.visibility='global' AND d.enabled`, sourceID, ActorID(ctx)).Scan(&id)
+ WHERE source.id=$1 AND d.visibility='global' AND d.enabled AND dbhub_source_visible(d.id,$2)`, sourceID, ActorID(ctx)).Scan(&id)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return 0, ErrNotFound
 	}
@@ -235,6 +253,23 @@ func (r *ConnectionRepository) prepareDefinition(ctx context.Context, tx pgx.Tx,
 	d, e := scanDefinition(tx.QueryRow(ctx, `SELECT to_jsonb(d) FROM sys_source_definitions d WHERE d.id=$1 AND `+visibleDefinition+` FOR SHARE`, *c.DefinitionRevisionID, ActorID(ctx)))
 	if e != nil {
 		return e
+	}
+	// Private target edits may append a revision. Take the append lock before
+	// the family read lock to match management's lock order.
+	if d.Visibility == "private" && !sameSourceConfig(ConfigOf(c), d.Config) {
+		if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('source-definition:'||$1,0))`, d.FamilyID); e != nil {
+			return e
+		}
+	}
+	if _, e = tx.Exec(ctx, `SELECT 1 FROM sys_source_families WHERE family_id=$1::uuid FOR SHARE`, d.FamilyID); e != nil {
+		return e
+	}
+	var allowed bool
+	if e = tx.QueryRow(ctx, `SELECT dbhub_source_visible($1,$2)`, d.ID, ActorID(ctx)).Scan(&allowed); e != nil {
+		return e
+	}
+	if !allowed {
+		return ErrSourceAccessDenied
 	}
 	if !d.Enabled {
 		return ErrCatalogDisabled

@@ -42,12 +42,12 @@ func (r *ConnectionRepository) DefinitionRevisions(ctx context.Context, id int64
 		offset = 0
 	}
 	var total int64
-	if err = r.pool.QueryRow(ctx, `SELECT count(*) FROM sys_source_definitions WHERE family_id=$1::uuid AND (visibility='global' OR owner_id=$2)`, d.FamilyID, ActorID(ctx)).Scan(&total); err != nil {
+	if err = r.pool.QueryRow(ctx, `SELECT count(*) FROM sys_source_definitions WHERE family_id=$1::uuid AND dbhub_source_visible(id,$2)`, d.FamilyID, ActorID(ctx)).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := r.pool.Query(ctx, `WITH history AS (
  SELECT d.*, lag(to_jsonb(d)) OVER(ORDER BY revision) AS previous
- FROM sys_source_definitions d WHERE family_id=$1::uuid AND (visibility='global' OR owner_id=$2))
+ FROM sys_source_definitions d WHERE family_id=$1::uuid AND dbhub_source_visible(id,$2))
  SELECT to_jsonb(h)-'previous',h.previous,
  CASE WHEN (h.visibility='private' AND h.owner_id=$2) OR (h.visibility='global' AND $3)
  THEN (SELECT count(*) FROM sys_connections c WHERE c.definition_revision_id=h.id) END

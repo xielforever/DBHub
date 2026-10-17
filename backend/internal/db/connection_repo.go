@@ -80,7 +80,7 @@ const connSelectCols = `
 	COALESCE((SELECT p.name FROM sys_proxies p WHERE p.id=c.proxy_id),''),
 	(SELECT cc.result FROM sys_connection_checks cc WHERE cc.connection_id=c.id AND cc.config_updated_at=c.updated_at),c.template_revision_id,c.parameters,
  (SELECT to_jsonb(dt)||jsonb_build_object('driver',to_jsonb(jd)) FROM sys_datasource_templates dt JOIN sys_jdbc_drivers jd ON jd.id=dt.driver_id WHERE dt.id=c.template_revision_id),c.definition_revision_id,COALESCE(c.definition_family_id::text,''),
- (SELECT to_jsonb(sd) FROM sys_source_definitions sd WHERE sd.id=c.definition_revision_id)`
+ (SELECT to_jsonb(sd)||jsonb_build_object('access_denied',NOT dbhub_source_visible(sd.id,c.user_id)) FROM sys_source_definitions sd WHERE sd.id=c.definition_revision_id)`
 
 func scanConnection(row pgx.Row, extra ...any) (*Connection, error) {
 	c := &Connection{}
@@ -162,6 +162,9 @@ func (r *ConnectionRepository) GetSecrets(ctx context.Context, id int64) (*Conne
 		LEFT JOIN sys_ssh_tunnels t ON t.id=c.ssh_tunnel_id WHERE c.id=$1 AND c.user_id=$2 AND EXISTS(SELECT 1 FROM sys_users u WHERE u.id=$2 AND u.is_active)`, id, ActorID(ctx)), &enc)
 	if err != nil {
 		return nil, "", err
+	}
+	if c.Definition != nil && c.Definition.AccessDenied {
+		return nil, "", ErrSourceAccessDenied
 	}
 	if c.Definition != nil && (!c.Definition.Enabled || c.Definition.Visibility == "private" && c.Definition.OwnerID != ActorID(ctx)) {
 		return nil, "", ErrCatalogDisabled
@@ -298,6 +301,9 @@ func (c *Connection) SQLDialect() string {
 	return ""
 }
 func (c *Connection) SupportedCapabilities() connector.Capabilities {
+	if c.Definition != nil && c.Definition.AccessDenied {
+		return connector.Capabilities{Reason: ErrSourceAccessDenied.Error()}
+	}
 	if c.Definition != nil && !c.Definition.Enabled {
 		return connector.Capabilities{Reason: "数据源定义已停用"}
 	}
@@ -316,7 +322,7 @@ func (c *Connection) SupportedCapabilities() connector.Capabilities {
 		if !sql {
 			reason = "此模板仅启用结构浏览，SQL 方言尚未适配"
 		}
-		return connector.Capabilities{SQL: sql, Format: sql, Metadata: true, Collect: c.Template.Driver.ClassName == "org.postgresql.Driver" || c.Template.Driver.ClassName == "com.mysql.cj.jdbc.Driver" || c.Template.Driver.ClassName == "org.h2.Driver", Transactions: sql, EnforcedReadOnly: sql, Reason: reason}
+		return connector.Capabilities{SQL: sql, Format: sql, Metadata: true, Collect: c.Template.Driver.ClassName == "org.postgresql.Driver" || c.Template.Driver.ClassName == "org.opengauss.Driver" || c.Template.Driver.ClassName == "com.mysql.cj.jdbc.Driver" || c.Template.Driver.ClassName == "org.h2.Driver", Transactions: sql, EnforcedReadOnly: sql, Reason: reason}
 	}
 	return connector.Capabilities{Reason: "未注册的数据源类型"}
 }

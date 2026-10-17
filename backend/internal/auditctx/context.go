@@ -1,0 +1,40 @@
+// Package auditctx carries a closed, credential-free audit snapshot per request.
+package auditctx
+
+import (
+	"context"
+	"sync"
+)
+
+type Data struct {
+	ActorID            int64  `json:"actor_id,omitempty"`
+	ActorUsername      string `json:"actor_username,omitempty"`
+	ActorRole          string `json:"actor_role,omitempty"`
+	ConnectionID       int64  `json:"connection_id,omitempty"`
+	SourceFamilyID     string `json:"source_family_id,omitempty"`
+	DefinitionID       int64  `json:"definition_revision_id,omitempty"`
+	Revision           int    `json:"revision,omitempty"`
+	DatabaseAccount    string `json:"database_account,omitempty"`
+	Driver             string `json:"driver,omitempty"`
+	TargetOpened       bool   `json:"target_opened,omitempty"`
+	ExecutionRequestID string `json:"execution_request_id,omitempty"`
+	Outcome            string `json:"outcome,omitempty"`
+}
+type key struct{}
+type Snapshot struct {
+	mu   sync.Mutex
+	data Data
+}
+
+func Begin(ctx context.Context) (context.Context, *Snapshot) {
+	s := &Snapshot{}
+	return context.WithValue(ctx, key{}, s), s
+}
+func Update(ctx context.Context, fn func(*Data)) {
+	if s, ok := ctx.Value(key{}).(*Snapshot); ok {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		fn(&s.data)
+	}
+}
+func (s *Snapshot) Read() Data { s.mu.Lock(); defer s.mu.Unlock(); return s.data }

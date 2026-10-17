@@ -128,12 +128,12 @@ public final class DBHubJdbc {
         if(!a.sha256.equals(str(q,"sha256")))throw new Problem(409,"artifact_changed","驱动制品与实例绑定版本不符");
         String url=str(q,"url");if(url.length()>4096||!a.driver.acceptsURL(url))throw new Problem(400,"invalid_config","URL 与驱动不匹配");
         if(str(q,"owner").isEmpty())throw new Problem(400,"invalid_config","缺少会话归属");
-        String dialect=str(q,"dialect");if(!dialect.isEmpty()&&!((dialect.equals("postgres")&&a.name.equals("postgresql"))||(dialect.equals("mysql")&&a.name.equals("mysql"))))throw new Problem(400,"unsupported","驱动未实现所选方言");
+        String dialect=str(q,"dialect");if(!dialect.isEmpty()&&!((dialect.equals("postgres")&&Set.of("postgresql","opengauss").contains(a.name))||(dialect.equals("mysql")&&a.name.equals("mysql"))))throw new Problem(400,"unsupported","驱动未实现所选方言");
         if(!SESSION_SLOTS.tryAcquire())throw new Problem(503,"resource_exhausted","JDBC 会话已满");
         int budget=Math.max(100,Math.min(30000,number(q,"budget_ms",10000)));Properties p=new Properties();
         p.setProperty("user",str(q,"username"));p.setProperty("password",str(q,"password"));
         int seconds=Math.max(1,(budget+999)/1000);
-        if(a.name.equals("postgresql")){p.setProperty("connectTimeout",String.valueOf(seconds));p.setProperty("socketTimeout","120");p.setProperty("stringtype","unspecified");p.setProperty("ApplicationName","DBHub JDBC");p.setProperty("sslfactory","org.postgresql.ssl.DefaultJavaSSLFactory");p.setProperty("sslmode",str(q,"ssl_mode").equals("disable")?"disable":"verify-full");}
+        if(Set.of("postgresql","opengauss").contains(a.name)){p.setProperty("connectTimeout",String.valueOf(seconds));p.setProperty("socketTimeout","120");p.setProperty("stringtype","unspecified");p.setProperty("ApplicationName","DBHub JDBC");p.setProperty("sslfactory",a.name.equals("opengauss")?"org.opengauss.ssl.DefaultJavaSSLFactory":"org.postgresql.ssl.DefaultJavaSSLFactory");p.setProperty("sslmode",str(q,"ssl_mode").equals("disable")?"disable":"verify-full");}
         if(a.name.equals("mysql")){p.setProperty("connectTimeout",String.valueOf(budget));p.setProperty("socketTimeout","120000");p.setProperty("autoReconnect","false");p.setProperty("useCursorFetch","true");p.setProperty("useServerPrepStmts","true");p.setProperty("allowPublicKeyRetrieval","true");p.setProperty("sslMode",str(q,"ssl_mode").equals("disable")?"DISABLED":"VERIFY_IDENTITY");}
         AtomicBoolean abandoned=new AtomicBoolean(false);AtomicReference<Connection> opened=new AtomicReference<>();Future<Connection> future=null;
         try {

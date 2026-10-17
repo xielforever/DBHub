@@ -198,7 +198,7 @@
           <el-form-item label="SSL 模式">
             <el-select v-model="connForm.ssl_mode" class="w-full" popper-class="glass-popper">
               <el-option label="禁用（内网明文）" value="disable" />
-              <el-option label="加密并验证证书" value="verify-full" :disabled="selectedTemplate && !['org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.driver.class_name)" />
+              <el-option label="加密并验证证书" value="verify-full" :disabled="selectedTemplate && !['org.opengauss.Driver', 'org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.driver.class_name)" />
             </el-select>
           </el-form-item>
           <el-form-item label="连接超时（秒）">
@@ -420,7 +420,7 @@ function onTypeChange(type: DbType) {
 function onTemplateChange() {
   for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
   for (const field of selectedTemplate.value?.fields || []) jdbcParameters[field.name] = field.default || ''
-  if (selectedTemplate.value && !['org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.value.driver.class_name)) connForm.ssl_mode = 'disable'
+  if (selectedTemplate.value && !['org.opengauss.Driver', 'org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.value.driver.class_name)) connForm.ssl_mode = 'disable'
 }
 function openCreate() {
   focusPasswordOnOpen.value = false

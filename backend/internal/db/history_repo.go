@@ -64,7 +64,7 @@ func (r *HistoryRepository) List(ctx context.Context, userID int64, isAdmin bool
 
 	where := `WHERE ($2 OR h.user_id = $1)
 		AND ($3 = 0 OR h.connection_id = $3)
-		AND ($4 = '' OR h.status::text = $4)`
+		AND ($4 = '' OR h.status::text = $4) AND ` + connectionScope(ctx, "h.connection_id")
 
 	var total int64
 	if err := r.pool.QueryRow(ctx, `
@@ -211,7 +211,7 @@ func (r *HistoryRepository) RecentQueries(ctx context.Context, userID int64, isA
 		       COALESCE(h.error_message, ''), h.created_at, COALESCE(c.name, '')
 		FROM sys_query_history h
 		LEFT JOIN sys_connections c ON c.id = h.connection_id
-		WHERE $2 OR h.user_id = $1
+		WHERE ($2 OR h.user_id = $1) AND `+connectionScope(ctx, "h.connection_id")+`
 		ORDER BY h.id DESC
 		LIMIT $3`, ActorID(ctx), false, limit)
 	if err != nil {
@@ -253,7 +253,7 @@ func (r *HistoryRepository) SearchBySQL(ctx context.Context, userID int64, isAdm
 		LEFT JOIN sys_connections c ON c.id = h.connection_id
 		WHERE h.status = 1
 		  AND ($2 OR h.user_id = $1)
-		  AND h.sql_text ILIKE $3
+		  AND h.sql_text ILIKE $3 AND `+connectionScope(ctx, "h.connection_id")+`
 		ORDER BY h.id DESC
 		LIMIT $4`, ActorID(ctx), false, "%"+keyword+"%", limit)
 	if err != nil {

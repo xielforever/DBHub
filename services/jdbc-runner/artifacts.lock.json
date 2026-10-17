@@ -38,5 +38,15 @@
     "sha256": "29b70e427cc1c40cdc376283adbb0cc62853073797bb5fe5761f81fe73d57ce0",
     "url": "https://repo.maven.apache.org/maven2/com/h2database/h2/2.4.240/h2-2.4.240.jar",
     "upstream_sha1": "686180ad33981ad943fdc0ab381e619b2c2fdfe5"
+  },
+  {
+    "id": "opengauss-6.0.0-og",
+    "name": "opengauss",
+    "version": "6.0.0-og",
+    "class_name": "org.opengauss.Driver",
+    "file": "opengauss-jdbc-6.0.0-og.jar",
+    "sha256": "b70742a49dec51af3d6fd21a1bad884a2ea86422c29515e7e8b4c3050c7b6ca5",
+    "url": "https://repo.maven.apache.org/maven2/org/opengauss/opengauss-jdbc/6.0.0-og/opengauss-jdbc-6.0.0-og.jar",
+    "upstream_sha1": "2447cd9de2ff2e7ae284c1407ac59a6ae121b827"
   }
 ]

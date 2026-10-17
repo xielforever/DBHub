@@ -6,6 +6,7 @@
     </header>
 
     <ConnectorSettings />
+<GroupSettings v-if="userStore.role === 'admin'" />
 
     <section class="glass-card p-6">
       <h2 class="font-medium mb-4">个人资料</h2>
@@ -83,6 +84,7 @@ import { KeyRound } from 'lucide-vue-next'
 import { useUserStore } from '../../stores/user'
 import { adminApi } from '../../api/admin'
 import ConnectorSettings from './ConnectorSettings.vue'
+import GroupSettings from './GroupSettings.vue'
 
 const userStore = useUserStore()
 const darkMode = ref(true)

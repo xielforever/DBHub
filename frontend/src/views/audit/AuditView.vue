@@ -2,7 +2,7 @@
   <div class="space-y-5">
     <header>
       <h1 class="text-xl font-semibold">操作审计</h1>
-      <p class="text-sm text-white/45 mt-1">所有登录、连接管理与 SQL 执行均自动留痕，不可篡改</p>
+      <p class="text-sm text-white/45 mt-1">关联平台用户、配置的数据库账号与数据源修订；查看执行回执区分失败和结果待确认。</p>
     </header>
 
     <!-- 筛选栏 -->
@@ -44,6 +44,8 @@
           @keyup.enter="reload"
         />
       </div>
+      <input v-model.trim="filters.database_account" class="glass-input !w-full sm:!w-48" aria-label="按数据库账号搜索" placeholder="配置的数据库账号" @keyup.enter="page = 1; reload()" />
+      <el-select v-model="filters.outcome" class="!w-full sm:!w-44" aria-label="按执行状态筛选" @change="page = 1; reload()"><el-option label="全部执行状态" value="" /><el-option v-for="(label, value) in outcomes" :key="value" :label="label" :value="value" /></el-select>
       <button class="ghost-button flex items-center gap-2 text-sm w-full sm:w-auto sm:ml-auto shrink-0" @click="reload">
         <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': loading }" /> 刷新
       </button>
@@ -57,7 +59,8 @@
             <tr class="text-left text-white/40 text-xs border-b border-white/10">
               <th class="font-medium px-5 py-3 whitespace-nowrap">时间</th>
               <th class="font-medium px-5 py-3">用户</th>
-              <th class="font-medium px-5 py-3">操作</th>
+              <th class="font-medium px-5 py-3">数据库身份与修订</th>
+<th class="font-medium px-5 py-3">操作</th>
               <th class="font-medium px-5 py-3">资源</th>
               <th class="font-medium px-5 py-3 hidden md:table-cell">来源 IP</th>
               <th class="font-medium px-5 py-3">结果</th>
@@ -75,6 +78,7 @@
                   {{ a.username || '匿名' }}
                 </span>
               </td>
+              <td class="px-5 py-3 text-xs text-white/65 max-w-64 break-all"><p>{{ a.context?.database_account || '—' }}</p><p v-if="a.context?.definition_revision_id" class="text-white/45">定义 #{{ a.context.definition_revision_id }} · 修订 {{ a.context.revision || '—' }}</p><p v-if="a.context?.driver" class="text-white/45">{{ a.context.driver }}</p><details v-if="a.context?.source_family_id || a.context?.execution_request_id" class="mt-1"><summary class="cursor-pointer">关联编号</summary><p>{{ a.context.source_family_id }}</p><p>{{ a.context.execution_request_id }}</p></details></td>
               <td class="px-5 py-3">
                 <span class="px-2 py-0.5 rounded-full text-xs bg-white/8 text-white/75 whitespace-nowrap">
                   {{ actionLabels[a.action] || a.action }}
@@ -90,7 +94,7 @@
                   class="px-2 py-0.5 rounded-full text-xs whitespace-nowrap"
                   :class="a.status === 1 ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'"
                 >
-                  {{ a.status === 1 ? '成功' : '失败' }}
+                  {{ outcomes[a.context?.outcome || ''] || (a.status === 1 ? '成功' : '失败') }}
                 </span>
                 <p v-if="a.error_message" class="text-[11px] text-rose-300/70 mt-1 max-w-[200px] truncate" :title="a.error_message">
                   {{ a.error_message }}
@@ -99,7 +103,7 @@
               <td class="px-5 py-3.5 text-right text-white/45 text-xs whitespace-nowrap">{{ a.duration_ms ?? '—' }} ms</td>
             </tr>
             <tr v-if="!logs.length && !loading">
-              <td colspan="7" class="px-5 py-12 text-center text-white/40 text-sm">所选条件下暂无审计记录</td>
+              <td colspan="8" class="px-5 py-12 text-center text-white/40 text-sm">所选条件下暂无审计记录</td>
             </tr>
           </tbody>
         </table>
@@ -133,9 +137,10 @@ const filters = reactive({
   resource_type: '',
   action: '',
   status: '',
-  username: '',
+  username: '', database_account: '', outcome: '',
 })
 
+const outcomes: Record<string, string> = {succeeded: '执行成功', failed: '执行失败', unknown: '结果待确认', rejected: '请求拒绝', duplicate: '重复请求', conflict: '请求冲突', completed: '操作完成', access_updated: '范围已更新', profile_updated: '资料已更新', revision_published: '修订已发布', revision_status_updated: '修订状态已更新'}
 const actionLabels: Record<string, string> = {
   LOGIN: '登录',
   CHANGE_PASSWORD: '修改密码',
@@ -150,7 +155,7 @@ const resourceLabels: Record<string, string> = {
   CONNECTION: '数据源',
   SSH_TUNNEL: 'SSH 隧道',
   USER: '用户',
-  SQL: 'SQL',
+  SQL: 'SQL', 'DATASOURCE-DEFINITIONS': '数据源定义', 'USER-GROUPS': '用户组',
   QUERY_HISTORY: '查询历史',
 }
 
@@ -162,7 +167,7 @@ async function reload() {
       resource_type: filters.resource_type,
       action: filters.action,
       status: filters.status,
-      username: filters.username,
+      username: filters.username, database_account: filters.database_account, outcome: filters.outcome,
       page: page.value,
       page_size: pageSize,
     })

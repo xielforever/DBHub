@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
@@ -60,6 +61,21 @@ func (h *Handler) loadOwnedConnection(r *http.Request, connID int64) (*db.Connec
 	if err != nil {
 		return nil, "", nil, mapNotFound(err)
 	}
+	auditctx.Update(r.Context(), func(d *auditctx.Data) {
+		d.ConnectionID = conn.ID
+		d.SourceFamilyID = conn.DefinitionFamilyID
+		d.DatabaseAccount = conn.Username
+		d.Driver = conn.Type
+		if conn.DefinitionRevisionID != nil {
+			d.DefinitionID = *conn.DefinitionRevisionID
+		}
+		if conn.Definition != nil {
+			d.Revision = conn.Definition.Revision
+		}
+		if conn.Template != nil {
+			d.Driver = conn.Template.Driver.ArtifactID
+		}
+	})
 	// 仓储严格校验当前用户的个人连接，绝不回退到发布者凭据。
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
@@ -394,8 +410,15 @@ func atoiDefault(s string, fallback int) int {
 func intPtr(n int) *int { return &n }
 
 func mapNotFound(err error) error {
- if errors.Is(err,db.ErrCatalogDisabled){return httpx.BadRequest("数据源定义、驱动或连接规则已停用")}
- if errors.Is(err,db.ErrConnectionChanged){return httpx.Conflict(err.Error())}
+	if errors.Is(err, db.ErrCatalogDisabled) {
+		return httpx.BadRequest("数据源定义、驱动或连接规则已停用")
+	}
+	if errors.Is(err, db.ErrConnectionChanged) {
+		return httpx.Conflict(err.Error())
+	}
+	if errors.Is(err, db.ErrSourceAccessDenied) {
+		return httpx.Forbidden(err.Error())
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return &httpx.AppError{Code: httpx.CodeNotFound, Message: "记录不存在"}
 	}

@@ -642,6 +642,9 @@ func mapNotFound(err error) error {
 	if errors.Is(err, db.ErrConnectionChanged) {
 		return httpx.Conflict(err.Error())
 	}
+	if errors.Is(err, db.ErrSourceAccessDenied) {
+		return httpx.Forbidden(err.Error())
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return &httpx.AppError{Code: httpx.CodeNotFound, Message: "记录不存在"}
 	}

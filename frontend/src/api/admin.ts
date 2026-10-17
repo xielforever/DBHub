@@ -22,7 +22,9 @@ export interface UserItem {
   created_at: string
 }
 
+export interface UserGroup {id: number; name: string; description: string; version: number; member_ids: number[]; updated_at: string}
 export interface AuditLog {
+ context: {actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; outcome?: string}
   id: number
   user_id: number | null
   connection_id: number | null
@@ -48,6 +50,12 @@ interface Paged<T> {
 }
 
 export const adminApi = {
+ groups: (params: {keyword?: string; page: number; page_size: number}) => request.get<unknown, Paged<UserGroup>>('/user-groups', {params}),
+ saveGroup: (id: number, payload: {name: string; description: string; member_ids: number[]; expected_version: number}) => {
+  const body = {name: payload.name, description: payload.description, member_ids: payload.member_ids, expected_version: payload.expected_version}
+  return id ? request.put<unknown, UserGroup>(`/user-groups/${id}`, body) : request.post<unknown, UserGroup>('/user-groups', body)
+ },
+ deleteGroup: (id: number, expectedVersion: number) => request.delete(`/user-groups/${id}`, {data: {expected_version: expectedVersion}}),
   roles() {
     return request.get<unknown, { items: Role[] }>('/roles')
   },
@@ -80,6 +88,8 @@ export const adminApi = {
     })
   },
   auditLogs(params: {
+    database_account?: string
+    outcome?: string
     username?: string
     action?: string
     resource_type?: string

@@ -41,11 +41,11 @@ func requireCurrentActor(ctx context.Context, pool *pgxpool.Pool) error {
 // connectionScope only interpolates a server-owned column and an integer actor.
 func connectionScope(ctx context.Context, column string) string {
 	return "EXISTS (SELECT 1 FROM sys_connections access_conn WHERE access_conn.id=" + column +
-		" AND access_conn.user_id=" + strconv.FormatInt(ActorID(ctx), 10) + ")"
+		" AND access_conn.user_id=" + strconv.FormatInt(ActorID(ctx), 10) + " AND dbhub_source_visible(access_conn.definition_revision_id,access_conn.user_id))"
 }
 func requireConnection(ctx context.Context, pool *pgxpool.Pool, id int64) error {
 	var found bool
-	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_connections WHERE id=$1 AND user_id=$2)`, id, ActorID(ctx)).Scan(&found); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_connections WHERE id=$1 AND user_id=$2 AND dbhub_source_visible(definition_revision_id,$2))`, id, ActorID(ctx)).Scan(&found); err != nil {
 		return err
 	}
 	if !found {

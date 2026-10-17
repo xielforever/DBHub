@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/connector"
 	"github.com/user/dbhub/internal/connector/jdbc"
 	"github.com/user/dbhub/internal/connector/native"
@@ -18,8 +19,9 @@ import (
 )
 
 type Runtime struct {
-	registry *connector.Registry
-	jdbc     *jdbc.Client
+	RecordUsage func(context.Context, *db.Connection)
+	registry    *connector.Registry
+	jdbc        *jdbc.Client
 }
 
 func New() *Runtime {
@@ -123,9 +125,14 @@ func (r *Runtime) OpenRelational(ctx context.Context, c *db.Connection, password
 	if err != nil {
 		return nil, err
 	}
+	r.auditTarget(ctx, c, false)
 	session, err := driver.Open(ctx, spec)
 	if err != nil {
 		return nil, err
+	}
+	r.auditTarget(ctx, c, true)
+	if r.RecordUsage != nil {
+		r.RecordUsage(ctx, c)
 	}
 	return &RelDB{Conn: c, session: session, Capabilities: r.Capabilities(c)}, nil
 }
@@ -142,9 +149,14 @@ func (r *Runtime) OpenRedis(ctx context.Context, c *db.Connection, password stri
 		}
 	}
 	d, _ := r.registry.Resolve("redis.native")
+	r.auditTarget(ctx, c, false)
 	s, e := d.Open(ctx, r.spec(c, password, t))
 	if e != nil {
 		return nil, e
+	}
+	r.auditTarget(ctx, c, true)
+	if r.RecordUsage != nil {
+		r.RecordUsage(ctx, c)
 	}
 	return &RedisClient{session: s}, nil
 }
@@ -369,3 +381,22 @@ type RedisKeyItem = connector.RedisKeyItem
 type RedisValue = connector.RedisValue
 
 func TestedVersions() []legacy.TestedVersion { return legacy.TestedVersions() }
+
+func (r *Runtime) auditTarget(ctx context.Context, c *db.Connection, opened bool) {
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.ConnectionID = c.ID
+		d.SourceFamilyID = c.DefinitionFamilyID
+		d.DatabaseAccount = c.Username
+		d.Driver = c.Type
+		d.TargetOpened = opened
+		if c.DefinitionRevisionID != nil {
+			d.DefinitionID = *c.DefinitionRevisionID
+		}
+		if c.Definition != nil {
+			d.Revision = c.Definition.Revision
+		}
+		if c.Template != nil {
+			d.Driver = c.Template.Driver.ArtifactID
+		}
+	})
+}

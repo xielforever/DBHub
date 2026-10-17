@@ -32,6 +32,10 @@ func ValidateTemplate(t *db.DatasourceTemplate) error {
 		expected = "jdbc:postgresql://{host}:{port}/{database}"
 		dialect = "postgres"
 		needed = map[string]string{"host": "string", "port": "integer", "database": "string"}
+	case "org.opengauss.Driver":
+		expected = "jdbc:opengauss://{host}:{port}/{database}"
+		dialect = "postgres"
+		needed = map[string]string{"host": "string", "port": "integer", "database": "string"}
 	case "com.mysql.cj.jdbc.Driver":
 		expected = "jdbc:mysql://{host}:{port}/{database}"
 		dialect = "mysql"
@@ -183,5 +187,5 @@ func ProfileDatabase(params map[string]string) string {
 	return "current"
 }
 func KnownJDBCClass(class string) bool {
-	return class == "org.postgresql.Driver" || class == "com.mysql.cj.jdbc.Driver" || class == "org.h2.Driver"
+	return class == "org.postgresql.Driver" || class == "org.opengauss.Driver" || class == "com.mysql.cj.jdbc.Driver" || class == "org.h2.Driver"
 }

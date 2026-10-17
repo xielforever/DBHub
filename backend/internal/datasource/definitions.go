@@ -22,12 +22,17 @@ func scopeFor(r *http.Request, value string) (string, error) {
 	return value, nil
 }
 func (h *Handler) Definitions(w http.ResponseWriter, r *http.Request) {
-	items, e := h.conns.Definitions(r.Context())
+	filter, e := directoryPage(r)
+	if e != nil {
+		httpx.Fail(w, e)
+		return
+	}
+	items, total, e := h.conns.SearchDefinitions(r.Context(), filter)
 	if e != nil {
 		httpx.Fail(w, httpx.Internal("加载数据源目录失败", e))
 		return
 	}
-	httpx.OK(w, map[string]any{"items": items, "total": len(items)})
+	httpx.OK(w, map[string]any{"items": items, "total": total})
 }
 
 func (h *Handler) DefinitionRevisions(w http.ResponseWriter, r *http.Request) {
@@ -79,6 +84,7 @@ func (h *Handler) SaveDefinition(w http.ResponseWriter, r *http.Request) {
 		Name        string          `json:"name"`
 		Description string          `json:"description"`
 		Visibility  string          `json:"visibility"`
+		AccessMode  string          `json:"access_mode"`
 		Config      db.SourceConfig `json:"config"`
 	}
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
@@ -98,7 +104,7 @@ func (h *Handler) SaveDefinition(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	d := &db.SourceDefinition{Name: in.Name, Description: in.Description, Visibility: scope, Config: in.Config}
+	d := &db.SourceDefinition{Name: in.Name, Description: in.Description, Visibility: scope, AccessMode: in.AccessMode, Config: in.Config}
 	if e = h.validateDefinition(r, d); e != nil {
 		httpx.Fail(w, e)
 		return
@@ -107,6 +113,7 @@ func (h *Handler) SaveDefinition(w http.ResponseWriter, r *http.Request) {
 		catalogFailure(w, e)
 		return
 	}
+	h.definitionAudit(r, d.ID, "revision_published")
 	httpx.JSON(w, 201, httpx.Envelope{Code: 0, Message: "ok", Data: d})
 }
 
@@ -153,6 +160,7 @@ func (h *Handler) PublishConnection(w http.ResponseWriter, r *http.Request) {
 		catalogFailure(w, e)
 		return
 	}
+	h.definitionAudit(r, d.ID, "revision_published")
 	httpx.JSON(w, 201, httpx.Envelope{Code: 0, Message: "ok", Data: d})
 }
 func (h *Handler) DefinitionStatus(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +190,7 @@ func (h *Handler) DefinitionStatus(w http.ResponseWriter, r *http.Request) {
 		catalogFailure(w, e)
 		return
 	}
+	h.definitionAudit(r, id, "revision_status_updated")
 	httpx.OK(w, map[string]any{"id": id, "enabled": *in.Enabled})
 }
 
@@ -221,6 +230,7 @@ func (h *Handler) personalCandidate(r *http.Request, id int64, in personalIdenti
 	}
 	c.Username = strings.TrimSpace(in.Username)
 	c.Password = in.Password
+	c.Definition = d
 	c.DefinitionRevisionID = &d.ID
 	c.DefinitionFamilyID = d.FamilyID
 	draft := requestOf(c)

@@ -68,6 +68,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 
 	if deps != nil && deps.Conns != nil {
 		drivers := connectorruntime.NewConfigured(cfg.JDBCURL, cfg.JDBCToken)
+		drivers.RecordUsage = deps.Conns.MarkUsed
 		auditMW := middleware.Audit(deps.Audit, log)
 		canWrite := middleware.RequireRoles("admin", "developer")
 		requireAdmin := middleware.RequireRoles("admin")
@@ -99,6 +100,11 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			middleware.Chain(http.HandlerFunc(adminH.ResetPassword), requireAuth, requireAdmin, auditMW))
 		mux.Handle("DELETE /api/v1/users/{id}",
 			middleware.Chain(http.HandlerFunc(adminH.DeleteUser), requireAuth, requireAdmin, auditMW))
+
+		mux.Handle("GET /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.Groups), requireAuth, requireAdmin))
+		mux.Handle("POST /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.SaveGroup), requireAuth, requireAdmin, auditMW))
+		mux.Handle("PUT /api/v1/user-groups/{id}", middleware.Chain(http.HandlerFunc(adminH.SaveGroup), requireAuth, requireAdmin, auditMW))
+		mux.Handle("DELETE /api/v1/user-groups/{id}", middleware.Chain(http.HandlerFunc(adminH.DeleteGroup), requireAuth, requireAdmin, auditMW))
 
 		// 审计日志（仅 admin）
 		auditH := adminapi.NewAuditHandler(deps.Audit)
@@ -137,6 +143,12 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("GET /api/v1/connections/{id}/capabilities", middleware.Chain(http.HandlerFunc(dsH.Capabilities), requireAuth))
 
 		mux.Handle("GET /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.Definitions), requireAuth))
+		mux.Handle("GET /api/v1/datasource-definitions/categories", middleware.Chain(http.HandlerFunc(dsH.DefinitionCategories), requireAuth))
+		mux.Handle("GET /api/v1/datasource-definitions/{id}/access", middleware.Chain(http.HandlerFunc(dsH.DefinitionAccess), requireAuth))
+		mux.Handle("PUT /api/v1/datasource-definitions/{id}/access", middleware.Chain(http.HandlerFunc(dsH.DefinitionAccess), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/datasource-definitions/{id}/profile", middleware.Chain(http.HandlerFunc(dsH.DefinitionProfile), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/datasource-definitions/{id}/favorite", middleware.Chain(http.HandlerFunc(dsH.DefinitionFavorite), requireAuth))
+
 		mux.Handle("GET /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.DefinitionRevisions), requireAuth))
 		mux.Handle("POST /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
 		mux.Handle("POST /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
