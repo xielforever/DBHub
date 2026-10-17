@@ -26,6 +26,7 @@ export interface ConnectionItem {
   proxy_name?: string
   created_at: string
   updated_at: string
+  last_check?: TestResult
 }
 
 export interface ConnectionPayload {
@@ -77,6 +78,10 @@ export interface TestResult {
   version: string
   elapsed_ms: number
   compatibility?: VersionCompatibility
+  error?: string
+  started_at?: string
+  checked_at?: string
+  recorded?: boolean
 }
 
 export interface VersionCompatibility {
@@ -111,17 +116,20 @@ export const connectionApi = {
   create(payload: ConnectionPayload) {
     return request.post<unknown, ConnectionItem>('/connections', payload)
   },
+  get(id: number) {
+    return request.get<unknown, ConnectionItem>(`/connections/${id}`)
+  },
   update(id: number, payload: ConnectionPayload) {
     return request.put<unknown, ConnectionItem>(`/connections/${id}`, payload)
   },
   remove(id: number) {
     return request.delete<unknown, { id: number }>(`/connections/${id}`)
   },
-  testSaved(id: number) {
-    return request.post<unknown, TestResult>(`/connections/${id}/test`)
+  testSaved(id: number, draft?: ConnectionPayload) {
+    return request.post<unknown, TestResult>(`/connections/${id}/test`, draft, { timeout: 25_000 })
   },
   test(payload: ConnectionPayload) {
-    return request.post<unknown, TestResult>('/connections/test', payload)
+    return request.post<unknown, TestResult>('/connections/test', payload, { timeout: 25_000 })
   },
 }
 

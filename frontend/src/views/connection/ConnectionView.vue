@@ -72,6 +72,7 @@
 
           <p v-if="connectionChecks[conn.id]" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(connectionChecks[conn.id]!)">
             最近测试：{{ compatibilityText(connectionChecks[conn.id]!) }}
+            <span v-if="connectionChecks[conn.id]!.checked_at" class="block text-white/40">{{ checkTime(connectionChecks[conn.id]!.checked_at) }} · {{ connectionChecks[conn.id]!.elapsed_ms }} ms</span>
           </p>
 
           <div class="flex items-center gap-2 pt-2 border-t border-white/10">
@@ -159,6 +160,7 @@
               show-password
               :placeholder="connForm.id && !connForm.password ? '已保存，留空表示不修改' : 'AES-256-GCM 加密存储'"
             />
+            <p v-if="connForm.id" class="text-[11px] text-white/40 mt-1">留空使用已保存口令；修改连接地址、账号、TLS 或代理后，测试需重新输入口令。</p>
           </el-form-item>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -187,8 +189,10 @@
           <p class="text-[11px] text-white/30 mt-1">在代理管理创建代理后在此选用，连接测试和查询均使用该代理。</p>
         </el-form-item>
         <p v-if="formTest" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(formTest)" data-testid="connection-version-result">
-          {{ compatibilityText(formTest) }}。{{ versionInfo(formTest).message }}
-          <span v-if="versionInfo(formTest).tested_version && versionInfo(formTest).status === 'branch_verified'">实测版本 {{ versionInfo(formTest).tested_version }}。</span>
+          {{ compatibilityText(formTest) }}
+          <template v-if="formTest.ok">。{{ versionInfo(formTest).message }}
+            <span v-if="versionInfo(formTest).tested_version && versionInfo(formTest).status === 'branch_verified'">实测版本 {{ versionInfo(formTest).tested_version }}。</span>
+          </template>
         </p>
       </el-form>
 
@@ -235,6 +239,7 @@ import {
 } from '../../api/datasource'
 import { proxyApi, type ProxyItem } from '../../api/proxy'
 import { useUserStore } from '../../stores/user'
+import { ApiRequestError } from '../../utils/request'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -254,12 +259,17 @@ function versionInfo(result: TestResult): VersionCompatibility {
   return result.compatibility ?? { engine: result.type, product: typeMeta[result.type as DbType]?.label || '数据库', version: '', branch: '', status: 'unknown', message: '当前服务未返回版本验证信息，兼容性尚未确认。' }
 }
 function compatibilityText(result: TestResult) {
+  if (!result.ok) return result.error || '连接测试失败'
   const info = versionInfo(result)
   const label = { verified: '版本已验证', branch_verified: '同分支已验证，当前补丁待验证', unverified: '兼容性未验证', unknown: '版本待确认' }[info.status]
   return `${info.product || result.type} ${info.version || '版本未知'} · ${label}`
 }
 function compatibilityClass(result: TestResult) {
+  if (!result.ok) return 'text-rose-300'
   return versionInfo(result).status === 'verified' ? 'text-emerald-300' : 'text-amber-200'
+}
+function checkTime(value?: string) {
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : ''
 }
 function showTestMessage(result: TestResult) {
   const text = `连接成功：${compatibilityText(result)}（${result.elapsed_ms} ms）`
@@ -287,7 +297,7 @@ async function fetchConnections() {
       keyword: keyword.value,
     })
     connections.value = res.items
-    connectionChecks.value = {}
+    connectionChecks.value = Object.fromEntries(res.items.filter(item => item.last_check).map(item => [item.id, item.last_check!]))
   } catch {
     /* 拦截器已统一提示 */
   } finally {
@@ -341,7 +351,7 @@ const versionHint = computed(() => {
   return branches.length ? `已验证分支：${branches.join(' / ')}。测试连接可确认当前服务端版本。` : '测试连接后显示版本识别结果；其他版本的兼容性需要单独确认。'
 })
 // 编辑目标或凭据后不保留旧结果，较早发起的响应也不能覆盖当前表单。
-watch(() => JSON.stringify(payloadOf()), () => { formTest.value = null })
+watch(() => JSON.stringify({ id: connForm.id, payload: payloadOf() }), () => { formTest.value = null })
 
 function onTypeChange(type: DbType) {
   connForm.port = { mysql: 3306, postgres: 5432, redis: 6379 }[type]
@@ -421,13 +431,17 @@ async function testUnsaved() {
   }
   testing.value = true
   formTest.value = null
-  const snapshot = JSON.stringify(payloadOf())
+  const id = connForm.id
+  const snapshot = JSON.stringify({ id, payload: payloadOf() })
   try {
-    const res = await connectionApi.test(payloadOf())
-    if (snapshot !== JSON.stringify(payloadOf())) return
+    const res = id ? await connectionApi.testSaved(id, payloadOf()) : await connectionApi.test(payloadOf())
+    if (snapshot !== JSON.stringify({ id: connForm.id, payload: payloadOf() })) return
     formTest.value = res
     showTestMessage(res)
-  } catch {
+  } catch (error) {
+    if (snapshot === JSON.stringify({ id: connForm.id, payload: payloadOf() }) && error instanceof ApiRequestError && error.data) {
+      formTest.value = error.data as TestResult
+    }
     /* 拦截器已提示 */
   } finally {
     testing.value = false
@@ -443,13 +457,28 @@ async function testSaved(c: ConnectionItem) {
     const res = await connectionApi.testSaved(c.id)
     const current = connections.value.find(item => item.id === c.id)
     if (!current || current.updated_at !== c.updated_at) return
+    if (res.recorded === false) { await refreshSavedCheck(c.id); return }
     connectionChecks.value[c.id] = res
+    current.last_check = res
     showTestMessage(res)
   } catch {
-    /* 拦截器已提示 */
+    // 失败检查也已持久化；从服务端恢复最新结果，避免显示此前的成功状态。
+    await refreshSavedCheck(c.id)
   } finally {
     delete testingSaved.value[c.id]
   }
+}
+
+async function refreshSavedCheck(id: number) {
+  try {
+    const latest = await connectionApi.get(id)
+    const index = connections.value.findIndex(item => item.id === id)
+    if (index >= 0) {
+      connections.value[index] = latest
+      if (latest.last_check) connectionChecks.value[id] = latest.last_check
+      else delete connectionChecks.value[id]
+    }
+  } catch { /* 拦截器已提示 */ }
 }
 
 async function remove(c: ConnectionItem) {

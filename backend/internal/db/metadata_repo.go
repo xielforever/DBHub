@@ -33,18 +33,18 @@ type MetaSnapshot struct {
 
 // AssetAnnotation 表级或列级人工标注。
 type AssetAnnotation struct {
-	ID           int64    `json:"id"`
-	ConnectionID int64    `json:"connection_id"`
-	DatabaseName string   `json:"database_name"`
-	SchemaName   string   `json:"schema_name"`
-	TableName    string   `json:"table_name"`
-	ColumnName   string   `json:"column_name"`
-	OwnerUserID  *int64   `json:"owner_user_id"`
-	BusinessDesc string   `json:"business_desc"`
-	Tags         []string `json:"tags"`
-	Sensitivity  string   `json:"sensitivity"`
-	StarredBy    []int64  `json:"starred_by"`
-	UpdatedBy    *int64   `json:"updated_by"`
+	ID           int64     `json:"id"`
+	ConnectionID int64     `json:"connection_id"`
+	DatabaseName string    `json:"database_name"`
+	SchemaName   string    `json:"schema_name"`
+	TableName    string    `json:"table_name"`
+	ColumnName   string    `json:"column_name"`
+	OwnerUserID  *int64    `json:"owner_user_id"`
+	BusinessDesc string    `json:"business_desc"`
+	Tags         []string  `json:"tags"`
+	Sensitivity  string    `json:"sensitivity"`
+	StarredBy    []int64   `json:"starred_by"`
+	UpdatedBy    *int64    `json:"updated_by"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
@@ -65,14 +65,14 @@ type TableListFilter struct {
 // TableListItem 列表行：快照摘要 + 表级标注 + 热度。
 type TableListItem struct {
 	MetaSnapshot
-	OwnerID            *int64   `json:"owner_user_id"`
-	OwnerName          string   `json:"owner_name"`
-	BusinessDesc       string   `json:"business_desc"`
-	Tags               []string `json:"tags"`
-	Sensitivity        string   `json:"sensitivity"`
-	Starred            bool     `json:"starred"`
-	QueryCount30d      int64    `json:"query_count_30d"`
-	SensitiveColCount  int      `json:"sensitive_columns"`
+	OwnerID           *int64   `json:"owner_user_id"`
+	OwnerName         string   `json:"owner_name"`
+	BusinessDesc      string   `json:"business_desc"`
+	Tags              []string `json:"tags"`
+	Sensitivity       string   `json:"sensitivity"`
+	Starred           bool     `json:"starred"`
+	QueryCount30d     int64    `json:"query_count_30d"`
+	SensitiveColCount int      `json:"sensitive_columns"`
 }
 
 // MetadataRepository 资产元数据仓储。
@@ -94,6 +94,12 @@ func mustJSON(v any) json.RawMessage {
 
 // UpsertSnapshot 单表快照 upsert（按对象四元组唯一）。
 func (r *MetadataRepository) UpsertSnapshot(ctx context.Context, s *MetaSnapshot) error {
+	return upsertSnapshot(ctx, r.pool, s)
+}
+
+func upsertSnapshot(ctx context.Context, writer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, s *MetaSnapshot) error {
 	if s.RawColumns == nil {
 		s.RawColumns = json.RawMessage("[]")
 	}
@@ -103,7 +109,7 @@ func (r *MetadataRepository) UpsertSnapshot(ctx context.Context, s *MetaSnapshot
 	if s.RawKeys == nil {
 		s.RawKeys = json.RawMessage("[]")
 	}
-	return r.pool.QueryRow(ctx, `
+	return writer.QueryRow(ctx, `
 		INSERT INTO sys_meta_snapshots
 			(connection_id, database_name, schema_name, table_name, table_type,
 			 table_comment, estimated_rows, data_bytes, raw_columns, raw_indexes,
@@ -124,16 +130,6 @@ func (r *MetadataRepository) UpsertSnapshot(ctx context.Context, s *MetaSnapshot
 		s.TableComment, s.EstimatedRows, s.DataBytes, s.RawColumns, s.RawIndexes,
 		s.RawKeys, s.DDLText,
 	).Scan(&s.ID, &s.SyncedAt)
-}
-
-// PruneDatabase 删除指定库本次未采集到的过期快照（按表名集合）。
-func (r *MetadataRepository) PruneDatabase(ctx context.Context, connID int64, database string, keep []string) error {
-	_, err := r.pool.Exec(ctx, `
-		DELETE FROM sys_meta_snapshots
-		WHERE connection_id = $1 AND database_name = $2
-		  AND ($3 = '{}' OR table_name <> ALL($3))`,
-		connID, database, keep)
-	return err
 }
 
 // ListTables 资产列表（带表级标注与 Owner 用户名）。

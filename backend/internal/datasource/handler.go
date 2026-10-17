@@ -3,6 +3,7 @@ package datasource
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -298,20 +299,65 @@ func (h *Handler) TestUnpersisted(w http.ResponseWriter, r *http.Request) {
 	h.runTest(w, r, conn, in.Password)
 }
 
-// TestPersisted POST /api/v1/connections/{id}/test 使用已保存凭据测试。
+// TestPersisted 空请求体测试已保存配置；有请求体则测试编辑草稿，不修改配置或最近检查。
 func (h *Handler) TestPersisted(w http.ResponseWriter, r *http.Request) {
 	id, err := idFromPath(r)
 	if err != nil {
 		httpx.Fail(w, err)
 		return
 	}
+	var draft *connectionRequest
+	present, err := httpx.DecodeOptionalJSON(w, r, &draft)
+	if err != nil {
+		httpx.Fail(w, err)
+		return
+	}
+	if present && draft == nil {
+		httpx.Fail(w, httpx.BadRequest("测试参数必须为 JSON 对象"))
+		return
+	}
+	if present {
+		if err := validConnReq(draft); err != nil {
+			httpx.Fail(w, err)
+			return
+		}
+		c := claimsOf(r)
+		conn, err := h.conns.Get(r.Context(), id)
+		if err != nil {
+			httpx.Fail(w, mapNotFound(err))
+			return
+		}
+		if !isAdmin(c) && (c.Role != "developer" || conn.UserID != c.Subject) {
+			httpx.Fail(w, httpx.Forbidden("无权测试该数据源的编辑配置"))
+			return
+		}
+	}
 	conn, password, err := h.conns.GetSecrets(r.Context(), id)
 	if err != nil {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}
+	if present {
+		if draft.Password == "" && conn.HasPassword && !sameCredentialDestination(conn, draft) {
+			httpx.Fail(w, httpx.BadRequest("连接地址、账号、TLS 或代理已修改，请重新输入口令后测试"))
+			return
+		}
+		if draft.Password != "" {
+			password = draft.Password
+		}
+		conn = &db.Connection{Type: draft.Type, Host: draft.Host, Port: draft.Port, Database: draft.Database,
+			Username: draft.Username, SSLMode: draft.SSLMode, ConnectionTimeout: draft.ConnectionTimeout,
+			SSHTunnelID: draft.SSHTunnelID, ProxyID: draft.ProxyID}
+	}
 	// 共享数据源，所有登录用户均可发起连通性测试。
 	h.runTest(w, r, conn, password)
+}
+
+func sameCredentialDestination(conn *db.Connection, draft *connectionRequest) bool {
+	sameID := func(a, b *int64) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+	return conn.Type == draft.Type && conn.Host == draft.Host && conn.Port == draft.Port &&
+		conn.Username == draft.Username && conn.SSLMode == draft.SSLMode &&
+		sameID(conn.SSHTunnelID, draft.SSHTunnelID) && sameID(conn.ProxyID, draft.ProxyID)
 }
 
 func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Connection, password string) {
@@ -343,19 +389,36 @@ func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Conne
 	start := time.Now()
 	info, err := target.Test(ctx, conn, password, tunnel)
 	duration := time.Since(start).Milliseconds()
+	result := db.ConnectionCheck{OK: err == nil, Type: conn.Type, ElapsedMS: duration,
+		StartedAt: start.UTC(), CheckedAt: time.Now().UTC()}
 	if err != nil {
 		h.log.Warn("数据源连接测试失败",
 			"user_id", c.Subject, "type", conn.Type, "host", conn.Host, "elapsed_ms", duration, "error", err)
-		httpx.Fail(w, httpx.BadRequest("连接测试失败: "+safeErr(err)))
+		result.Error = "连接测试失败: " + safeErr(err)
+	} else {
+		result.Version = info.Version
+		result.Compatibility, _ = json.Marshal(info.Compatibility)
+	}
+	recorded := false
+	if conn.ID > 0 {
+		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
+		defer persistCancel()
+		var saveErr error
+		recorded, saveErr = h.conns.SaveCheck(persistCtx, conn.ID, conn.UpdatedAt, &result)
+		if saveErr != nil {
+			httpx.Fail(w, httpx.Internal("保存连接检查失败", saveErr))
+			return
+		}
+	}
+	response := struct {
+		db.ConnectionCheck
+		Recorded bool `json:"recorded"`
+	}{result, recorded}
+	if err != nil {
+		httpx.JSON(w, http.StatusBadRequest, httpx.Envelope{Code: httpx.CodeBadRequest, Message: result.Error, Data: response})
 		return
 	}
-	httpx.OK(w, map[string]any{
-		"ok":            true,
-		"type":          info.Type,
-		"version":       info.Version,
-		"compatibility": info.Compatibility,
-		"elapsed_ms":    duration,
-	})
+	httpx.OK(w, response)
 }
 
 // CompatibilityMatrix 只提供已验证的版本记录，不连接目标数据库。

@@ -72,6 +72,7 @@ cd frontend && npm install && npm run dev
 - [后端架构设计](./docs/架构设计/后端架构设计.md)
 - [API 接口规范](./docs/接口规范/API接口规范.md)
 - [数据源版本兼容](./docs/开发指南/数据源版本兼容.md)
+- [数据源检查与采集可靠性](./docs/开发指南/数据源检查与采集可靠性.md)
 - [数据库模型设计](./docs/数据库设计/数据库模型设计.md)
 - [低保真 UX 线框图](./docs/界面设计/wireframes/README.md)
 - [UI 设计规范](./docs/界面设计/UI设计规范.md)

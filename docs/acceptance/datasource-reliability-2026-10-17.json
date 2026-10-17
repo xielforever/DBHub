@@ -1,0 +1,33 @@
+{
+  "verified_at": "2026-10-17T11:54:19.654248+00:00",
+  "source_revision": "6ea754898ba75a775980cc423cc9f4263cf940f9",
+  "source_dirty": true,
+  "backend_go_sha256": "c5199802e0c74f2fc60a8d7e2ca92a116cd87a5ec4589320225d8940580f80ce",
+  "backend_commands": [
+    "go test -race -p=4 -count=1 -json ./...",
+    "go vet -p=4 ./..."
+  ],
+  "backend_exit_code": 0,
+  "reliability_checks": [
+    "TestDatasourceReliability/saved-check-survives-reload-and-draft-uses-saved-password",
+    "TestDatasourceReliability/saved-password-is-not-sent-to-edited-destination",
+    "TestDatasourceReliability/older-check-cannot-overwrite-newer-check",
+    "TestDatasourceReliability/concurrent-edit-loads-credentials-from-one-revision",
+    "TestDatasourceReliability/configuration-change-invalidates-check-and-failure-is-persisted",
+    "TestMetadataSyncReliability/publication-is-atomic-and-identifies-schema",
+    "TestMetadataSyncReliability/independent-handlers-share-lock-and-config-change-aborts",
+    "TestMetadataSyncReliability/sync-input-cannot-accidentally-select-all-sources",
+    "TestMetadataSyncReliability/partial-schema-failure-keeps-complete-previous-inventory",
+    "TestMetadataSyncReliability/concurrent-http-sync-and-cancellation-release-lock"
+  ],
+  "intentional_suite_skips": [
+    "TestVersionMatrixTarget (run explicitly by version matrix)"
+  ],
+  "frontend_query_tests": 14,
+  "frontend_build_passed": true,
+  "backend_migrations_sha256": "1d8e456d556303abae02be89fe5e29993acf61866b59d6ff59b87a3524bdc02e",
+  "matrix_report": "datasource-compatibility-2026-10-17.json",
+  "browser_report": "datasource-version-ui-2026-10-17.json",
+  "version_branches_passed": 12,
+  "postgres_reliability_scenario_runs": 50
+}

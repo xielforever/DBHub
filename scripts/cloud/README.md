@@ -54,6 +54,8 @@ python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.
 
 版本矩阵会使用当前开发后端容器执行 Go 竞态测试，基础 PostgreSQL/MySQL/Redis 必须已启动。目标版本逐个拉取、启动并清理，数据放在容器临时内存文件系统；默认删除本轮新拉取的镜像，保留运行前已有镜像，`--keep-images` 可保留本轮镜像。不要并行运行矩阵或重建后端；VFS 环境也应避免同时执行其他大量磁盘写入的构建。
 
-报告在私有 `compatibility-artifacts/<UTC时间>/matrix.json`，记录真实补丁号、镜像摘要、测试名称、跳过与清理状态，以及后端 Go 实现指纹。完整有效报告可通过 `python3 scripts/cloud/compatibility.py --record-from /私有报告路径/matrix.json` 更新内嵌版本记录；部分报告、失败或实现指纹变化时拒绝更新。恢复运行会记录原报告摘要和复用项来源，不会掩盖原运行的失败。`.github/workflows/datasource-compatibility.yml` 提供手动触发的完整 CI 验证，不上传凭据文件。具体范围见 [数据源版本兼容](../../docs/开发指南/数据源版本兼容.md)。
+报告在私有 `compatibility-artifacts/<UTC时间>/matrix.json`，记录真实补丁号、镜像摘要、测试名称、跳过与清理状态，以及后端 Go 实现和迁移 SQL 的独立指纹。PostgreSQL 各分支额外执行数据源检查、并发编辑、采集失败/互斥/取消的可靠性测试。完整有效报告可通过 `python3 scripts/cloud/compatibility.py --record-from /私有报告路径/matrix.json` 更新内嵌版本记录；部分报告、失败或任一实现/迁移指纹变化时拒绝更新。恢复运行会记录原报告摘要和复用项来源，不会掩盖原运行的失败。`.github/workflows/datasource-compatibility.yml` 提供手动触发的完整 CI 验证，不上传凭据文件。具体范围见 [数据源版本兼容](../../docs/开发指南/数据源版本兼容.md)。
 
 版本提示的浏览器验收：`DBHUB_BROWSER_TEST_SCRIPT=/app/scripts/cloud/version_browser_test.py ./scripts/cloud/browser.sh`。验证真实数据库版本显示、修改连接后清除旧结果、过期响应处理及手机表单；MariaDB 警示使用界面契约样例，不代表真实产品兼容验证。
+
+数据源异常与并发的定向回归：`./scripts/cloud/dev.sh exec -T backend go test -race -count=1 ./internal/server -run '^(TestDatasourceReliability|TestMetadataSyncReliability)$'`。测试会创建随机 Schema、临时账号与连接，在独立目标账号上设置 statement timeout 并对测试表加锁，验证采集失败和取消；不修改现有账号的权限。行为与原始结果见 [检查与采集可靠性](../../docs/开发指南/数据源检查与采集可靠性.md)。

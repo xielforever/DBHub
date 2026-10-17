@@ -125,6 +125,7 @@ export interface DbSyncStat {
   views: number
 }
 export interface SyncResult {
+  status: 'succeeded' | 'failed' | 'busy' | 'skipped'
   connection_id: number
   connection_name: string
   type: string

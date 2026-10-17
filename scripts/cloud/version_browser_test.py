@@ -66,18 +66,30 @@ try:
             assert result['status'] in ('verified','branch_verified')
             passed('real '+item['type']+' version is displayed on the saved connection')
 
+        page.reload(wait_until='networkidle')
+        for saved in created:
+            saved_card = page.locator('article').filter(has=page.get_by_role('heading',name=saved['name'],exact=True))
+            expect(saved_card.get_by_role('status')).to_contain_text('版本已验证')
+        passed('saved checks survive a page reload')
+
         item = created[0]
         card = page.locator('article').filter(has=page.get_by_role('heading',name=item['name'],exact=True))
         card.get_by_role('button',name='编辑连接',exact=True).click()
         dialog = page.get_by_role('dialog')
         expect(dialog.get_by_test_id('version-support-hint')).to_contain_text('14 / 15 / 16 / 17 / 18')
-        dialog.get_by_label('密码',exact=True).fill(values['POSTGRES_PASSWORD'])
-        with page.expect_response(lambda r:r.url.endswith('/connections/test')):
+        expect(dialog.get_by_label('密码',exact=True)).to_have_value('')
+        test_path = f"/connections/{item['id']}/test"
+        with page.expect_response(lambda r:r.url.endswith(test_path)):
             dialog.get_by_role('button',name='测试连接',exact=True).click()
         expect(dialog.get_by_test_id('connection-version-result')).to_contain_text('PostgreSQL')
+        passed('editing a saved connection tests with its stored password without exposing it')
         host = dialog.get_by_label('主机',exact=True)
         host.fill('changed.invalid')
         expect(dialog.get_by_test_id('connection-version-result')).to_have_count(0)
+        with page.expect_response(lambda r:r.url.endswith(test_path)) as denied:
+            dialog.get_by_role('button',name='测试连接',exact=True).click()
+        assert denied.value.status==400 and '重新输入口令' in denied.value.json()['message']
+        passed('changing a target requires an explicit password before testing')
         host.fill('postgres')
         passed('editing a target clears the previous verified result')
 
@@ -86,12 +98,12 @@ try:
             assert response.status==200
             host.fill('changed.invalid')
             route.fulfill(response=response)
-        page.route('**/api/v1/connections/test',change_before_delivery)
-        with page.expect_response(lambda r:r.url.endswith('/connections/test')):
+        page.route('**/api/v1'+test_path,change_before_delivery)
+        with page.expect_response(lambda r:r.url.endswith(test_path)):
             dialog.get_by_role('button',name='测试连接',exact=True).click()
         expect(dialog.get_by_role('button',name='测试连接',exact=True)).to_be_enabled()
         expect(dialog.get_by_test_id('connection-version-result')).to_have_count(0)
-        page.unroute('**/api/v1/connections/test',change_before_delivery)
+        page.unroute('**/api/v1'+test_path,change_before_delivery)
         passed('late connection-test response cannot verify an edited target')
         host.fill('postgres')
 
@@ -101,10 +113,10 @@ try:
             payload = response.json()
             payload['data']['compatibility'] = {'engine':'mariadb','product':'MariaDB','version':'10.11.11','branch':'10.11','status':'unverified','message':'MariaDB 尚未纳入兼容验证。'}
             route.fulfill(status=200,json=payload)
-        page.route('**/api/v1/connections/test',unverified_profile)
+        page.route('**/api/v1'+test_path,unverified_profile)
         dialog.get_by_role('button',name='测试连接',exact=True).click()
         expect(dialog.get_by_test_id('connection-version-result')).to_contain_text('MariaDB 10.11.11 · 兼容性未验证')
-        page.unroute('**/api/v1/connections/test',unverified_profile)
+        page.unroute('**/api/v1'+test_path,unverified_profile)
         passed('contract fixture: protocol-compatible product is shown as unverified')
         expect(page.locator('.el-message')).to_have_count(0)
         page.screenshot(path=str(out/'versions-unverified-desktop.png'),animations='disabled')
@@ -123,7 +135,38 @@ try:
         page.screenshot(path=str(out/'versions-desktop.png'),animations='disabled')
         page.set_viewport_size({'width':390,'height':844})
         dialog.get_by_test_id('connection-version-result').scroll_into_view_if_needed()
+        # 视口切换和滚动后等待布局完成，避免合成层尚未重绘时截掉下拉框内容。
+        page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
         page.screenshot(path=str(out/'versions-mobile.png'),animations='disabled',full_page=True)
+
+        page.set_viewport_size({'width':1440,'height':1000})
+        dialog.get_by_role('button',name='取消',exact=True).click()
+        mysql_item = created[1]
+        mysql_card = page.locator('article').filter(has=page.get_by_role('heading',name=mysql_item['name'],exact=True))
+        mysql_card.get_by_role('button',name='编辑连接',exact=True).click()
+        dialog.get_by_label('主机',exact=True).fill('127.0.0.1')
+        dialog.get_by_label('端口',exact=True).fill('1')
+        dialog.get_by_role('button',name='保存',exact=True).click()
+        expect(dialog).not_to_be_visible()
+        expect(mysql_card.get_by_role('status')).to_have_count(0)
+        passed('saving a changed connection invalidates its previous check')
+        with page.expect_response(lambda r:r.url.endswith(f"/connections/{mysql_item['id']}/test")) as failed:
+            mysql_card.get_by_role('button',name='测试连接 '+mysql_item['name'],exact=True).click()
+        assert failed.value.status==400
+        expect(mysql_card.get_by_role('status')).to_contain_text('连接测试失败')
+        page.reload(wait_until='networkidle')
+        expect(mysql_card.get_by_role('status')).to_contain_text('连接测试失败')
+        passed('failed checks survive a page reload')
+
+        # 保存编辑表单时空口令仍保留原凭据，恢复地址后可重新连接。
+        mysql_card.get_by_role('button',name='编辑连接',exact=True).click()
+        dialog.get_by_label('主机',exact=True).fill('mysql')
+        dialog.get_by_label('端口',exact=True).fill('3306')
+        dialog.get_by_role('button',name='保存',exact=True).click()
+        expect(dialog).not_to_be_visible()
+        mysql_card.get_by_role('button',name='测试连接 '+mysql_item['name'],exact=True).click()
+        expect(mysql_card.get_by_role('status')).to_contain_text('MySQL')
+        passed('saving an empty password preserves the working stored credential')
         assert not errors
         context.close()
         browser.close()

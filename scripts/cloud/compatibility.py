@@ -23,6 +23,9 @@ TARGETS = [
 ]
 REQUIRED_TESTS = {'TestVersionMatrixTarget', 'TestIntegrationRealSQLAndTransactions', 'TestVersionCompatibilityHTTP', 'TestRealHTTPBackend'}
 
+def required_tests(kind):
+    return REQUIRED_TESTS | ({'TestDatasourceReliability', 'TestMetadataSyncReliability'} if kind == 'postgres' else set())
+
 def command(args, **kwargs):
     return subprocess.run([str(a) for a in args], check=False, **kwargs)
 
@@ -44,6 +47,13 @@ def source_fingerprint():
     # 兼容矩阵 JSON 是运行结果的记录，最终才填入实测补丁号，不参与协议实现指纹。
     return digest.hexdigest()
 
+def migration_fingerprint():
+    digest = hashlib.sha256()
+    for path in sorted((ROOT/'backend/internal/db/migrations').glob('*.sql')):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
 def save_json(path, value):
     with open(path, 'w', opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
         json.dump(value, stream, ensure_ascii=False, indent=2)
@@ -52,11 +62,11 @@ def save_json(path, value):
 def completed_target(target):
     return (target.get('valid') and target.get('cleanup_succeeded')
             and not target.get('skipped_tests') and target.get('version')
-            and REQUIRED_TESTS.issubset(target.get('passed_tests', [])))
+            and required_tests(target.get('engine')).issubset(target.get('passed_tests', [])))
 
 def record_verified(path):
     report = json.loads(path.read_text())
-    if not report.get('valid') or report.get('backend_go_sha256') != source_fingerprint():
+    if not report.get('valid') or report.get('backend_go_sha256') != source_fingerprint() or report.get('backend_migrations_sha256') != migration_fingerprint():
         raise RuntimeError('报告无效或后端实现已变化，不能更新已验证版本')
     targets = report['targets']
     expected = {(kind, branch) for kind, branch, _ in TARGETS}
@@ -69,7 +79,7 @@ def record_verified(path):
     (ROOT/'backend/internal/target/compatibility_matrix.json').write_text(json.dumps(matrix, indent=2)+'\n')
     print('已按完整报告更新 12 个实测版本；请审核并提交记录。', flush=True)
 
-def exercise(kind, branch, image, out, base, fingerprint, keep_images):
+def exercise(kind, branch, image, out, base, fingerprint, migration_hash, keep_images):
     label = kind+'-'+branch
     name = 'dbhub-compat-'+secrets.token_hex(6)
     log = out/(label+'.log')
@@ -139,8 +149,9 @@ def exercise(kind, branch, image, out, base, fingerprint, keep_images):
                 exec_args += ['-e', key]
             exec_args += ['backend','go','test','-race','-count=1','-json']
             print(f'验证 {kind} {branch}：真实目标操作和 HTTP 契约', flush=True)
-            for package, pattern in [('./internal/target','^(TestVersionMatrixTarget|TestIntegrationRealSQLAndTransactions)$'),('./internal/server','^(TestVersionCompatibilityHTTP|TestRealHTTPBackend)$')]:
-                if source_fingerprint() != fingerprint:
+            server_pattern = '^(TestVersionCompatibilityHTTP|TestRealHTTPBackend'+('|TestDatasourceReliability|TestMetadataSyncReliability' if kind == 'postgres' else '')+')$'
+            for package, pattern in [('./internal/target','^(TestVersionMatrixTarget|TestIntegrationRealSQLAndTransactions)$'),('./internal/server',server_pattern)]:
+                if source_fingerprint() != fingerprint or migration_fingerprint() != migration_hash:
                     raise RuntimeError('运行期间后端源文件改变，本轮结果无效')
                 if command(exec_args+[package,'-run',pattern], env=test_env, stdout=logs, stderr=logs).returncode:
                     raise RuntimeError('真实兼容测试失败')
@@ -151,7 +162,7 @@ def exercise(kind, branch, image, out, base, fingerprint, keep_images):
         passes = [e['Test'] for e in events if e.get('Action')=='pass' and e.get('Test')]
         skips = [e['Test'] for e in events if e.get('Action')=='skip' and e.get('Test')]
         profiles = [json.loads(e['Output'].split('DBHUB_COMPAT_RESULT ',1)[1]) for e in events if 'DBHUB_COMPAT_RESULT ' in e.get('Output','')]
-        if skips or not REQUIRED_TESTS.issubset(passes) or len(profiles)!=1 or profiles[0]['engine']!=kind or profiles[0]['branch']!=branch:
+        if skips or not required_tests(kind).issubset(passes) or len(profiles)!=1 or profiles[0]['engine']!=kind or profiles[0]['branch']!=branch:
             raise RuntimeError('测试未完整执行或目标版本不匹配')
         result.update(version=profiles[0]['version'], passed_tests=passes, skipped_tests=skips, valid=True)
     except Exception as error:
@@ -187,7 +198,7 @@ def main():
         previous = json.loads(opts.resume_from.read_text())
         expected = {(kind, branch, image) for kind, branch, image in TARGETS}
         actual = {(t['engine'], t['branch'], t['image']) for t in previous['targets']}
-        if previous.get('backend_go_sha256') != source_fingerprint() or actual != expected or len(previous['targets']) != len(TARGETS):
+        if previous.get('backend_go_sha256') != source_fingerprint() or previous.get('backend_migrations_sha256') != migration_fingerprint() or actual != expected or len(previous['targets']) != len(TARGETS):
             raise RuntimeError('只能恢复同一后端实现的完整矩阵报告')
     targets = [t for t in TARGETS if (not opts.engine or t[0]==opts.engine) and (not opts.branch or t[1]==opts.branch)]
     if not targets:
@@ -198,7 +209,8 @@ def main():
     out = STATE/'compatibility-artifacts'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     out.mkdir(parents=True, mode=0o700, exist_ok=False)
     fingerprint = source_fingerprint()
-    report = {'started_at':datetime.now(timezone.utc).isoformat(), 'source_revision':capture(['git','-C',ROOT,'rev-parse','HEAD']), 'source_dirty':bool(capture(['git','-C',ROOT,'status','--porcelain'])), 'backend_go_sha256':fingerprint, 'targets':[]}
+    migration_hash = migration_fingerprint()
+    report = {'started_at':datetime.now(timezone.utc).isoformat(), 'source_revision':capture(['git','-C',ROOT,'rev-parse','HEAD']), 'source_dirty':bool(capture(['git','-C',ROOT,'status','--porcelain'])), 'backend_go_sha256':fingerprint, 'backend_migrations_sha256':migration_hash, 'targets':[]}
     if previous:
         report['resumed_from'] = opts.resume_from.parent.name+'/'+opts.resume_from.name
         report['previous_report_sha256'] = hashlib.sha256(opts.resume_from.read_bytes()).hexdigest()
@@ -209,10 +221,10 @@ def main():
             save_json(out/(target[0]+'-'+target[1]+'.json'), result)
             print(f'复用 PASS {target[0]} {target[1]} {result["version"]}（同一后端实现）', flush=True)
         else:
-            result = exercise(*target,out,base,fingerprint,opts.keep_images)
+            result = exercise(*target,out,base,fingerprint,migration_hash,opts.keep_images)
         report['targets'].append(result)
     report['finished_at'] = datetime.now(timezone.utc).isoformat()
-    report['valid'] = all(t['valid'] for t in report['targets']) and source_fingerprint()==fingerprint
+    report['valid'] = all(t['valid'] for t in report['targets']) and source_fingerprint()==fingerprint and migration_fingerprint()==migration_hash
     save_json(out/'matrix.json', report)
     print(f'矩阵 {len(targets)} 项，整体有效={report["valid"]}；{out/"matrix.json"}', flush=True)
     return 0 if report['valid'] else 1

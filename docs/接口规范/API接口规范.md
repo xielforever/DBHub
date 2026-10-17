@@ -139,7 +139,7 @@ curl http://localhost:8080/api/health
 
 ## 4. 数据源管理 (Connections)
 
-> 除标注外均需 Access Token（三通道任一）。写操作（POST/PUT/DELETE）仅 `admin`、`developer` 角色可用，`readonly` 返回 `40300`。
+> 除标注外均需 Access Token（三通道任一）。创建连接限 `admin`、`developer`；修改和删除限管理员或连接的 developer 创建者，`readonly` 不可执行。所有已登录角色可测试已保存配置，编辑草稿的测试权限见 4.5。
 > **数据源为团队共享资源**：任何登录用户均可查看完整连接列表，并可对全部数据源执行元数据浏览、表预览与（只读）SQL；列表与使用不再按创建人过滤。`user_id` 仅记录创建者用于审计，个人可见性维度预留给后续「个人连接」类型。写操作（增删改数据源、隧道）仍在路由层按角色鉴权。
 
 ### 4.1 连接列表
@@ -184,7 +184,9 @@ curl http://localhost:8080/api/health
 
 ### 4.5 测试连接
 - **POST** `/api/v1/connections/test`：请求体同创建（用于保存前验证，口令不落库）
-- **POST** `/api/v1/connections/{id}/test`：使用已保存凭据测试
+- **POST** `/api/v1/connections/{id}/test`：空请求体使用已保存配置测试；携带完整连接配置时测试编辑草稿
+
+草稿测试仅限管理员或该连接的 developer 创建者。口令留空复用已保存口令；修改数据库类型、主机、端口、账号、TLS 或代理/SSH 隧道后，必须重新输入口令。草稿测试不修改配置或已保存配置的检查记录。
 
 **Response data:**
 ```json
@@ -193,6 +195,9 @@ curl http://localhost:8080/api/health
   "type": "postgres",
   "version": "PostgreSQL 16.15 ...",
   "elapsed_ms": 48,
+  "started_at": "2026-10-17T10:00:00Z",
+  "checked_at": "2026-10-17T10:00:00.048Z",
+  "recorded": true,
   "compatibility": {
     "engine": "postgres",
     "product": "PostgreSQL",
@@ -204,7 +209,7 @@ curl http://localhost:8080/api/health
   }
 }
 ```
-失败返回 `40000`，消息为清洗后的驱动错误（不含口令片段）。
+失败返回 HTTP 400 / `40000`，消息为清洗后的驱动错误（不含口令片段），`data` 包含 `ok=false`、`error`、耗时与检查时间。保存配置的成功/失败检查都会持久化最近一条，列表/详情以可选 `last_check` 返回。`recorded=false` 表示草稿测试，或该结果因配置变更/较新检查而未记录；配置修改后旧检查失效，删除连接时级联删除记录。详情见[检查与采集可靠性](../开发指南/数据源检查与采集可靠性.md)。
 
 `version` 保留原有响应字段；`compatibility.version` 为规范化版本。`ok` 表示连接成功，兼容结论另见 `status`：`verified` 为实测补丁；`branch_verified` 为同分支其他补丁；`unverified` 为尚未验证的版本、兼容产品或 Redis 部署模式；`unknown` 为版本无法可靠识别。Redis 账号可以连接但无权读取 INFO 时返回成功与 `unknown`，不伪造验证结论。Redis 的 `compatibility.mode` 表示服务端报告的运行模式。具体边界见[数据源版本兼容](../开发指南/数据源版本兼容.md)。
 
@@ -223,7 +228,7 @@ curl http://localhost:8080/api/health
 }
 ```
 
-完整记录含 12 个分支；只有非空 `tested_version` 才表示已有实测。连接列表本身不自动探测版本，用户执行测试连接后在当前页面显示结果。
+完整记录含 12 个分支；只有非空 `tested_version` 才表示已有实测。连接列表本身不自动探测版本，显示的是用户最近一次针对当前已保存配置的检查。
 
 ---
 
@@ -474,8 +479,11 @@ JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`reques
 ```json
 { "connection_id": 1 }
 ```
-串行采集，整体超时 4 分钟；非关系型（redis 等）标记 `skipped`；不可达数据源把清洗后的
-错误聚合进 `errors`，不中断其余数据源。每个业务库采集完成后按对象清单剪枝已消失的快照。
+空请求体或 `{}` 表示全量。显式 `connection_id` 必须为正整数，0、负数、null、未知字段或尾随 JSON 返回 400。
+
+串行采集，整体超时 4 分钟；非关系型（redis 等）标记 `skipped`。每个数据源的全部库/Schema 成功采集后，一次事务发布快照和清理过期对象；部分失败、取消、超时或配置变更均保留该源原快照，返回 `status=failed`、发布计数为 0。错误聚合进 `errors`，不中断其余数据源。
+
+同一元数据库下的同源采集跨后端互斥。单源请求重复采集返回 409；全量请求将冲突源标为 `busy` 并继续其他源。结果状态为 `succeeded | failed | busy | skipped`。
 
 **Response data:**
 ```json
@@ -483,6 +491,7 @@ JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`reques
   "connections": [
     {
       "connection_id": 1, "connection_name": "订单核心库", "type": "postgres",
+      "status": "succeeded",
       "skipped": false,
       "databases": ["orders"],
       "tables": 24, "views": 2,

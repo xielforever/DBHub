@@ -119,16 +119,32 @@ func Fail(w http.ResponseWriter, err error) {
 
 // DecodeJSON 以大小受限、字段严格的方式解析请求体。
 func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	_, err := decodeJSON(w, r, dst, false)
+	return err
+}
+
+// DecodeOptionalJSON 对空请求体返回 false；非空请求仍严格限制大小、未知字段和尾随内容。
+func DecodeOptionalJSON(w http.ResponseWriter, r *http.Request, dst any) (bool, error) {
+	return decodeJSON(w, r, dst, true)
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any, optional bool) (bool, error) {
+	if r.Body == nil {
+		r.Body = http.NoBody
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1 MiB
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
-		return BadRequest("请求参数格式错误: " + err.Error())
+		if optional && err == io.EOF {
+			return false, nil
+		}
+		return false, BadRequest("请求参数格式错误: " + err.Error())
 	}
 	if err := dec.Decode(new(any)); err != io.EOF {
-		return BadRequest("只允许一个 JSON 对象")
+		return false, BadRequest("只允许一个 JSON 对象")
 	}
-	return nil
+	return true, nil
 }
 
 func httpStatusForCode(code int) int {

@@ -466,7 +466,9 @@
             <span class="font-medium">{{ r.connection_name }}</span>
             <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/8 text-white/55">{{ r.type }}</span>
             <span v-if="r.skipped" class="text-[11px] text-amber-300">类型不支持，已跳过</span>
-            <span v-else class="text-[11px] text-white/45">{{ r.tables }} 表 / {{ r.views }} 视图</span>
+            <span v-else-if="r.status === 'failed'" class="text-[11px] text-rose-300">采集未发布，旧快照已保留</span>
+            <span v-else-if="r.status === 'busy'" class="text-[11px] text-amber-300">该数据源正在采集，本次已跳过</span>
+            <span v-else class="text-[11px] text-white/45">已更新 {{ r.tables }} 表 / {{ r.views }} 视图</span>
           </div>
           <div v-for="e in r.errors ?? []" :key="e" class="text-[11px] text-rose-300/90 mt-1">⚠ {{ e }}</div>
         </div>

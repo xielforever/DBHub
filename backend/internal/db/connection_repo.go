@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -14,25 +15,26 @@ import (
 // Connection 目标数据库连接配置。Password 仅写入/建连时短暂存在，
 // 列表与详情接口只返回 HasPassword。
 type Connection struct {
-	ID                int64     `json:"id"`
-	UserID            int64     `json:"user_id"`
-	SSHTunnelID       *int64    `json:"ssh_tunnel_id"`
-	ProxyID           *int64    `json:"proxy_id"`
-	ProxyName         string    `json:"proxy_name"`
-	Proxy             *Proxy    `json:"-"`
-	Name              string    `json:"name"`
-	Type              string    `json:"type"` // mysql | postgres | redis | mongo
-	Host              string    `json:"host"`
-	Port              int       `json:"port"`
-	Database          string    `json:"database"`
-	Username          string    `json:"username"`
-	Password          string    `json:"-"`
-	SSLMode           string    `json:"ssl_mode"`
-	ConnectionTimeout int       `json:"connection_timeout"`
-	ColorLabel        string    `json:"color_label"`
-	Environment       string    `json:"environment"` // dev | test | prod
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                int64            `json:"id"`
+	UserID            int64            `json:"user_id"`
+	SSHTunnelID       *int64           `json:"ssh_tunnel_id"`
+	ProxyID           *int64           `json:"proxy_id"`
+	ProxyName         string           `json:"proxy_name"`
+	Proxy             *Proxy           `json:"-"`
+	Name              string           `json:"name"`
+	Type              string           `json:"type"` // mysql | postgres | redis | mongo
+	Host              string           `json:"host"`
+	Port              int              `json:"port"`
+	Database          string           `json:"database"`
+	Username          string           `json:"username"`
+	Password          string           `json:"-"`
+	SSLMode           string           `json:"ssl_mode"`
+	ConnectionTimeout int              `json:"connection_timeout"`
+	ColorLabel        string           `json:"color_label"`
+	Environment       string           `json:"environment"` // dev | test | prod
+	CreatedAt         time.Time        `json:"created_at"`
+	UpdatedAt         time.Time        `json:"updated_at"`
+	LastCheck         *ConnectionCheck `json:"last_check,omitempty"`
 
 	HasPassword bool `json:"has_password"`
 
@@ -67,18 +69,26 @@ const connSelectCols = `
 	c.ssl_mode, c.connection_timeout, COALESCE(c.color_label, ''),
 	COALESCE(c.environment, 'dev'),
 	c.created_at, c.updated_at, COALESCE(t.name, ''), c.proxy_id,
-	COALESCE((SELECT p.name FROM sys_proxies p WHERE p.id=c.proxy_id),'')`
+	COALESCE((SELECT p.name FROM sys_proxies p WHERE p.id=c.proxy_id),''),
+	(SELECT cc.result FROM sys_connection_checks cc WHERE cc.connection_id=c.id AND cc.config_updated_at=c.updated_at)`
 
-func scanConnection(row pgx.Row) (*Connection, error) {
+func scanConnection(row pgx.Row, extra ...any) (*Connection, error) {
 	c := &Connection{}
-	err := row.Scan(&c.ID, &c.UserID, &c.SSHTunnelID, &c.Name, &c.Type, &c.Host, &c.Port,
+	var checkJSON []byte
+	dest := []any{&c.ID, &c.UserID, &c.SSHTunnelID, &c.Name, &c.Type, &c.Host, &c.Port,
 		&c.Database, &c.Username, &c.HasPassword, &c.SSLMode, &c.ConnectionTimeout,
-		&c.ColorLabel, &c.Environment, &c.CreatedAt, &c.UpdatedAt, &c.TunnelName, &c.ProxyID, &c.ProxyName)
+		&c.ColorLabel, &c.Environment, &c.CreatedAt, &c.UpdatedAt, &c.TunnelName, &c.ProxyID, &c.ProxyName, &checkJSON}
+	err := row.Scan(append(dest, extra...)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(checkJSON) > 0 {
+		if err := json.Unmarshal(checkJSON, &c.LastCheck); err != nil {
+			return nil, err
+		}
 	}
 	return c, nil
 }
@@ -121,12 +131,12 @@ func (r *ConnectionRepository) Get(ctx context.Context, id int64) (*Connection, 
 
 // GetSecrets 取解密口令（仅用于建连，禁止进入响应体）。
 func (r *ConnectionRepository) GetSecrets(ctx context.Context, id int64) (*Connection, string, error) {
-	c, err := r.Get(ctx, id)
-	if err != nil {
-		return nil, "", err
-	}
+	// 配置与口令来自同一条语句，避免并发编辑时拼成旧地址与新口令。
 	var enc *string
-	if err := r.pool.QueryRow(ctx, `SELECT password FROM sys_connections WHERE id = $1`, id).Scan(&enc); err != nil {
+	c, err := scanConnection(r.pool.QueryRow(ctx,
+		`SELECT `+connSelectCols+`, c.password FROM sys_connections c
+		LEFT JOIN sys_ssh_tunnels t ON t.id=c.ssh_tunnel_id WHERE c.id=$1`, id), &enc)
+	if err != nil {
 		return nil, "", err
 	}
 	pwd, err := r.decrypt(enc)
