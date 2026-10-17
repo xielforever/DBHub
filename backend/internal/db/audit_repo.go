@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/user/dbhub/internal/auditctx"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -10,6 +12,7 @@ import (
 
 // AuditLog 操作审计记录。
 type AuditLog struct {
+	Context      auditctx.Data  `json:"context"`
 	ID           int64          `json:"id"`
 	UserID       *int64         `json:"user_id"`
 	ConnectionID *int64         `json:"connection_id"`
@@ -43,11 +46,11 @@ func (r *AuditRepository) Create(ctx context.Context, a *AuditLog) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO sys_audit_logs
 			(user_id, connection_id, trace_id, action, resource_type, resource_name,
-			 ip_address, user_agent, status, error_message, duration_ms, params)
+			 ip_address, user_agent, status, error_message, duration_ms, params, context)
 		VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),
-		        NULLIF($7,'')::inet,NULLIF($8,''),$9,NULLIF($10,''),$11,$12)`,
+		        NULLIF($7,'')::inet,NULLIF($8,''),$9,NULLIF($10,''),$11,$12,$13::jsonb)`,
 		a.UserID, a.ConnectionID, a.TraceID, a.Action, a.ResourceType, a.ResourceName,
-		a.IPAddress, a.UserAgent, a.Status, a.ErrorMessage, a.DurationMS, a.Params)
+		a.IPAddress, a.UserAgent, a.Status, a.ErrorMessage, a.DurationMS, a.Params, auditJSON(a.Context))
 	if err != nil {
 		return fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -56,23 +59,25 @@ func (r *AuditRepository) Create(ctx context.Context, a *AuditLog) error {
 
 // AuditFilter 审计查询过滤。
 type AuditFilter struct {
-	Username     string
-	Action       string
-	ResourceType string
-	Status       string // success | failed
-	Start        time.Time
-	End          time.Time
+	DatabaseAccount string
+	Outcome         string
+	Username        string
+	Action          string
+	ResourceType    string
+	Status          string // success | failed
+	Start           time.Time
+	End             time.Time
 }
 
 // List 分页查询审计日志（管理员接口）。
 func (r *AuditRepository) List(ctx context.Context, f AuditFilter, limit, offset int) ([]AuditLog, int64, error) {
-	where := `WHERE ($1 = '' OR u.username ILIKE '%' || $1 || '%')
+	where := `WHERE ($1 = '' OR COALESCE(NULLIF(a.context->>'actor_username',''),u.username,'') ILIKE '%' || $1 || '%')
 		AND ($2 = '' OR a.action = $2)
 		AND ($3 = '' OR a.resource_type = $3)
 		AND ($4 = '' OR a.status::text = $4)
 		AND ($5::timestamptz IS NULL OR a.created_at >= $5)
-		AND ($6::timestamptz IS NULL OR a.created_at <= $6)`
-	args := []any{f.Username, f.Action, f.ResourceType, f.Status, nilTime(f.Start), nilTime(f.End)}
+		AND ($6::timestamptz IS NULL OR a.created_at <= $6) AND ($7='' OR a.context->>'database_account' ILIKE '%'||$7||'%') AND ($8='' OR a.context->>'outcome'=$8)`
+	args := []any{f.Username, f.Action, f.ResourceType, f.Status, nilTime(f.Start), nilTime(f.End), f.DatabaseAccount, f.Outcome}
 
 	var total int64
 	if err := r.pool.QueryRow(ctx,
@@ -88,12 +93,12 @@ func (r *AuditRepository) List(ctx context.Context, f AuditFilter, limit, offset
 		       COALESCE(host(a.ip_address), ''), COALESCE(a.user_agent, ''),
 		       a.status, COALESCE(a.error_message, ''), a.duration_ms,
 		       COALESCE(a.params::jsonb, '{}'::jsonb), a.created_at,
-		       COALESCE(u.username, '')
+		       COALESCE(NULLIF(a.context->>'actor_username',''),u.username,''),a.context
 		FROM sys_audit_logs a
 		LEFT JOIN sys_users u ON u.id = a.user_id
 		`+where+`
 		ORDER BY a.id DESC
-		LIMIT $7 OFFSET $8`, args...)
+		LIMIT $9 OFFSET $10`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询审计日志失败: %w", err)
 	}
@@ -102,9 +107,13 @@ func (r *AuditRepository) List(ctx context.Context, f AuditFilter, limit, offset
 	out := make([]AuditLog, 0, limit)
 	for rows.Next() {
 		var a AuditLog
+		var raw []byte
 		if err := rows.Scan(&a.ID, &a.UserID, &a.ConnectionID, &a.TraceID,
 			&a.Action, &a.ResourceType, &a.ResourceName, &a.IPAddress, &a.UserAgent,
-			&a.Status, &a.ErrorMessage, &a.DurationMS, &a.Params, &a.CreatedAt, &a.Username); err != nil {
+			&a.Status, &a.ErrorMessage, &a.DurationMS, &a.Params, &a.CreatedAt, &a.Username, &raw); err != nil {
+			return nil, 0, err
+		}
+		if err := json.Unmarshal(raw, &a.Context); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, a)
@@ -125,3 +134,5 @@ func nilTime(t time.Time) any {
 	}
 	return t
 }
+
+func auditJSON(d auditctx.Data) string { raw, _ := json.Marshal(d); return string(raw) }

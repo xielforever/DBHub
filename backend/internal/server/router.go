@@ -5,21 +5,26 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/user/dbhub/internal/adminapi"
+	"github.com/user/dbhub/internal/aiapi"
 	"github.com/user/dbhub/internal/assetapi"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/config"
+	"github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/datasource"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/health"
 	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/lineage"
+	"github.com/user/dbhub/internal/lineageapi"
 	"github.com/user/dbhub/internal/metrics"
 	"github.com/user/dbhub/internal/middleware"
+	"github.com/user/dbhub/internal/presenceapi"
 	"github.com/user/dbhub/internal/proxyapi"
 	"github.com/user/dbhub/internal/queryapi"
 	"github.com/user/dbhub/internal/reportapi"
-	"github.com/user/dbhub/internal/lineage"
-	"github.com/user/dbhub/internal/lineageapi"
+	"github.com/user/dbhub/internal/snippetapi"
 	"github.com/user/dbhub/internal/ticketapi"
 )
 
@@ -37,6 +42,11 @@ type Deps struct {
 	Shares     *db.ShareRepository
 	Tickets    *db.TicketRepository
 	Lineage    *db.LineageRepository
+	Snippets   *db.SnippetRepository
+	Queries    *queryapi.Handler
+	Sessions   *auth.SessionStore
+	Redis      *redis.Client
+	Controls   *db.QueryControls
 }
 
 // NewRouter 组装全部路由。
@@ -48,11 +58,17 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	mux.HandleFunc("GET /api/health", healthH.Health)
 
 	// 认证模块
-	authH := auth.NewHandler(cfg, users, log)
+	sessions := auth.NewSessionStore(nil)
+	if deps != nil && deps.Sessions != nil {
+		sessions = deps.Sessions
+	}
+	authH := auth.NewHandler(cfg, users, log, sessions)
 
-	requireAuth := middleware.RequireAuth(cfg.SecretKey)
+	requireAuth := middleware.RequireAuth(cfg.SecretKey, users, sessions)
 
-	if deps != nil {
+	if deps != nil && deps.Conns != nil {
+		drivers := connectorruntime.NewConfigured(cfg.JDBCURL, cfg.JDBCToken)
+		drivers.RecordUsage = deps.Conns.MarkUsed
 		auditMW := middleware.Audit(deps.Audit, log)
 		canWrite := middleware.RequireRoles("admin", "developer")
 		requireAdmin := middleware.RequireRoles("admin")
@@ -85,27 +101,61 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("DELETE /api/v1/users/{id}",
 			middleware.Chain(http.HandlerFunc(adminH.DeleteUser), requireAuth, requireAdmin, auditMW))
 
+		mux.Handle("GET /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.Groups), requireAuth, requireAdmin))
+		mux.Handle("POST /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.SaveGroup), requireAuth, requireAdmin, auditMW))
+		mux.Handle("PUT /api/v1/user-groups/{id}", middleware.Chain(http.HandlerFunc(adminH.SaveGroup), requireAuth, requireAdmin, auditMW))
+		mux.Handle("DELETE /api/v1/user-groups/{id}", middleware.Chain(http.HandlerFunc(adminH.DeleteGroup), requireAuth, requireAdmin, auditMW))
+
 		// 审计日志（仅 admin）
 		auditH := adminapi.NewAuditHandler(deps.Audit)
 		mux.Handle("GET /api/v1/audit-logs",
 			middleware.Chain(http.HandlerFunc(auditH.AuditLogs), requireAuth, requireAdmin))
 
 		// ---------- 数据源 ----------
-		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log)
+		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log, deps.Proxies, drivers)
 		mux.Handle("GET /api/v1/connections",
 			middleware.Chain(http.HandlerFunc(dsH.List), requireAuth))
+		mux.Handle("GET /api/v1/connections/compatibility",
+			middleware.Chain(http.HandlerFunc(dsH.CompatibilityMatrix), requireAuth))
 		mux.Handle("POST /api/v1/connections",
-			middleware.Chain(http.HandlerFunc(dsH.Create), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.Create), requireAuth, auditMW))
 		mux.Handle("POST /api/v1/connections/test",
 			middleware.Chain(http.HandlerFunc(dsH.TestUnpersisted), requireAuth, auditMW))
 		mux.Handle("GET /api/v1/connections/{id}",
 			middleware.Chain(http.HandlerFunc(dsH.Get), requireAuth))
 		mux.Handle("PUT /api/v1/connections/{id}",
-			middleware.Chain(http.HandlerFunc(dsH.Update), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.Update), requireAuth, auditMW))
 		mux.Handle("DELETE /api/v1/connections/{id}",
-			middleware.Chain(http.HandlerFunc(dsH.Delete), requireAuth, canWrite, auditMW))
+			middleware.Chain(http.HandlerFunc(dsH.Delete), requireAuth, auditMW))
 		mux.Handle("POST /api/v1/connections/{id}/test",
 			middleware.Chain(http.HandlerFunc(dsH.TestPersisted), requireAuth, auditMW))
+
+		mux.Handle("GET /api/v1/connector-drivers/available", middleware.Chain(http.HandlerFunc(dsH.AvailableDrivers), requireAuth))
+		mux.Handle("GET /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.Drivers), requireAuth))
+		mux.Handle("POST /api/v1/connector-drivers", middleware.Chain(http.HandlerFunc(dsH.RegisterDriver), requireAuth, auditMW))
+		mux.Handle("GET /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.Templates), requireAuth))
+		mux.Handle("POST /api/v1/datasource-templates", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/datasource-templates/{id}", middleware.Chain(http.HandlerFunc(dsH.PublishTemplate), requireAuth, auditMW))
+		mux.Handle("PATCH /api/v1/connector-drivers/{id}/status", middleware.Chain(dsH.SetCatalogStatus("driver"), requireAuth, auditMW))
+		mux.Handle("PATCH /api/v1/datasource-templates/{id}/status", middleware.Chain(dsH.SetCatalogStatus("template"), requireAuth, auditMW))
+		mux.Handle("DELETE /api/v1/connector-drivers/{id}", middleware.Chain(dsH.DeleteCatalog("driver"), requireAuth, auditMW))
+		mux.Handle("DELETE /api/v1/datasource-templates/{id}", middleware.Chain(dsH.DeleteCatalog("template"), requireAuth, auditMW))
+		mux.Handle("GET /api/v1/connections/{id}/capabilities", middleware.Chain(http.HandlerFunc(dsH.Capabilities), requireAuth))
+
+		mux.Handle("GET /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.Definitions), requireAuth))
+		mux.Handle("GET /api/v1/datasource-definitions/categories", middleware.Chain(http.HandlerFunc(dsH.DefinitionCategories), requireAuth))
+		mux.Handle("GET /api/v1/datasource-definitions/{id}/access", middleware.Chain(http.HandlerFunc(dsH.DefinitionAccess), requireAuth))
+		mux.Handle("PUT /api/v1/datasource-definitions/{id}/access", middleware.Chain(http.HandlerFunc(dsH.DefinitionAccess), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/datasource-definitions/{id}/profile", middleware.Chain(http.HandlerFunc(dsH.DefinitionProfile), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/datasource-definitions/{id}/favorite", middleware.Chain(http.HandlerFunc(dsH.DefinitionFavorite), requireAuth))
+
+		mux.Handle("GET /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.DefinitionRevisions), requireAuth))
+		mux.Handle("POST /api/v1/datasource-definitions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/datasource-definitions/{id}/revisions", middleware.Chain(http.HandlerFunc(dsH.SaveDefinition), requireAuth, auditMW))
+		mux.Handle("PATCH /api/v1/datasource-definitions/{id}/status", middleware.Chain(http.HandlerFunc(dsH.DefinitionStatus), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/datasource-definitions/{id}/connections", middleware.Chain(http.HandlerFunc(dsH.AddPersonal), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/connections/{id}/publish", middleware.Chain(http.HandlerFunc(dsH.PublishConnection), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/connections/{id}/revision", middleware.Chain(http.HandlerFunc(dsH.UpgradePersonal), requireAuth, auditMW))
 
 		// SSH 隧道（已废弃，保留兼容，M5 迁移至代理）
 		mux.Handle("GET /api/v1/ssh-tunnels",
@@ -119,7 +169,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("DELETE /api/v1/ssh-tunnels/{id}",
 			middleware.Chain(http.HandlerFunc(dsH.DeleteTunnel), requireAuth, canWrite, auditMW))
 
-		// 代理管理（占位，替代 SSH 隧道，M5 正式实现拨号）
+		// 代理管理与实际拨号
 		if deps.Proxies != nil {
 			proxyH := proxyapi.NewHandler(deps.Proxies, log)
 			mux.Handle("GET /api/v1/proxies",
@@ -136,7 +186,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 
 		// ---------- 工单中心（Step26 落库） ----------
 		if deps.Tickets != nil {
-			tH := ticketapi.NewHandler(deps.Tickets, log)
+			tH := ticketapi.NewHandler(deps.Tickets, log, deps.Conns, deps.Tunnels, deps.History, drivers)
 			mux.Handle("POST /api/v1/tickets",
 				middleware.Chain(http.HandlerFunc(tH.Create), requireAuth, canWrite, auditMW))
 			mux.Handle("GET /api/v1/tickets",
@@ -144,7 +194,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			mux.Handle("GET /api/v1/tickets/{id}",
 				middleware.Chain(http.HandlerFunc(tH.Get), requireAuth))
 			mux.Handle("POST /api/v1/tickets/{id}/status",
-				middleware.Chain(http.HandlerFunc(tH.UpdateStatus), requireAuth, canWrite, auditMW))
+				middleware.Chain(http.HandlerFunc(tH.UpdateStatus), requireAuth, requireAdmin, auditMW))
+			mux.Handle("POST /api/v1/tickets/{id}/execute", middleware.Chain(http.HandlerFunc(tH.Execute), requireAuth, requireAdmin, auditMW))
 		}
 
 		// ---------- 仪表盘汇总指标 ----------
@@ -152,10 +203,45 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("GET /api/v1/metrics/overview",
 			middleware.Chain(http.HandlerFunc(mH.Overview), requireAuth))
 
+		snippetH := snippetapi.NewHandler(deps.Snippets)
+		mux.Handle("GET /api/v1/snippets", middleware.Chain(http.HandlerFunc(snippetH.List), requireAuth))
+		mux.Handle("POST /api/v1/snippets", middleware.Chain(http.HandlerFunc(snippetH.Create), requireAuth, auditMW))
+		mux.Handle("PUT /api/v1/snippets/{id}", middleware.Chain(http.HandlerFunc(snippetH.Update), requireAuth, auditMW))
+		mux.Handle("DELETE /api/v1/snippets/{id}", middleware.Chain(http.HandlerFunc(snippetH.Delete), requireAuth, auditMW))
 		// ---------- SQL 工作台 ----------
-		qH := queryapi.NewHandler(deps.Conns, deps.Tunnels, deps.History, log)
+		qH := queryapi.NewHandler(deps.Conns, deps.Tunnels, deps.History, log, deps.Controls, drivers)
+		mux.Handle("GET /api/v1/metrics/query", middleware.Chain(http.HandlerFunc(qH.QueryMetrics), requireAuth, requireAdmin))
+		aiH := aiapi.New(cfg.AIBaseURL, cfg.AIKey, cfg.AIModel)
+		mux.Handle("GET /api/v1/ai/status", middleware.Chain(http.HandlerFunc(aiH.Status), requireAuth))
+		mux.Handle("POST /api/v1/ai/complete", middleware.Chain(http.HandlerFunc(aiH.Complete), requireAuth))
+		mux.Handle("GET /api/v1/query/exports", middleware.Chain(http.HandlerFunc(qH.ListExports), requireAuth))
+		mux.Handle("POST /api/v1/query/exports", middleware.Chain(http.HandlerFunc(qH.CreateExport), requireAuth, auditMW))
+		mux.Handle("POST /api/v1/query/exports/{id}/review", middleware.Chain(http.HandlerFunc(qH.ReviewExport), requireAuth, requireAdmin, auditMW))
+		mux.Handle("GET /api/v1/query/exports/{id}/download", middleware.Chain(http.HandlerFunc(qH.DownloadExport), requireAuth, auditMW))
+		presenceH := &presenceapi.Handler{Redis: deps.Redis, Conns: deps.Conns}
+		mux.Handle("POST /api/v1/query/presence", middleware.Chain(http.HandlerFunc(presenceH.Heartbeat), requireAuth))
+		mux.Handle("GET /api/v1/query/presence", middleware.Chain(http.HandlerFunc(presenceH.List), requireAuth))
+		mux.Handle("GET /api/v1/query/settings", middleware.Chain(http.HandlerFunc(qH.Settings), requireAuth))
+		mux.Handle("PUT /api/v1/query/settings", middleware.Chain(http.HandlerFunc(qH.SaveSettings), requireAuth, auditMW))
+		mux.Handle("GET /api/v1/query/policies", middleware.Chain(http.HandlerFunc(qH.Policies), requireAuth))
+		mux.Handle("PUT /api/v1/query/policies", middleware.Chain(http.HandlerFunc(qH.SavePolicy), requireAuth, requireAdmin, auditMW))
+		mux.Handle("DELETE /api/v1/query/policies/{id}", middleware.Chain(http.HandlerFunc(qH.DeletePolicy), requireAuth, requireAdmin, auditMW))
+		mux.Handle("GET /api/v1/query/shares", middleware.Chain(http.HandlerFunc(qH.ListShares), requireAuth))
+		mux.Handle("POST /api/v1/query/shares", middleware.Chain(http.HandlerFunc(qH.CreateShare), requireAuth, auditMW))
+		mux.Handle("DELETE /api/v1/query/shares/{id}", middleware.Chain(http.HandlerFunc(qH.RevokeShare), requireAuth, auditMW))
+		mux.HandleFunc("GET /api/v1/public/query-shares/{token}", qH.PublicShare)
+
+		deps.Queries = qH
+		mux.Handle("POST /api/v1/query/transaction/begin", middleware.Chain(http.HandlerFunc(qH.BeginTransaction), requireAuth))
+		mux.Handle("POST /api/v1/query/transaction/commit", middleware.Chain(qH.FinishTransaction(true), requireAuth))
+		mux.Handle("POST /api/v1/query/transaction/rollback", middleware.Chain(qH.FinishTransaction(false), requireAuth))
+		mux.Handle("GET /api/v1/query/transaction/status", middleware.Chain(http.HandlerFunc(qH.TransactionStatus), requireAuth))
+		mux.Handle("GET /api/v1/query/jobs", middleware.Chain(http.HandlerFunc(qH.Jobs), requireAuth))
+		mux.Handle("POST /api/v1/query/jobs/{id}/cancel", middleware.Chain(http.HandlerFunc(qH.CancelJob), requireAuth))
 		mux.Handle("POST /api/v1/query/execute",
 			middleware.Chain(http.HandlerFunc(qH.Execute), requireAuth, auditMW))
+		mux.Handle("GET /api/v1/query/executions/{id}",
+			middleware.Chain(http.HandlerFunc(qH.Execution), requireAuth))
 		mux.Handle("GET /api/v1/metadata/databases",
 			middleware.Chain(http.HandlerFunc(qH.Databases), requireAuth))
 		mux.Handle("GET /api/v1/metadata/schemas",
@@ -179,10 +265,22 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("DELETE /api/v1/query/history",
 			middleware.Chain(http.HandlerFunc(qH.ClearHistory), requireAuth, auditMW))
 
+		mux.Handle("DELETE /api/v1/redis/key", middleware.Chain(qH.RedisMutation("delete"), requireAuth, canWrite, auditMW))
+		mux.Handle("PUT /api/v1/redis/key/ttl", middleware.Chain(qH.RedisMutation("ttl"), requireAuth, canWrite, auditMW))
+		mux.Handle("POST /api/v1/redis/key", middleware.Chain(qH.RedisMutation("create"), requireAuth, canWrite, auditMW))
+		mux.Handle("PUT /api/v1/redis/key/value", middleware.Chain(qH.RedisMutation("value"), requireAuth, canWrite, auditMW))
+		mux.Handle("PUT /api/v1/redis/hash/field", middleware.Chain(qH.RedisMutation("hset"), requireAuth, canWrite, auditMW))
+		mux.Handle("DELETE /api/v1/redis/hash/field", middleware.Chain(qH.RedisMutation("hdel"), requireAuth, canWrite, auditMW))
+		mux.Handle("POST /api/v1/redis/list/push", middleware.Chain(qH.RedisMutation("lpush"), requireAuth, canWrite, auditMW))
+		mux.Handle("POST /api/v1/redis/list/pop", middleware.Chain(qH.RedisMutation("lpop"), requireAuth, canWrite, auditMW))
+		mux.Handle("POST /api/v1/redis/set/member", middleware.Chain(qH.RedisMutation("sadd"), requireAuth, canWrite, auditMW))
+		mux.Handle("DELETE /api/v1/redis/set/member", middleware.Chain(qH.RedisMutation("srem"), requireAuth, canWrite, auditMW))
+		mux.Handle("POST /api/v1/redis/zset/member", middleware.Chain(qH.RedisMutation("zadd"), requireAuth, canWrite, auditMW))
+		mux.Handle("DELETE /api/v1/redis/zset/member", middleware.Chain(qH.RedisMutation("zrem"), requireAuth, canWrite, auditMW))
 		// ---------- 数据资产（字典快照 / 目录 / 标注 / 收藏 / 搜索） ----------
 		if deps.Meta != nil {
 			aH := assetapi.NewHandler(deps.Conns, deps.Tunnels, deps.Meta,
-				deps.UserRepo, deps.History, log)
+				deps.UserRepo, deps.History, log, drivers)
 			mux.Handle("POST /api/v1/assets/sync",
 				middleware.Chain(http.HandlerFunc(aH.Sync), requireAuth, canWrite, auditMW))
 			mux.Handle("GET /api/v1/assets/search",
@@ -206,7 +304,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			if deps.Lineage != nil {
 				lineageSvc = lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log)
 			}
-			lH := lineageapi.NewHandler(deps.Meta, deps.History, deps.Reports, deps.Dashboards, deps.Lineage, lineageSvc, log)
+			lH := lineageapi.NewHandler(deps.Meta, deps.History, deps.Reports, deps.Dashboards, deps.Lineage, lineageSvc, log, deps.Conns)
 			mux.Handle("GET /api/v1/assets/lineage",
 				middleware.Chain(http.HandlerFunc(lH.Lineage), requireAuth))
 			mux.Handle("POST /api/v1/assets/lineage/refresh",
@@ -268,6 +366,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			middleware.Chain(http.HandlerFunc(authH.Me), requireAuth))
 	}
 
+	mux.Handle("POST /api/v1/auth/logout", middleware.Chain(http.HandlerFunc(authH.Logout), requireAuth))
+
 	// 未匹配路由统一 404 信封
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.Fail(w, httpx.NotFound("接口不存在"))
@@ -276,7 +376,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	allowedOrigins := []string{"*"}
 	if cfg.IsProduction() {
 		// 生产环境通过环境变量 CORS_ALLOWED_ORIGINS 注入白名单（逗号分隔）
-		allowedOrigins = []string{} // TODO: 读取 CORS_ALLOWED_ORIGINS
+		allowedOrigins = cfg.CORSOrigins
 	}
 
 	return middleware.Chain(

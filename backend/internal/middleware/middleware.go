@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -129,7 +130,7 @@ func CORS(allowedOrigins []string) Middleware {
 //  1. Authorization: Bearer <token>（标准通道）
 //  2. X-Access-Token: <token>（自定义头兜底）
 //  3. Cookie: dbhub_access_token=<token>（浏览器同源自动携带，网关一般不剥离）
-func RequireAuth(secret []byte) Middleware {
+func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStore) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := extractAccessToken(r)
@@ -149,6 +150,20 @@ func RequireAuth(secret []byte) Middleware {
 				httpx.Fail(w, httpx.New(httpx.CodeUnauthorized, "认证令牌无效或已过期", err))
 				return
 			}
+			user, e := users.FindByUsername(r.Context(), claims.Username)
+			if e != nil || user.ID != claims.Subject {
+				httpx.Fail(w, httpx.Unauthorized("用户不可用"))
+				return
+			}
+			if e = sessions.Validate(r.Context(), claims, user); e != nil {
+				if errors.Is(e, auth.ErrSession) {
+					httpx.Fail(w, httpx.Unauthorized("会话已失效"))
+				} else {
+					httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "会话服务暂不可用"})
+				}
+				return
+			}
+			claims.Role = user.Role
 			ctx := context.WithValue(r.Context(), auth.ClaimsContextKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

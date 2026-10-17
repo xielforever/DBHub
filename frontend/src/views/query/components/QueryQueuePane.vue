@@ -5,7 +5,7 @@
         <ListOrdered class="w-3.5 h-3.5 text-indigo-300" />
       </div>
       <div class="flex-1 min-w-0">
-        <p class="text-xs font-medium text-white/80">查询队列</p>
+        <p class="text-xs font-medium text-white/80">浏览器待发队列</p>
         <p class="text-[10px] text-white/40">并发 {{ concurrency }} · {{ pendingCount }} 等待 · {{ runningCount }} 执行中</p>
       </div>
       <div class="flex items-center gap-1.5">
@@ -27,11 +27,17 @@
     </div>
 
     <div class="flex-1 overflow-auto">
+      <div class="p-3 border-b border-white/10 space-y-2">
+        <p class="text-xs text-indigo-200">服务端执行队列 · 单用户最多 2 个并发</p>
+        <p v-if="serverError" class="text-xs text-rose-300">队列状态暂不可用</p>
+        <p v-if="!serverJobs.length" class="text-xs text-white/35">暂无服务端任务</p>
+        <div v-for="job in serverJobs" :key="job.id" class="rounded-lg bg-white/5 p-2 flex items-center gap-2"><span class="text-xs text-white/50">{{ job.status }}</span><span class="text-xs font-mono text-white/60 truncate flex-1">{{ job.sql }}</span><button v-if="['pending','running'].includes(job.status)" class="ghost-button text-xs" @click="cancelServer(job.id)">取消</button></div>
+      </div>
       <div v-if="!queue.length" class="flex flex-col items-center justify-center py-14 gap-2 text-white/35">
         <ListOrdered class="w-8 h-8 text-white/15" />
         <p class="text-xs">队列为空</p>
         <p class="text-[11px] text-white/25">执行中再次点击「运行」将自动入队</p>
-        <button class="ghost-button !py-1 !px-3 text-[11px] mt-1" @click="emit('addDemo')">加入演示任务</button>
+
       </div>
 
       <div v-for="(item, idx) in queue" :key="item.id" class="group px-3 py-2.5 border-b border-white/5 hover:bg-white/5 flex items-center gap-3" :class="{ 'bg-amber-500/5': item.status === 'running', 'opacity-60': item.status === 'canceled' || item.status === 'failed' }">
@@ -43,7 +49,7 @@
             <span class="flex items-center gap-1"><Database class="w-3 h-3" />{{ item.connectionName }} · {{ item.database || '默认' }}</span>
             <span>{{ formatTime(item.enqueuedAt) }}</span>
             <span v-if="item.duration" :class="item.status === 'success' ? 'text-emerald-300/70' : 'text-white/30'">{{ item.duration }}ms</span>
-            <span v-if="item.status === 'pending'" class="text-indigo-300/60">等待中 · 预计 {{ estimateWait(idx) }}</span>
+            <span v-if="item.status === 'pending'" class="text-indigo-300/60">等待发送</span>
           </p>
           <p v-if="item.error" class="text-[11px] text-rose-300/70 truncate">{{ item.error }}</p>
         </div>
@@ -63,13 +69,14 @@
       <span class="w-px h-3 bg-white/10" />
       <span>运行 {{ runningCount }} / {{ concurrency }}</span>
       <div class="flex-1" />
-      <span v-if="nextEta" class="text-indigo-300/60">下一任务约 {{ nextEta }}</span>
+
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { advancedApi, type QueryJob } from '../../../api/advanced'
 import { ArrowDown, ArrowUp, Database, ListOrdered, RotateCcw, Square, Trash2 } from 'lucide-vue-next'
 
 export interface QueueItem {
@@ -106,14 +113,14 @@ const emit = defineEmits<{
   (e: 'addDemo'): void
 }>()
 
+const serverJobs=ref<QueryJob[]>([]),serverError=ref(false)
+let serverTimer:ReturnType<typeof setInterval>|undefined
+async function loadServer(){try{serverJobs.value=(await advancedApi.jobs()).items;serverError.value=false}catch{serverError.value=true}}
+async function cancelServer(id:string){try{await advancedApi.cancelJob(id);await loadServer()}catch{}}
+onMounted(()=>{loadServer();serverTimer=setInterval(loadServer,2000)})
+onBeforeUnmount(()=>clearInterval(serverTimer))
 const pendingCount = computed(() => props.queue.filter(x => x.status === 'pending').length)
 const runningCount = computed(() => props.queue.filter(x => x.status === 'running').length)
-const nextEta = computed(() => {
-  const running = props.queue.find(x => x.status === 'running')
-  if (running) return '30秒后'
-  if (pendingCount.value) return '立即'
-  return ''
-})
 
 function statusDot(s: string) {
   return {
@@ -136,11 +143,7 @@ function statusBadge(s: string) {
 function statusLabel(s: string) {
   return { pending: '等待', running: '执行中', success: '成功', failed: '失败', canceled: '已取消' }[s] || s
 }
-function estimateWait(idx: number) {
-  const pendingIdx = props.queue.slice(0, idx).filter(x => x.status === 'pending').length
-  if (pendingIdx === 0) return '下一批'
-  return `${pendingIdx * 2}秒后`
-}
+
 function formatTime(s: string) {
   return new Date(s).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }

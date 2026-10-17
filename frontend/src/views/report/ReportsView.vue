@@ -2,7 +2,7 @@
   <div class="space-y-5">
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold">报表中心</h1>
+        <h1 class="text-xl font-semibold">报表</h1>
         <p class="text-sm text-white/45 mt-1">工作台另存的图表沉淀，支持私有/共享与收藏</p>
       </div>
       <div class="flex items-center gap-2">
@@ -59,9 +59,7 @@
 
         <div class="flex items-center gap-1.5 pt-2 border-t border-white/10">
           <button class="ghost-button flex-1 text-xs py-1.5" @click="openReport(rep)">查看</button>
-          <button class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-sky-500/15 hover:text-sky-300" title="分享" @click="openShare(rep)">
-            <Share2 class="w-4 h-4" />
-          </button>
+
           <button class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-amber-500/15 hover:text-amber-300" title="收藏" @click="toggleStar(rep)">
             <Star class="w-4 h-4" :class="rep.starred ? 'fill-amber-300 text-amber-300' : ''" />
           </button>
@@ -75,7 +73,7 @@
       </article>
       <div v-if="!loading && !items.length" class="col-span-full glass-card p-12 flex flex-col items-center gap-3 text-center">
         <BarChart3 class="w-10 h-10 text-white/20" />
-        <p class="text-white/50 text-sm">暂无报表，在 SQL 工作台「图表」Tab 另存为报表</p>
+        <p class="text-white/50 text-sm">暂无报表，在 数据工作台「图表」Tab 另存为报表</p>
       </div>
     </div>
 
@@ -97,7 +95,7 @@
             <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ current.database_name || '默认库' }}</span>
             <span class="px-2 py-0.5 rounded-full" :class="current.visibility==='shared' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/8 text-white/50'">{{ current.visibility==='shared' ? '共享' : '私有' }}</span>
             <span class="flex-1" />
-            <button class="ghost-button text-xs py-1 px-2 flex items-center gap-1" @click="openShare(current)"><Share2 class="w-3.5 h-3.5" />分享</button>
+
           </div>
           <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ current.sql_text }}</pre>
 
@@ -242,6 +240,7 @@ async function openReport(rep: ReportItem) {
   detailLoading.value = true
   try {
     // 执行固化 SQL 获取最新结果（复用工作台执行约束）
+    if (!rep.connection_id) { ElMessage.warning('请先从数据源目录添加此报表对应修订的个人连接'); return }
     const res = await workbenchApi.execute(rep.connection_id, rep.sql_text, rep.database_name)
     if (res.kind === 'query') {
       detailColumns.value = res.columns ?? []
@@ -312,12 +311,6 @@ const lastShareToken = ref('')
 const shareSubjectId = ref<number | null>(null)
 const shareLink = computed(() => lastShareToken.value ? `${window.location.origin}/s/${lastShareToken.value}` : '')
 
-function openShare(rep: ReportItem) {
-  shareSubjectId.value = rep.id
-  lastShareToken.value = ''
-  shareOpen.value = true
-  loadShares()
-}
 async function loadShares() {
   if (!shareSubjectId.value) return
   shareLoading.value = true

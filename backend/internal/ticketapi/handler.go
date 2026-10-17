@@ -1,25 +1,32 @@
 package ticketapi
 
 import (
+	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
-
-	"log/slog"
+	"time"
 
 	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/sqlparse"
 )
 
 type Handler struct {
 	tickets *db.TicketRepository
 	log     *slog.Logger
+	conns   *db.ConnectionRepository
+	tunnels *db.TunnelRepository
+	history *db.HistoryRepository
+	drivers *target.Runtime
 }
 
-func NewHandler(tickets *db.TicketRepository, log *slog.Logger) *Handler {
-	return &Handler{tickets: tickets, log: log}
+func NewHandler(tickets *db.TicketRepository, log *slog.Logger, conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, runtimes ...*target.Runtime) *Handler {
+	return &Handler{tickets: tickets, log: log, conns: conns, tunnels: tunnels, history: history, drivers: target.Default(runtimes)}
 }
 
 func claimsOf(r *http.Request) *auth.Claims {
@@ -84,6 +91,28 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("风险等级非法"))
 		return
 	}
+	if in.ConnectionID == nil || *in.ConnectionID < 1 {
+		httpx.Fail(w, httpx.BadRequest("工单必须指定目标 connection_id"))
+		return
+	}
+	conn, err := h.conns.Get(r.Context(), *in.ConnectionID)
+	if err != nil || conn.Type == "redis" {
+		httpx.Fail(w, httpx.BadRequest("目标数据源不存在或不支持 SQL"))
+		return
+	}
+	statement, parseErr := sqlparse.Parse(in.SQL, conn.SQLDialect())
+	if parseErr != nil {
+		httpx.Fail(w, httpx.BadRequest(parseErr.Error()))
+		return
+	}
+	if statement.ReadOnly {
+		httpx.Fail(w, httpx.BadRequest("变更工单不执行查询，请使用自己的数据工作台"))
+		return
+	}
+	if conn.Definition != nil && conn.Definition.Visibility == "global" && in.Database != "" && in.Database != conn.Database {
+		httpx.Fail(w, httpx.BadRequest("工单数据库必须与发布修订一致"))
+		return
+	}
 	t := &db.Ticket{
 		Title:        in.Title,
 		Type:         in.Type,
@@ -124,7 +153,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Limit:   pageSize,
 	}
 	// 校验 status
-	if f.Status != "" && f.Status != "pending" && f.Status != "approved" && f.Status != "rejected" && f.Status != "executed" {
+	if f.Status != "" && f.Status != "pending" && f.Status != "approved" && f.Status != "rejected" && f.Status != "executed" && f.Status != "executing" && f.Status != "failed" {
 		httpx.Fail(w, httpx.BadRequest("状态非法"))
 		return
 	}
@@ -173,39 +202,94 @@ func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, err)
 		return
 	}
-	in.Status = strings.TrimSpace(in.Status)
-	if in.Status != "approved" && in.Status != "rejected" && in.Status != "executed" && in.Status != "pending" {
-		httpx.Fail(w, httpx.BadRequest("状态非法，仅支持 pending/approved/rejected/executed"))
+	if in.Status != "approved" && in.Status != "rejected" {
+		httpx.Fail(w, httpx.BadRequest("审批仅支持 approved/rejected；请通过执行接口实际执行工单"))
 		return
 	}
-	// 校验存在
-	existing, err := h.tickets.Get(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "工单不存在"})
-			return
-		}
-		httpx.Fail(w, httpx.Internal("查询工单失败", err))
-		return
-	}
-	// 简单状态机：pending -> approved/rejected, approved -> executed
-	// 允许 admin 强制，但给提示
-	if existing.Status == "pending" && in.Status != "approved" && in.Status != "rejected" {
-		httpx.Fail(w, httpx.BadRequest("待审批工单仅可批准或拒绝"))
-		return
-	}
-	if existing.Status == "approved" && in.Status != "executed" {
-		httpx.Fail(w, httpx.BadRequest("已批准工单仅可标记已执行"))
-		return
-	}
-	if existing.Status == "rejected" || existing.Status == "executed" {
-		httpx.Fail(w, httpx.BadRequest("已终态工单不可再变更"))
-		return
-	}
-	// pending -> 同状态不允许？ already handled
-	if err := h.tickets.UpdateStatus(r.Context(), id, in.Status); err != nil {
-		httpx.Fail(w, httpx.Internal("更新状态失败", err))
+	if e := h.tickets.Review(r.Context(), id, in.Status, claimsOf(r).Subject); e != nil {
+		httpx.Fail(w, httpx.Conflict("工单已处理或不存在"))
 		return
 	}
 	httpx.OK(w, map[string]any{"id": id, "status": in.Status})
+}
+
+// Execute claims once before connecting; failed or uncertain executions never retry automatically.
+func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	ticket, e := h.tickets.Get(r.Context(), id)
+	if e != nil {
+		httpx.Fail(w, httpx.NotFound("工单不存在"))
+		return
+	}
+	if ticket.ConnectionID == nil {
+		httpx.Fail(w, httpx.BadRequest("历史工单没有目标连接，请重新建单"))
+		return
+	}
+	conn, password, e := h.conns.GetSecrets(r.Context(), *ticket.ConnectionID)
+	if errors.Is(e, db.ErrNotFound) {
+		personalID, resolveErr := h.conns.ResolvePersonal(r.Context(), *ticket.ConnectionID)
+		if resolveErr == nil {
+			conn, password, e = h.conns.GetSecrets(r.Context(), personalID)
+		}
+	}
+	if e != nil {
+		httpx.Fail(w, httpx.BadRequest("请先为工单目标的相同修订配置本人的连接"))
+		return
+	}
+	if ticket.DatabaseName != "" {
+		conn.Database = ticket.DatabaseName
+	}
+	var tunnel *db.SSHTunnel
+	if conn.SSHTunnelID != nil {
+		tunnel, e = h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)
+		if e != nil {
+			httpx.Fail(w, httpx.BadRequest("工单隧道不可用"))
+			return
+		}
+	}
+	if e = h.tickets.ClaimExecution(r.Context(), id, claimsOf(r).Subject); e != nil {
+		httpx.Fail(w, httpx.Conflict("仅可执行已批准且尚未执行的工单"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	handle, execErr := h.drivers.OpenRelational(ctx, conn, password, tunnel)
+	var result *target.ExecResult
+	if execErr == nil {
+		defer handle.Close()
+		result, execErr = target.ExecuteWithOptions(ctx, handle, ticket.SQLText, false, target.ExecuteOptions{Timeout: 30 * time.Second, MaxRows: 100, AllowUnsafeWrite: true, BeforeExecute: func() error { return h.conns.ValidateCurrent(ctx, conn) }})
+	}
+	// An approver's database identity must not become a result-data channel to
+	// the requester, including DML RETURNING and vendor utility statements.
+	if result != nil {
+		result = &target.ExecResult{Kind: result.Kind, AffectedRows: result.AffectedRows, DurationMS: result.DurationMS}
+	}
+	message := ""
+	if execErr != nil {
+		message = "目标数据库执行失败，请检查 SQL 与数据库状态"
+	}
+	cleanup, done := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer done()
+	history := &db.QueryHistory{ConnectionID: conn.ID, UserID: claimsOf(r).Subject, DatabaseName: conn.Database, SQLText: ticket.SQLText, Status: 1}
+	duration := int(time.Since(start).Milliseconds())
+	history.ExecutionTimeMS = &duration
+	if execErr != nil {
+		history.Status = 0
+		history.ErrorMessage = message
+	} else {
+		history.AffectedRows = &result.AffectedRows
+	}
+	if e = h.history.Create(cleanup, history); e != nil {
+		h.log.Error("工单执行历史保存失败", "ticket_id", id)
+	}
+	if e = h.tickets.FinishExecution(cleanup, id, result, message); e != nil {
+		httpx.Fail(w, httpx.Internal("执行结果保存失败，请核查目标数据库后人工处理，切勿重复执行", nil))
+		return
+	}
+	if execErr != nil {
+		httpx.Fail(w, httpx.BadRequest(message))
+		return
+	}
+	httpx.OK(w, map[string]any{"id": id, "status": "executed", "result": result})
 }

@@ -1,0 +1,70 @@
+# 仅用于 Cloud 内的生产镜像验收，不是生产基础设施配置。
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: ["${DBHUB_BUILD_ROOT}/release-data/postgres:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+  mysql:
+    image: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes: ["${DBHUB_BUILD_ROOT}/release-data/mysql:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql --protocol=TCP -u$$MYSQL_USER -e 'SELECT 1' $$MYSQL_DATABASE >/dev/null"]
+      interval: 3s
+      timeout: 5s
+      retries: 50
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["${DBHUB_BUILD_ROOT}/release-data/redis:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  backend:
+    environment:
+      DBHUB_TARGET_ALLOWLIST: postgres:5432,mysql:3306,redis:6379
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  browser:
+    profiles: ["checks"]
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    working_dir: /app
+    command: ["sh", "/app/scripts/cloud/browser-runtime.sh"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+      DBHUB_BROWSER_FRONTEND_URL: http://frontend
+      DBHUB_BROWSER_API_URL: http://frontend/api/v1
+      DBHUB_BROWSER_EXPECT_ENV: production
+      DBHUB_BROWSER_ARTIFACT_PREFIX: release
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app:ro
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+  ops:
+    profiles: ["checks"]
+    image: node:24.12.0-bullseye-slim@sha256:553730a6761d1aea8d3dc858cc9c62e51880a96f6c2a9bbce0577f53d87bb923
+    user: "${DBHUB_UID}:${DBHUB_GID}"
+    command: ["node", "/app/scripts/cloud/release_operational_test.mjs", "verify"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app:ro
+      - ${DBHUB_STATE_DIR}:/runtime

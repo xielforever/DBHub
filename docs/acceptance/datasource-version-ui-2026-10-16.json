@@ -1,0 +1,16 @@
+{
+  "scope": "datasource-version-ui",
+  "checks": [
+    "real postgres version is displayed on the saved connection",
+    "real mysql version is displayed on the saved connection",
+    "real redis version is displayed on the saved connection",
+    "editing a target clears the previous verified result",
+    "late connection-test response cannot verify an edited target",
+    "contract fixture: protocol-compatible product is shown as unverified",
+    "mobile connection form keeps the version result readable"
+  ],
+  "page_errors": [],
+  "contract_fixtures": [
+    "unverified MariaDB profile only"
+  ]
+}

@@ -152,6 +152,7 @@ func (r *LineageRepository) ListDirectEdges(ctx context.Context, connID int64, d
 			args = append(args, schema)
 		}
 	}
+	q += ` AND ` + connectionScope(ctx, "upstream_connection_id") + ` AND ` + connectionScope(ctx, "downstream_connection_id")
 	q += ` ORDER BY updated_at DESC LIMIT 100`
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
@@ -192,7 +193,7 @@ func (r *LineageRepository) RecentEdges(ctx context.Context, limit int) ([]Linea
 	rows, err := r.pool.Query(ctx, `SELECT id, upstream_connection_id, upstream_database, upstream_schema, upstream_table,
 		downstream_connection_id, downstream_database, downstream_schema, downstream_table,
 		edge_kind, sql_fingerprint, source_history_id, created_at, updated_at
-		FROM sys_meta_lineage ORDER BY updated_at DESC LIMIT $1`, limit)
+		FROM sys_meta_lineage WHERE `+connectionScope(ctx, "upstream_connection_id")+` AND `+connectionScope(ctx, "downstream_connection_id")+` ORDER BY updated_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +223,6 @@ func (r *LineageRepository) PruneBySource(ctx context.Context, olderThan time.Du
 // Count 统计边总数
 func (r *LineageRepository) Count(ctx context.Context) (int64, error) {
 	var n int64
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sys_meta_lineage`).Scan(&n)
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sys_meta_lineage WHERE `+connectionScope(ctx, "upstream_connection_id")+` AND `+connectionScope(ctx, "downstream_connection_id")).Scan(&n)
 	return n, err
 }

@@ -1,0 +1,32 @@
+{
+  "scope": "sql-workbench-phase1",
+  "backend_environment": "production",
+  "frontend_url": "http://frontend",
+  "checks": [
+    "anonymous API access requires authentication",
+    "real PostgreSQL, two actions, unchanged SQL and no implicit transaction",
+    "mobile SQL and result visible without page overflow",
+    "FETCH FIRST remains valid without automatic LIMIT",
+    "keyboard shortcut runs only the selected statement",
+    "multiple statements and SQL errors are clearly reported",
+    "real truncation count and virtual scrolling to the last row",
+    "duplicate shortcuts make one request; canceled server query reports uncertain outcome",
+    "refresh restores only the pending execution ID and requires verification before a new run",
+    "fresh execution succeeds after cancellation",
+    "lost committed-write response is recovered from a receipt without repeating the write",
+    "real MySQL execution and dialect-aware formatting",
+    "no advanced panels or background feature requests",
+    "production target requires confirmation; cancel sends no SQL and confirm sends once",
+    "developer workbench access, server authorization and unchanged protected data",
+    "developer revoked session returns to login instead of executing SQL",
+    "readonly workbench access, server authorization and unchanged protected data",
+    "readonly revoked session returns to login instead of executing SQL",
+    "production proxy preserves a real 62-second query beyond the default 60-second timeout",
+    "production execution timeout remains unknown and is distinguished from cancellation"
+  ],
+  "real_databases": [
+    "postgres",
+    "mysql"
+  ],
+  "page_errors": []
+}

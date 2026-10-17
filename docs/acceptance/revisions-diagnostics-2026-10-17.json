@@ -1,0 +1,151 @@
+{
+  "date": "2026-10-17",
+  "scope": "Datasource revision history, stop-impact confirmation and safe connection diagnostics",
+  "source_revision_before_changes": "702952ba28b9916b9bee486a82e9ea7949d4407a",
+  "working_tree_changes_included": true,
+  "fingerprint_algorithm": "SHA-256 of sorted relative path, NUL, file bytes, NUL for selected final files",
+  "fingerprints": {
+    "backend_application_go_sha256": "ca6e475116e072d24d3247677a0c298bb8e17024ad13435a92b4cfc2eb490ee2",
+    "backend_tests_sha256": "9377cb05f68f028bc10fe5c7055e9781a6b36fbf63a65b2d759e639398ebc12f",
+    "migrations_sha256": "0167d2ef7d19d41a62e11cf30a757d704d036f1fcb59fbdc77f76571aad9783c",
+    "frontend_sha256": "384adb5b4fcce1850ed89a8f11dc28396e19967533b17f3c863d18501e1f6064",
+    "jdbc_sha256": "0e0336d6486d00a773802056713941af713985bb35abe13ead5673bc6922e4b8"
+  },
+  "backend": {
+    "command": "go test -timeout 180s -race -p=4 -json ./...",
+    "passed_packages": 12,
+    "passed_test_items": 164,
+    "failed_test_items": [],
+    "skipped_tests": [
+      "TestVersionMatrixTarget"
+    ],
+    "json_log_sha256": "ccf7bb3da591401c0460ec8a65d4c4cfe197062bf4b8157ddb157c801ef9d5cd",
+    "vet": "passed",
+    "skip_reason": "Explicit-target native version matrix is a separate acceptance suite and was not rerun for this change.",
+    "migration_note": "Full suite passed before adding the binding index; unchanged application code was supplemented by the revision suite and the real 0021-to-0023 legacy migration test after 0023.",
+    "after_index_followup": {
+      "revision_governance": {
+        "passed_packages": 2,
+        "passed_test_items": 5,
+        "failed_test_items": [],
+        "skipped_tests": [],
+        "json_log_sha256": "7407350a39e1c7097fe77f955b599085212c6088accded136ad57aed65103cf8"
+      },
+      "legacy_migration": {
+        "passed_packages": 1,
+        "passed_test_items": 1,
+        "failed_test_items": [],
+        "skipped_tests": [],
+        "json_log_sha256": "25bce3cab54935ad6e156c49ecd78b9cc3c09916ba99f864cbbf26f7913d6333"
+      },
+      "migration_count": 23
+    }
+  },
+  "frontend": {
+    "execution_state_tests": 14,
+    "type_check": "passed",
+    "build": "passed",
+    "warning": "Existing bundle chunks above 500 kB."
+  },
+  "jdbc": {
+    "java_connection_cause_checks": 12,
+    "unknown_sqlstate_sanitization": "passed",
+    "compiled_current_source": true,
+    "production_image_rebuilt": false,
+    "live_service_recompiled_and_restarted": true
+  },
+  "browser": {
+    "personal_identity_revisions_diagnostics": {
+      "passed_checks": 22,
+      "checks": [
+        "administrator uses an installed and verified globally published JDBC driver",
+        "administrator publishes reusable global connection rules in settings",
+        "publishing the inventory source shares the target without administrator credentials",
+        "administrators can publish an inventory target without configuring any database credentials",
+        "a newly invited user has no inherited administrator connections",
+        "mobile users explicitly confirm the target and test their own credentials",
+        "the saved inventory binding belongs only to the current user",
+        "JDBC SQL executes as the personal database principal and retains two workspace actions",
+        "ordinary users can add private configurations without publishing them globally",
+        "published revisions leave existing bindings unchanged until the user confirms and re-enters credentials",
+        "readonly users configure their own identity while platform write restrictions remain enforced",
+        "a second user and administrator cannot use another personal binding or private driver",
+        "real JDBC authentication failures provide safe categorized recovery guidance",
+        "failure diagnosis survives reload and fits the mobile connection card",
+        "credential recovery focuses an empty personal password field and clears stale failures",
+        "administrators inspect historical bindings and actual target differences across revisions",
+        "mobile users see their pinned revision and differences without management counts or controls",
+        "canceling a historical revision stop sends no mutation",
+        "a changed binding count rejects stale stop confirmation and refreshes the impact",
+        "confirmed stop blocks the historical personal bindings and preserves other revisions",
+        "reenabling a historical revision restores the original database identity without rebinding",
+        "desktop and mobile complete without browser page errors"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "de1ab28ebabefcdca3a9160a2320f602d095360acdb878742eacb66f6c853a1d"
+    },
+    "connection_checks_regression": {
+      "passed_checks": 15,
+      "checks": [
+        "real postgres version is displayed on the saved connection",
+        "real mysql version is displayed on the saved connection",
+        "real redis version is displayed on the saved connection",
+        "saved checks survive a page reload",
+        "editing a saved connection tests with its stored password without exposing it",
+        "changing a target requires an explicit password before testing",
+        "editing a target clears the previous verified result",
+        "late connection-test response cannot verify an edited target",
+        "contract fixture: protocol-compatible product is shown as unverified",
+        "mobile connection form keeps the version result readable",
+        "a changed target cannot retain a password without explicit re-entry",
+        "saving a changed connection invalidates its previous check",
+        "failed checks survive a page reload",
+        "restoring a target requires the user to provide their own password",
+        "an unchanged destination can retain the personal credential when editing its alias"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "adbbb9a7288fbb946148669c42f499edba4012f821119723fdeeb10d88bf2943"
+    }
+  },
+  "functional_evidence": [
+    "Private predecessors are filtered before history differences are calculated.",
+    "Only managers receive aggregate binding counts; no personal account or credential information is published.",
+    "Missing stop confirmation is rejected; changed binding counts return 409 and require another confirmation.",
+    "Six concurrent bind/stop scenarios produce only a confirmed stop without a new binding, or a new binding with the stop rejected.",
+    "Old revisions can be stopped and reenabled independently while other revisions remain available.",
+    "Real native and JDBC PostgreSQL failures cover authentication, database absence, refused network connection and TLS refusal.",
+    "Real native and JDBC MySQL failures distinguish authentication from permission denial; an inaccessible missing database is reported as permission denial rather than guessed absence.",
+    "Typed unit cases also cover Redis error prefixes, DNS, certificates, timeout, capacity, service authentication and unknown causes.",
+    "Mobile credential repair focuses an empty personal password field, verifies the real database login and clears stale failure data.",
+    "Desktop and portrait mobile revision dialog pagination remains inside the viewport."
+  ],
+  "cloud": {
+    "migration_count": 23,
+    "binding_count_index_present": true,
+    "development_services_running": 6,
+    "backend_http_status": 200,
+    "frontend_http_status": 200,
+    "jdbc_sessions_after_cleanup": 0,
+    "owned_fixture_users_remaining": 0,
+    "owned_fixture_sources_remaining": 0,
+    "owned_fixture_driver_configs_remaining": 0,
+    "owned_fixture_rules_remaining": 0,
+    "owned_fixture_database_roles_remaining": 0,
+    "owned_browser_container_removed": true,
+    "baseline_personal_connections_preserved": 3,
+    "private_material_staged": false
+  },
+  "limits": [
+    "GaussDB real-service validation, organization tenancy and targeted user-group publishing are outside this change.",
+    "Stop-impact confirmation is based on the current count of saved personal connections, not active sessions or cancellation of already admitted operations.",
+    "Unknown connection causes remain unknown; classification does not prove a database exists or an account has all required privileges.",
+    "Native 12-version matrix and standalone production JDBC image/TLS suites were not rerun. Java compilation, typed cause checks and live JDBC HTTP integrations were run on the changed source.",
+    "Historical revision purge remains unavailable.",
+    "No main merge or production deployment."
+  ],
+  "screenshots": [
+    "images/source-revisions-desktop.png",
+    "images/source-revisions-mobile.png",
+    "images/connection-diagnosis-mobile.png"
+  ]
+}

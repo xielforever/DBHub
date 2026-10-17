@@ -330,6 +330,9 @@ func atoiDefault(s string, fallback int) int {
 }
 
 func mapNotFound(err error) error {
+	if errors.Is(err, db.ErrUserResourcesInUse) {
+		return httpx.Conflict(err.Error())
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return &httpx.AppError{Code: httpx.CodeNotFound, Message: "用户不存在"}
 	}

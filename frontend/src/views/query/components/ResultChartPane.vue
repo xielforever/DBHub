@@ -271,7 +271,7 @@ async function saveReport() {
       chart_config: config,
       visibility: saveForm.visibility,
     })
-    ElMessage.success('报表已保存，可在报表中心查看')
+    ElMessage.success('报表已保存，可在报表查看')
     saveOpen.value = false
   } catch {
     /* 拦截器提示 */

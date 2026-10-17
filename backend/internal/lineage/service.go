@@ -4,15 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
-	"log/slog"
-
+	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
 )
 
-// Service 血缘解析服务：定时扫描 sys_query_history → 解析（pg_query_go/vitess 正则近似）→ 落库 sys_meta_lineage
+// Service 血缘解析服务：定时扫描 sys_query_history → 解析实际 SQL AST→ 落库 sys_meta_lineage
 type Service struct {
 	lineage *db.LineageRepository
 	history *db.HistoryRepository
@@ -27,6 +27,24 @@ func NewService(lineage *db.LineageRepository, history *db.HistoryRepository, co
 
 // ParseRecentHistory 增量解析最近 limit 条成功历史，返回新增边数
 func (s *Service) ParseRecentHistory(ctx context.Context, limit int) (int, error) {
+	if db.ActorID(ctx) == 0 {
+		actors, e := s.history.ActiveActors(ctx)
+		if e != nil {
+			return 0, e
+		}
+		total := 0
+		for i := range actors {
+			if e = ctx.Err(); e != nil {
+				return total, e
+			}
+			n, err := s.ParseRecentHistory(context.WithValue(ctx, auth.ClaimsContextKey, &actors[i]), limit)
+			if err != nil {
+				return total, err
+			}
+			total += n
+		}
+		return total, nil
+	}
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
@@ -63,10 +81,13 @@ func (s *Service) parseOne(ctx context.Context, h *db.QueryHistory) (int, error)
 		return 0, nil // Redis 无表血缘
 	}
 
-	pr := ExtractTables(sqlText, dbType)
+	pr, parseErr := ParseTables(sqlText, dbType)
+	if parseErr != nil {
+		return 0, parseErr
+	}
 	fp := Fingerprint(sqlText)
 
-	// 若无目标（纯 SELECT），则在历史涉及的所有表之间两两建边（sql 关联）
+	// 只有明确的来源 → 写入目标构成数据血缘；SELECT 共现不生成虚假方向。
 	// 若有目标（INSERT/CREATE），则 source → target
 	var edges []struct {
 		up   TableRef
@@ -82,81 +103,37 @@ func (s *Service) parseOne(ctx context.Context, h *db.QueryHistory) (int, error)
 			}
 		}
 		// 若 INSERT 无来源（如 VALUES），则不建边
-	} else {
-		// SELECT：两两关联，取有序对（避免自环）
-		all := pr.All
-		if len(all) < 2 {
-			return 0, nil
-		}
-		for i := 0; i < len(all); i++ {
-			for j := i + 1; j < len(all); j++ {
-				// 双向各一条，或仅一条以减少噪声；此处建双向便于任一表为中心均可命中
-				edges = append(edges, struct {
-					up   TableRef
-					down TableRef
-				}{up: all[i], down: all[j]})
-				edges = append(edges, struct {
-					up   TableRef
-					down TableRef
-				}{up: all[j], down: all[i]})
-			}
-		}
 	}
 
 	if len(edges) == 0 {
 		return 0, nil
 	}
 
-	// 规范化表名到 snapshot（若存在），否则使用 history 的 database 作为 fallback
-	// 为减少 DB 查询，先批量加载该连接的 snapshots
-	snapMap := map[string]*db.MetaSnapshot{}
-	if s.meta != nil {
-		snaps, _ := s.meta.ListSnapshots(ctx, h.ConnectionID)
-		for i := range snaps {
-			low := strings.ToLower(snaps[i].TableName)
-			snapMap[low] = &snaps[i]
-		}
-	}
-
 	count := 0
 	for _, e := range edges {
-		upSnap := snapMap[strings.ToLower(e.up.Table)]
-		downSnap := snapMap[strings.ToLower(e.down.Table)]
-
-		upConn := h.ConnectionID
-		upDB := h.DatabaseName
-		upSchema := "public"
-		upTable := e.up.Table
-		if upSnap != nil {
-			upConn = upSnap.ConnectionID
-			upDB = upSnap.DatabaseName
-			upSchema = upSnap.SchemaName
-			upTable = upSnap.TableName
-		} else if e.up.Database != "" {
+		upConn, downConn := h.ConnectionID, h.ConnectionID
+		upDB, downDB := h.DatabaseName, h.DatabaseName
+		if e.up.Database != "" {
 			upDB = e.up.Database
+		}
+		if e.down.Database != "" {
+			downDB = e.down.Database
+		}
+		upSchema, downSchema := "public", "public"
+		if dbType == "mysql" {
+			upSchema = upDB
+			downSchema = downDB
 		}
 		if e.up.Schema != "" {
 			upSchema = e.up.Schema
 		}
-
-		downConn := h.ConnectionID
-		downDB := h.DatabaseName
-		downSchema := "public"
-		downTable := e.down.Table
-		if downSnap != nil {
-			downConn = downSnap.ConnectionID
-			downDB = downSnap.DatabaseName
-			downSchema = downSnap.SchemaName
-			downTable = downSnap.TableName
-		} else if e.down.Database != "" {
-			downDB = e.down.Database
-		}
 		if e.down.Schema != "" {
 			downSchema = e.down.Schema
 		}
+		upTable, downTable := e.up.Table, e.down.Table
 
 		// 过滤自环
-		if strings.EqualFold(upTable, downTable) && upConn == downConn && strings.EqualFold(upDB, downDB) {
+		if upTable == downTable && upConn == downConn && upDB == downDB && upSchema == downSchema {
 			continue
 		}
 
@@ -199,6 +176,21 @@ func (s *Service) ParseHistoryID(ctx context.Context, historyID int64) (int, err
 
 // BackfillFK 将外键血缘也落入缓存（按当前快照全量扫描）
 func (s *Service) BackfillFK(ctx context.Context) (int, error) {
+	if db.ActorID(ctx) == 0 {
+		actors, e := s.history.ActiveActors(ctx)
+		if e != nil {
+			return 0, e
+		}
+		total := 0
+		for i := range actors {
+			n, err := s.BackfillFK(context.WithValue(ctx, auth.ClaimsContextKey, &actors[i]))
+			if err != nil {
+				return total, err
+			}
+			total += n
+		}
+		return total, nil
+	}
 	if s.meta == nil {
 		return 0, fmt.Errorf("meta repo is nil")
 	}
@@ -280,14 +272,14 @@ func (s *Service) StartScheduler(ctx context.Context, interval time.Duration) {
 		defer ticker.Stop()
 		for {
 			start := time.Now()
-			n, err := s.ParseRecentHistory(context.Background(), 500)
+			n, err := s.ParseRecentHistory(ctx, 500)
 			if err != nil {
 				s.log.Warn("定时血缘解析失败", "error", err)
 			} else if n > 0 {
 				s.log.Info("定时血缘解析完成", "edges", n, "elapsed", time.Since(start))
 			}
 			// 额外：每日一次全量 FK 回填（简化：每次都尝试，幂等）
-			if _, err := s.BackfillFK(context.Background()); err != nil {
+			if _, err := s.BackfillFK(ctx); err != nil {
 				s.log.Warn("FK 回填失败", "error", err)
 			}
 			select {

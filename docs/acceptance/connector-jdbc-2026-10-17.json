@@ -1,0 +1,171 @@
+{
+  "date": "2026-10-17",
+  "scope": "native connector abstraction, capability workspace and custom JDBC first release",
+  "source_revision_before_changes": "3c6ec26a5937c19ec20360f32ec2118fb4578f2a",
+  "working_tree_changes_included": true,
+  "fingerprints": {
+    "backend_go_sha256": "7f6d47ebc9b9b37d44e6914b871c4496bf816796f1fb27f0d8e5aff6f5af1af2",
+    "backend_migrations_sha256": "d7b6a3d3232f055103386ef969c40e2ae6e335cd1595d02b0c6d69185b7467cc",
+    "frontend_source_sha256": "2f3c9404b1666eb00ef098824b87f5f70d5b303e4634d22b41879ab1056c0273",
+    "jdbc_source_sha256": "41097b3c05a78154fb83dcba3e2785e988724d213db17b0c302e6dab2d0d52e3"
+  },
+  "backend": {
+    "command": "go test -race -p=4 -count=1 -json ./...",
+    "passed_packages": 12,
+    "passed_test_items": 110,
+    "failed_test_items": [],
+    "skipped_tests": [
+      "TestVersionMatrixTarget"
+    ],
+    "skip_reason": "TestVersionMatrixTarget is run separately with explicit targets in the full compatibility matrix.",
+    "json_log_sha256": "c4aeeb0b52b8425c63f9eb6cb036fff75284fe2bc993c27d4bc7f70d3a9622b4",
+    "vet": "passed"
+  },
+  "frontend": {
+    "execution_state_tests": 14,
+    "build": "passed",
+    "warning": "Existing bundle chunks above 500 kB."
+  },
+  "browser": {
+    "connector": {
+      "checks": [
+        "admin registers an actually installed and checksum-verified JDBC artifact",
+        "admin publishes a reusable metadata-only JDBC template",
+        "custom JDBC source is tested and saved through the real form",
+        "H2 opens the metadata view without an unsupported SQL editor",
+        "metadata collection publishes the actual H2 table snapshot",
+        "contract fixture: an empty Schema list still allows default-scope metadata browsing",
+        "metadata browsing remains readable on a 390px screen",
+        "publishing a revision preserves the source original template binding",
+        "driver and template settings do not overflow the mobile page",
+        "invalid and missing source IDs never silently open another source",
+        "PostgreSQL JDBC runs SQL through the two-action data workspace",
+        "native and JDBC execute the same three workloads with recorded end-to-end timings",
+        "PostgreSQL JDBC collects the configured database and publishes its real table snapshot",
+        "MySQL JDBC preserves its formatting dialect, runs SQL and publishes a real metadata snapshot",
+        "Redis opens its key view and updates TTL without SQL controls",
+        "readonly users can browse while driver management and write controls stay hidden"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "56f06b5ecbcd62032204e184cb6a5bbfd3cb6d4a678cc42e5e8c821c5fa50b86",
+      "fixtures": [
+        "H2 fixture DDL uses private JDBC protocol only; public H2 SQL remains disabled",
+        "Empty Schema list is a UI contract fixture, not an additional driver validation"
+      ]
+    },
+    "versions": {
+      "checks": [
+        "real postgres version is displayed on the saved connection",
+        "real mysql version is displayed on the saved connection",
+        "real redis version is displayed on the saved connection",
+        "saved checks survive a page reload",
+        "editing a saved connection tests with its stored password without exposing it",
+        "changing a target requires an explicit password before testing",
+        "editing a target clears the previous verified result",
+        "late connection-test response cannot verify an edited target",
+        "contract fixture: protocol-compatible product is shown as unverified",
+        "mobile connection form keeps the version result readable",
+        "saving a changed connection invalidates its previous check",
+        "failed checks survive a page reload",
+        "saving an empty password preserves the working stored credential"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "168eeb1520b1f6e956fca011ac78b51a895ea9f8bffd70e3d20bf9beb1323e8c",
+      "fixtures": [
+        "unverified MariaDB profile only"
+      ]
+    },
+    "phase1": {
+      "checks": [
+        "anonymous API access requires authentication",
+        "real PostgreSQL, two actions, unchanged SQL and no implicit transaction",
+        "mobile SQL and result visible without page overflow",
+        "FETCH FIRST remains valid without automatic LIMIT",
+        "keyboard shortcut runs only the selected statement",
+        "multiple statements and SQL errors are clearly reported",
+        "real truncation count and virtual scrolling to the last row",
+        "duplicate shortcuts make one request; canceled server query reports uncertain outcome",
+        "refresh restores only the pending execution ID and requires verification before a new run",
+        "fresh execution succeeds after cancellation",
+        "lost committed-write response is recovered from a receipt without repeating the write",
+        "real MySQL execution and dialect-aware formatting",
+        "no advanced panels or background feature requests",
+        "production target requires confirmation; cancel sends no SQL and confirm sends once",
+        "developer workbench access, server authorization and unchanged protected data",
+        "developer revoked session returns to login instead of executing SQL",
+        "readonly workbench access, server authorization and unchanged protected data",
+        "readonly revoked session returns to login instead of executing SQL"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "44c6d5f19419bf071b57b96f7059949c18e4339ffdc6c969c4bd832dd44ae948",
+      "fixtures": []
+    }
+  },
+  "jdbc": {
+    "protocol": 1,
+    "jdk": "OpenJDK 17.0.20.1",
+    "transport": "Docker bridge, direct targets, TLS disabled",
+    "actual_targets": [
+      {
+        "product": "PostgreSQL",
+        "server_version": "16.15",
+        "driver_version": "42.7.7"
+      },
+      {
+        "product": "MySQL",
+        "server_version": "8.4.11",
+        "driver_version": "8.4.0"
+      },
+      {
+        "product": "H2",
+        "server_version": "2.4.240",
+        "driver_version": "2.4.240"
+      }
+    ],
+    "tls": {
+      "verified_products": [
+        "PostgreSQL 16.15 / JDBC 42.7.7",
+        "MySQL 8.4.11 / JDBC 8.4.0"
+      ],
+      "checks": [
+        "trusted CA and correct hostname succeed",
+        "hostname mismatch rejects",
+        "untrusted CA rejects"
+      ],
+      "report": "connector-jdbc-image-2026-10-17.json"
+    },
+    "image": {
+      "image_id": "sha256:e688e434cf30c36f5b8ec753a8a62ed839525beff244ac49ab7b2fb314130fc3",
+      "go_integration_items_passed": 12,
+      "protocol_tls_checks_passed": 12,
+      "runtime_user": "10001:10001",
+      "read_only_root": true,
+      "cleanup_succeeded": true
+    }
+  },
+  "cloud": {
+    "setup_script": "passed",
+    "start_script": "passed",
+    "migration_count": 21,
+    "final_services_expected": 6,
+    "owned_connector_fixture_records_remaining": 0,
+    "jdbc_sessions_after_cleanup": 0,
+    "test_containers_removed": true,
+    "private_credentials_not_staged": true
+  },
+  "limits": [
+    "No production deployment or main merge.",
+    "Generic Oracle-style template unit fixture is not actual Oracle support; MariaDB UI contract fixture is not server validation.",
+    "H2 public SQL is disabled; fixture creation uses private JDBC protocol.",
+    "Performance comparison is a small sequential development sample, not a capacity or production SLA result."
+  ],
+  "native_version_matrix": {
+    "passed_branches": 12,
+    "report": "connector-native-compatibility-2026-10-17.json",
+    "initial_disk_guard_failure_preserved": true
+  },
+  "browser_notes": [
+    "Version and SQL regression suites test their existing paths; the final connector rerun also verifies Redis list and detail TTL consistency.",
+    "Screenshot fixture data only."
+  ]
+}

@@ -1,0 +1,125 @@
+services:
+  jdbc:
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    command: ["sh", "/app/scripts/cloud/jdbc-runtime.sh"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    environment:
+      DBHUB_RUNTIME_UID: ${DBHUB_UID}
+      DBHUB_RUNTIME_GID: ${DBHUB_GID}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app:ro
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health', timeout=2)"]
+      interval: 3s
+      timeout: 3s
+      retries: 80
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+  mysql:
+    image: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes: ["mysql-data:/var/lib/mysql"]
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql --protocol=TCP -u$$MYSQL_USER -e 'SELECT 1' $$MYSQL_DATABASE >/dev/null"]
+      interval: 3s
+      timeout: 5s
+      retries: 50
+  redis:
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  backend:
+    image: golang:1.25.5-bookworm@sha256:d9132cce84391efab786495288756d60e1da215b1f94e87860aeefc3d4c45b6d
+    user: "${DBHUB_UID}:${DBHUB_GID}"
+    working_dir: /app/backend
+    command: ["sh", "-ec", "go build -p=4 -o /runtime/dbhub-backend ./cmd/server; exec /runtime/dbhub-backend"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    environment:
+      APP_ENV: development
+      PORT: "8080"
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=vendor
+      GOMAXPROCS: "4"
+      GOCACHE: /build-cache/go
+      TMPDIR: /build-cache/tmp
+      GOMODCACHE: /runtime/go-mod
+      SSL_CERT_FILE: /run/cloud-ca.pem
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+      DBHUB_AI_API_KEY: ${DBHUB_AI_API_KEY:-}
+      DBHUB_AI_BASE_URL: ${DBHUB_AI_BASE_URL:-https://api.openai.com/v1}
+      DBHUB_AI_MODEL: ${DBHUB_AI_MODEL:-gpt-4.1-mini}
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_BUILD_ROOT}:/build-cache
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  frontend:
+    image: node:24.12.0-bullseye@sha256:8302278f5ee66f9239f185e8f83236db63172a3432d60840c486fdc557d7e6e2
+    user: "${DBHUB_UID}:${DBHUB_GID}"
+    working_dir: /app/frontend
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--strictPort"]
+    environment:
+      VITE_API_PROXY_TARGET: http://backend:8080
+      NODE_EXTRA_CA_CERTS: /run/cloud-ca.pem
+      NPM_CONFIG_CACHE: /runtime/npm-cache
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+    ports: ["127.0.0.1:5173:5173"]
+  browser:
+    profiles: ["checks"]
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    command: ["sh", "/app/scripts/cloud/browser-runtime.sh"]
+    env_file: ["${DBHUB_STATE_DIR}/runtime.env"]
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${DBHUB_NO_PROXY}
+      DBHUB_BROWSER_TEST_SCRIPT: ${DBHUB_BROWSER_TEST_SCRIPT:-/app/scripts/cloud/browser_test.py}
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_REPO_DIR}:/app:ro
+      - ${DBHUB_STATE_DIR}:/runtime
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+volumes:
+  postgres-data:
+  mysql-data:
+  redis-data:

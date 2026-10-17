@@ -1,0 +1,22 @@
+{
+  "scope": "datasource-version-ui",
+  "checks": [
+    "real postgres version is displayed on the saved connection",
+    "real mysql version is displayed on the saved connection",
+    "real redis version is displayed on the saved connection",
+    "saved checks survive a page reload",
+    "editing a saved connection tests with its stored password without exposing it",
+    "changing a target requires an explicit password before testing",
+    "editing a target clears the previous verified result",
+    "late connection-test response cannot verify an edited target",
+    "contract fixture: protocol-compatible product is shown as unverified",
+    "mobile connection form keeps the version result readable",
+    "saving a changed connection invalidates its previous check",
+    "failed checks survive a page reload",
+    "saving an empty password preserves the working stored credential"
+  ],
+  "page_errors": [],
+  "contract_fixtures": [
+    "unverified MariaDB profile only"
+  ]
+}

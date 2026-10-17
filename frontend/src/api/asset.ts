@@ -1,5 +1,5 @@
 /**
- * 数据资产模块（M1）：字典同步、资产目录、表详情、人工标注、收藏与全局搜索
+ * 数据目录模块（M1）：字典同步、资产目录、表详情、人工标注、收藏与全局搜索
  */
 import request from '../utils/request'
 
@@ -50,6 +50,7 @@ export interface MetaSnapshot {
   raw_indexes: MetaIndex[]
   raw_keys: MetaKey[]
   ddl_text: string
+  metadata_status?: Record<string,string>
   synced_at: string
 }
 
@@ -125,6 +126,7 @@ export interface DbSyncStat {
   views: number
 }
 export interface SyncResult {
+  status: 'succeeded' | 'failed' | 'busy' | 'skipped' | 'unknown'
   connection_id: number
   connection_name: string
   type: string
@@ -235,7 +237,7 @@ export interface AnnotationPayload {
 }
 
 export const assetApi = {
-  /** 同步字典；body 为空同步全部关系型数据源，指定 connection_id 同步单源 */
+  /** 采集结构；body 为空同步全部关系型数据源，指定 connection_id 同步单源 */
   sync(connectionId?: number) {
     return request.post<unknown, SyncSummary>(
       '/assets/sync',

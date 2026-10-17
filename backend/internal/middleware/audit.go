@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
 )
@@ -38,6 +39,11 @@ func Audit(repo *db.AuditRepository, log *slog.Logger) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+			ctx, snapshot := auditctx.Begin(r.Context())
+			r = r.WithContext(ctx)
+			if c, ok := auth.ClaimsFromContext(ctx); ok {
+				auditctx.Update(ctx, func(d *auditctx.Data) { d.ActorID = c.Subject; d.ActorUsername = c.Username; d.ActorRole = c.Role })
+			}
 			sw := &AuditWriter{ResponseWriter: w, status: http.StatusOK}
 			next.ServeHTTP(sw, r)
 
@@ -47,6 +53,7 @@ func Audit(repo *db.AuditRepository, log *slog.Logger) Middleware {
 			}
 
 			rec := &db.AuditLog{
+				Context:      snapshot.Read(),
 				Action:       action,
 				ResourceType: resource,
 				ResourceName: name,
@@ -63,6 +70,17 @@ func Audit(repo *db.AuditRepository, log *slog.Logger) Middleware {
 				rec.UserID = &uid
 			} else if sw.auditID != nil {
 				rec.UserID = sw.auditID
+			}
+			if rec.Context.Outcome == "" {
+				if sw.status < 400 {
+					rec.Context.Outcome = "completed"
+				} else {
+					rec.Context.Outcome = "rejected"
+				}
+			}
+			if rec.Context.ConnectionID > 0 {
+				id := rec.Context.ConnectionID
+				rec.ConnectionID = &id
 			}
 			if sw.status >= 400 {
 				rec.ErrorMessage = http.StatusText(sw.status)

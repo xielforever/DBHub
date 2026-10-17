@@ -2,12 +2,10 @@ package lineageapi
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 	"strings"
-
-	"log/slog"
 
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
@@ -19,17 +17,18 @@ import (
 // 优先读取 sys_meta_lineage（定时 pg_query_go/vitess 解析 sys_query_history 落库），
 // 缓存未命中或空时回退到 FK+历史+报表实时计算，保证可用性
 type Handler struct {
-	meta     *db.MetadataRepository
-	history  *db.HistoryRepository
-	reports  *db.ReportRepository
-	dash     *db.DashboardRepository
-	lineage  *db.LineageRepository
-	svc      *lineage.Service
-	log      *slog.Logger
+	meta    *db.MetadataRepository
+	conns   *db.ConnectionRepository
+	history *db.HistoryRepository
+	reports *db.ReportRepository
+	dash    *db.DashboardRepository
+	lineage *db.LineageRepository
+	svc     *lineage.Service
+	log     *slog.Logger
 }
 
-func NewHandler(meta *db.MetadataRepository, history *db.HistoryRepository, reports *db.ReportRepository, dashboards *db.DashboardRepository, lineageRepo *db.LineageRepository, svc *lineage.Service, log *slog.Logger) *Handler {
-	return &Handler{meta: meta, history: history, reports: reports, dash: dashboards, lineage: lineageRepo, svc: svc, log: log}
+func NewHandler(meta *db.MetadataRepository, history *db.HistoryRepository, reports *db.ReportRepository, dashboards *db.DashboardRepository, lineageRepo *db.LineageRepository, svc *lineage.Service, log *slog.Logger, conns *db.ConnectionRepository) *Handler {
+	return &Handler{meta: meta, history: history, reports: reports, dash: dashboards, lineage: lineageRepo, svc: svc, log: log, conns: conns}
 }
 
 type lineageNode struct {
@@ -63,40 +62,6 @@ func tableKey(conn int64, dbName, schema, table string) string {
 	return strings.ToLower(strings.Join([]string{strconv.FormatInt(conn, 10), dbName, schema, table}, "."))
 }
 
-var (
-	tableRe  = regexp.MustCompile(`(?i)(?:FROM|JOIN|INTO|UPDATE|TABLE)\s+("?[a-zA-Z_][a-zA-Z0-9_]*"?\.)?("?[a-zA-Z_][a-zA-Z0-9_]*"?\.)?("?[a-zA-Z_][a-zA-Z0-9_]*"?)`)
-	insertRe = regexp.MustCompile(`(?i)INSERT\s+INTO\s+("?[a-zA-Z_][\w$]*"?)`)
-)
-
-func extractTables(sql string) []string {
-	seen := map[string]struct{}{}
-	out := []string{}
-	for _, m := range tableRe.FindAllStringSubmatch(sql, -1) {
-		t := strings.Trim(m[3], `"`)
-		t = strings.TrimSpace(t)
-		if t == "" {
-			continue
-		}
-		low := strings.ToLower(t)
-		if low == "select" || low == "where" || low == "values" || low == "set" {
-			continue
-		}
-		if _, ok := seen[low]; !ok {
-			seen[low] = struct{}{}
-			out = append(out, low)
-		}
-	}
-	for _, m := range insertRe.FindAllStringSubmatch(sql, -1) {
-		t := strings.Trim(m[1], `"`)
-		low := strings.ToLower(t)
-		if _, ok := seen[low]; !ok {
-			seen[low] = struct{}{}
-			out = append(out, low)
-		}
-	}
-	return out
-}
-
 // Lineage GET /api/v1/assets/lineage?connection_id=&database=&schema=&table=&depth=1|2|3
 func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 	claims, _ := auth.ClaimsFromContext(r.Context())
@@ -104,6 +69,12 @@ func (h *Handler) Lineage(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	connID, _ := strconv.ParseInt(q.Get("connection_id"), 10, 64)
+	if connID > 0 {
+		if _, e := h.conns.Get(r.Context(), connID); e != nil {
+			httpx.Fail(w, httpx.NotFound("个人连接不存在"))
+			return
+		}
+	}
 	dbName := strings.TrimSpace(q.Get("database"))
 	schema := strings.TrimSpace(q.Get("schema"))
 	table := strings.TrimSpace(q.Get("table"))
@@ -181,7 +152,7 @@ func (h *Handler) lineageCached(r *http.Request, targetSnap *db.MetaSnapshot, ta
 	visited := map[string]bool{targetKey: true}
 	type qItem struct {
 		key  string
-		dep int
+		dep  int
 		snap *db.MetaSnapshot
 	}
 	queue := []qItem{{key: targetKey, dep: 0, snap: targetSnap}}
@@ -274,9 +245,7 @@ func (h *Handler) lineageCached(r *http.Request, targetSnap *db.MetaSnapshot, ta
 	if h.reports != nil {
 		if items, _, err := h.reports.List(r.Context(), db.ReportFilter{Limit: 100, Offset: 0}); err == nil {
 			for _, rep := range items {
-				lowSQL := strings.ToLower(rep.SQLText)
-				lowTable := strings.ToLower(targetSnap.TableName)
-				if strings.Contains(lowSQL, lowTable) {
+				if h.reportUses(r, rep, targetSnap) {
 					id := "report." + strconv.FormatInt(rep.ID, 10)
 					if !visited[id] {
 						visited[id] = true
@@ -329,7 +298,7 @@ func (h *Handler) lineageRealtime(r *http.Request, targetSnap *db.MetaSnapshot, 
 	visited := map[string]bool{targetKey: true}
 	queue := []struct {
 		key  string
-		dep int
+		dep  int
 		snap *db.MetaSnapshot
 	}{{key: targetKey, dep: 0, snap: targetSnap}}
 
@@ -382,7 +351,7 @@ func (h *Handler) lineageRealtime(r *http.Request, targetSnap *db.MetaSnapshot, 
 						upstream[upKey] = lineageNode{ID: upKey, Name: upSnap.TableName, Type: upSnap.TableType, DB: upSnap.DatabaseName, Desc: "外键 " + k.Name}
 						queue = append(queue, struct {
 							key  string
-							dep int
+							dep  int
 							snap *db.MetaSnapshot
 						}{key: upKey, dep: cur.dep + 1, snap: upSnap})
 					}
@@ -419,7 +388,7 @@ func (h *Handler) lineageRealtime(r *http.Request, targetSnap *db.MetaSnapshot, 
 						downstream[downKey] = lineageNode{ID: downKey, Name: f.TableName, Type: f.TableType, DB: f.DatabaseName, Desc: "外键 " + kk.Name}
 						queue = append(queue, struct {
 							key  string
-							dep int
+							dep  int
 							snap *db.MetaSnapshot
 						}{key: downKey, dep: cur.dep + 1, snap: f})
 					}
@@ -427,55 +396,10 @@ func (h *Handler) lineageRealtime(r *http.Request, targetSnap *db.MetaSnapshot, 
 				}
 			}
 		}
-		if h.history != nil && cur.dep < depth {
-			hists, _, _ := h.history.List(r.Context(), 0, true, 0, "success", 100, 0)
-			for _, he := range hists {
-				tables := extractTables(he.SQLText)
-				lowCur := strings.ToLower(cur.snap.TableName)
-				foundCur := false
-				for _, t := range tables {
-					if t == lowCur {
-						foundCur = true
-						break
-					}
-				}
-				if !foundCur {
-					continue
-				}
-				for _, t := range tables {
-					if t == lowCur {
-						continue
-					}
-					cands := snapByTable[t]
-					var other *db.MetaSnapshot
-					var otherKey string
-					for _, c := range cands {
-						otherKey = tableKey(c.ConnectionID, c.DatabaseName, c.SchemaName, c.TableName)
-						other = c
-						break
-					}
-					if other == nil {
-						otherKey = "ext." + t
-						if !visited[otherKey] {
-							visited[otherKey] = true
-							downstream[otherKey] = lineageNode{ID: otherKey, Name: t, Type: "table", DB: he.DatabaseName, Desc: "SQL 依赖"}
-							edges = append(edges, lineageEdge{From: cur.key, To: otherKey, Kind: "sql"})
-						}
-						continue
-					}
-					if !visited[otherKey] {
-						visited[otherKey] = true
-						downstream[otherKey] = lineageNode{ID: otherKey, Name: other.TableName, Type: other.TableType, DB: other.DatabaseName, Desc: "SQL 关联"}
-					}
-					edges = append(edges, lineageEdge{From: cur.key, To: otherKey, Kind: "sql"})
-				}
-			}
-		}
 	}
+
 	for _, rep := range reports {
-		lowSQL := strings.ToLower(rep.SQLText)
-		lowTable := strings.ToLower(targetSnap.TableName)
-		if strings.Contains(lowSQL, lowTable) {
+		if h.reportUses(r, rep, targetSnap) {
 			id := "report." + strconv.FormatInt(rep.ID, 10)
 			if !visited[id] {
 				visited[id] = true
@@ -556,4 +480,39 @@ func parseKeys(raw []byte, out *[]metaKey) error {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+func (h *Handler) reportUses(r *http.Request, report db.Report, snap *db.MetaSnapshot) bool {
+	if report.ConnectionID != snap.ConnectionID || h.conns == nil {
+		return false
+	}
+	conn, e := h.conns.Get(r.Context(), report.ConnectionID)
+	if e != nil {
+		return false
+	}
+	pr, e := lineage.ParseTables(report.SQLText, conn.Type)
+	if e != nil {
+		return false
+	}
+	database := report.DatabaseName
+	if database == "" {
+		database = conn.Database
+	}
+	for _, table := range pr.All {
+		d := table.Database
+		if d == "" {
+			d = database
+		}
+		s := table.Schema
+		if s == "" {
+			s = "public"
+			if conn.Type == "mysql" {
+				s = d
+			}
+		}
+		if d == snap.DatabaseName && s == snap.SchemaName && table.Table == snap.TableName {
+			return true
+		}
+	}
+	return false
 }

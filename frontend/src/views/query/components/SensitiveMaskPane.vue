@@ -84,7 +84,7 @@
             <span>导出审批</span>
             <span class="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300">{{ pendingCount }} 待审批</span>
             <div class="flex-1" />
-            <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="clearRequests">清空已处理</button>
+            <button class="ghost-button !py-0.5 !px-2 text-[10px]" @click="clearRequests">刷新申请</button>
           </div>
           <div v-if="!exportRequests.length" class="text-center text-[11px] text-white/30 py-6">暂无导出申请</div>
           <div v-else class="divide-y divide-white/5">
@@ -92,8 +92,9 @@
               <span class="px-1.5 py-0.5 rounded text-[10px]" :class="req.status==='pending' ? 'bg-amber-500/15 text-amber-300' : req.status==='approved' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'">{{ statusLabel(req.status) }}</span>
               <span class="text-xs text-white/60 flex-1 truncate">{{ req.reason || '未填写原因' }} · {{ req.format }} · {{ req.rows }} 行</span>
               <span class="text-[10px] text-white/30">{{ formatTime(req.created_at) }}</span>
-              <button v-if="req.status==='pending'" class="ghost-button !py-0.5 !px-2 text-[10px] text-emerald-300" @click="updateStatus(req.id,'approved')">批准</button>
-              <button v-if="req.status==='pending'" class="ghost-button !py-0.5 !px-2 text-[10px] text-rose-300" @click="updateStatus(req.id,'rejected')">拒绝</button>
+              <button v-if="req.status==='approved'" class="ghost-button text-xs" @click="emit('download', req.id)">下载</button>
+              <button v-if="req.status==='pending' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[10px] text-emerald-300" @click="updateStatus(req.id,'approved')">批准</button>
+              <button v-if="req.status==='pending' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[10px] text-rose-300" @click="updateStatus(req.id,'rejected')">拒绝</button>
             </div>
           </div>
         </div>
@@ -104,6 +105,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useUserStore } from '../../../stores/user'
+const isAdmin=computed(()=>useUserStore().role==='admin')
 import { AlertTriangle, EyeOff, ShieldCheck } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -118,6 +121,7 @@ const emit = defineEmits<{
   (e: 'requestExport'): void
   (e: 'updateStatus', id: number, status: string): void
   (e: 'clearRequests'): void
+  (e: 'download', id:number): void
 }>()
 
 const sensitivePattern = /(phone|mobile|tel|email|id_card|idcard|ssn|password|passwd|credit|bank|card_no|real_name|name)/i

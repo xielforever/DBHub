@@ -154,7 +154,7 @@
               </tr>
               <tr v-if="!recentQueries.length">
                 <td colspan="5" class="py-10 text-center text-white/35 text-sm">
-                  暂无查询记录，去 SQL 工作台执行第一条查询吧
+                  暂无查询记录，去 数据工作台执行第一条查询吧
                 </td>
               </tr>
             </tbody>
@@ -168,7 +168,7 @@
       <article class="glass-card p-0 overflow-hidden">
         <div class="px-5 py-3 border-b border-white/10 flex items-center gap-2">
           <h2 class="font-medium">查询性能监控</h2>
-          <span class="text-xs text-white/40">复用 SQL 工作台监控能力 · 实时</span>
+          <span class="text-xs text-white/40">复用 数据工作台监控能力 · 实时</span>
           <div class="flex-1" />
           <button class="ghost-button text-xs py-1 px-2" @click="$router.push('/query')">前往工作台</button>
         </div>

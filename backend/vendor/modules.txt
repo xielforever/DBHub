@@ -6,7 +6,7 @@ filippo.io/edwards25519/field
 ## explicit; go 1.11
 github.com/cespare/xxhash/v2
 # github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f
-## explicit; go 1.12
+## explicit
 github.com/dgryski/go-rendezvous
 # github.com/go-sql-driver/mysql v1.9.3
 ## explicit; go 1.21.0
@@ -21,7 +21,6 @@ github.com/jackc/pgservicefile
 ## explicit; go 1.21
 github.com/jackc/pgx/v5
 github.com/jackc/pgx/v5/internal/iobufpool
-github.com/jackc/pgx/v5/internal/pgdatetime
 github.com/jackc/pgx/v5/internal/pgio
 github.com/jackc/pgx/v5/internal/sanitize
 github.com/jackc/pgx/v5/internal/stmtcache
@@ -31,11 +30,14 @@ github.com/jackc/pgx/v5/pgconn/internal/bgreader
 github.com/jackc/pgx/v5/pgproto3
 github.com/jackc/pgx/v5/pgtype
 github.com/jackc/pgx/v5/pgxpool
-github.com/jackc/pgx/v5/stdlib
 # github.com/jackc/puddle/v2 v2.2.2
 ## explicit; go 1.19
 github.com/jackc/puddle/v2
 github.com/jackc/puddle/v2/internal/genstack
+# github.com/pganalyze/pg_query_go/v5 v5.1.0
+## explicit; go 1.14
+github.com/pganalyze/pg_query_go/v5
+github.com/pganalyze/pg_query_go/v5/parser
 # github.com/redis/go-redis/v9 v9.7.3
 ## explicit; go 1.18
 github.com/redis/go-redis/v9
@@ -46,11 +48,14 @@ github.com/redis/go-redis/v9/internal/pool
 github.com/redis/go-redis/v9/internal/proto
 github.com/redis/go-redis/v9/internal/rand
 github.com/redis/go-redis/v9/internal/util
-
-# go.uber.org/atomic v1.11.0 => github.com/uber-go/atomic v1.11.0
-## explicit; go 1.18
-go.uber.org/atomic
-# golang.org/x/crypto v0.0.0-00010101000000-000000000000 => github.com/golang/crypto v0.39.0
+# github.com/xwb1989/sqlparser v0.0.0-20180606152119-120387863bf2
+## explicit
+github.com/xwb1989/sqlparser
+github.com/xwb1989/sqlparser/dependency/bytes2
+github.com/xwb1989/sqlparser/dependency/hack
+github.com/xwb1989/sqlparser/dependency/querypb
+github.com/xwb1989/sqlparser/dependency/sqltypes
+# golang.org/x/crypto v0.31.0 => github.com/golang/crypto v0.39.0
 ## explicit; go 1.23.0
 golang.org/x/crypto/blowfish
 golang.org/x/crypto/chacha20
@@ -81,6 +86,33 @@ golang.org/x/text/transform
 golang.org/x/text/unicode/bidi
 golang.org/x/text/unicode/norm
 golang.org/x/text/width
+# google.golang.org/protobuf v1.31.0
+## explicit; go 1.11
+google.golang.org/protobuf/encoding/prototext
+google.golang.org/protobuf/encoding/protowire
+google.golang.org/protobuf/internal/descfmt
+google.golang.org/protobuf/internal/descopts
+google.golang.org/protobuf/internal/detrand
+google.golang.org/protobuf/internal/encoding/defval
+google.golang.org/protobuf/internal/encoding/messageset
+google.golang.org/protobuf/internal/encoding/tag
+google.golang.org/protobuf/internal/encoding/text
+google.golang.org/protobuf/internal/errors
+google.golang.org/protobuf/internal/filedesc
+google.golang.org/protobuf/internal/filetype
+google.golang.org/protobuf/internal/flags
+google.golang.org/protobuf/internal/genid
+google.golang.org/protobuf/internal/impl
+google.golang.org/protobuf/internal/order
+google.golang.org/protobuf/internal/pragma
+google.golang.org/protobuf/internal/set
+google.golang.org/protobuf/internal/strs
+google.golang.org/protobuf/internal/version
+google.golang.org/protobuf/proto
+google.golang.org/protobuf/reflect/protoreflect
+google.golang.org/protobuf/reflect/protoregistry
+google.golang.org/protobuf/runtime/protoiface
+google.golang.org/protobuf/runtime/protoimpl
 # gopkg.in/yaml.v3 => github.com/go-yaml/yaml/v3 v3.0.1
 # golang.org/x/crypto => github.com/golang/crypto v0.39.0
 # golang.org/x/sys => github.com/golang/sys v0.32.0

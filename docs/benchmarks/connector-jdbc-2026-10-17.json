@@ -1,0 +1,64 @@
+{
+  "scope": "sequential HTTP comparison with fresh target connection per execution",
+  "samples_per_case": 20,
+  "percentile_method": "nearest rank",
+  "results": [
+    {
+      "workload": "short_query",
+      "implementation": "native",
+      "n": 20,
+      "p50_ms": 7.805,
+      "p95_ms": 8.222,
+      "max_ms": 8.692
+    },
+    {
+      "workload": "short_query",
+      "implementation": "jdbc",
+      "n": 20,
+      "p50_ms": 12.929,
+      "p95_ms": 15.335,
+      "max_ms": 21.098
+    },
+    {
+      "workload": "1000_rows",
+      "implementation": "native",
+      "n": 20,
+      "p50_ms": 8.519,
+      "p95_ms": 11.156,
+      "max_ms": 15.189
+    },
+    {
+      "workload": "1000_rows",
+      "implementation": "jdbc",
+      "n": 20,
+      "p50_ms": 18.823,
+      "p95_ms": 23.775,
+      "max_ms": 24.165
+    },
+    {
+      "workload": "aggregation",
+      "implementation": "native",
+      "n": 20,
+      "p50_ms": 8.985,
+      "p95_ms": 9.727,
+      "max_ms": 10.069
+    },
+    {
+      "workload": "aggregation",
+      "implementation": "jdbc",
+      "n": 20,
+      "p50_ms": 14.437,
+      "p95_ms": 19.848,
+      "max_ms": 22.403
+    }
+  ],
+  "limitations": [
+    "Small development sample; no capacity or production SLA claim.",
+    "Includes API authorization, receipt persistence, driver/RPC execution and JSON decoding."
+  ],
+  "recorded_at": "2026-10-17",
+  "target": "PostgreSQL 16.15",
+  "jdbc_driver": "PostgreSQL JDBC 42.7.7",
+  "transport": "Docker bridge, direct target, TLS disabled, JDBC HTTP TCP_NODELAY enabled",
+  "warmup_per_case": 2
+}

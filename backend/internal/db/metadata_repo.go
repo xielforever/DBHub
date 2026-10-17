@@ -15,36 +15,37 @@ import (
 
 // MetaSnapshot 一张表/视图的采集快照。
 type MetaSnapshot struct {
-	ID            int64           `json:"id"`
-	ConnectionID  int64           `json:"connection_id"`
-	DatabaseName  string          `json:"database_name"`
-	SchemaName    string          `json:"schema_name"`
-	TableName     string          `json:"table_name"`
-	TableType     string          `json:"table_type"`
-	TableComment  string          `json:"table_comment"`
-	EstimatedRows int64           `json:"estimated_rows"`
-	DataBytes     int64           `json:"data_bytes"`
-	RawColumns    json.RawMessage `json:"raw_columns"`
-	RawIndexes    json.RawMessage `json:"raw_indexes"`
-	RawKeys       json.RawMessage `json:"raw_keys"`
-	DDLText       string          `json:"ddl_text"`
-	SyncedAt      time.Time       `json:"synced_at"`
+	ID             int64           `json:"id"`
+	ConnectionID   int64           `json:"connection_id"`
+	DatabaseName   string          `json:"database_name"`
+	SchemaName     string          `json:"schema_name"`
+	TableName      string          `json:"table_name"`
+	TableType      string          `json:"table_type"`
+	TableComment   string          `json:"table_comment"`
+	EstimatedRows  int64           `json:"estimated_rows"`
+	DataBytes      int64           `json:"data_bytes"`
+	RawColumns     json.RawMessage `json:"raw_columns"`
+	RawIndexes     json.RawMessage `json:"raw_indexes"`
+	RawKeys        json.RawMessage `json:"raw_keys"`
+	DDLText        string          `json:"ddl_text"`
+	SyncedAt       time.Time       `json:"synced_at"`
+	MetadataStatus json.RawMessage `json:"metadata_status"`
 }
 
 // AssetAnnotation 表级或列级人工标注。
 type AssetAnnotation struct {
-	ID           int64    `json:"id"`
-	ConnectionID int64    `json:"connection_id"`
-	DatabaseName string   `json:"database_name"`
-	SchemaName   string   `json:"schema_name"`
-	TableName    string   `json:"table_name"`
-	ColumnName   string   `json:"column_name"`
-	OwnerUserID  *int64   `json:"owner_user_id"`
-	BusinessDesc string   `json:"business_desc"`
-	Tags         []string `json:"tags"`
-	Sensitivity  string   `json:"sensitivity"`
-	StarredBy    []int64  `json:"starred_by"`
-	UpdatedBy    *int64   `json:"updated_by"`
+	ID           int64     `json:"id"`
+	ConnectionID int64     `json:"connection_id"`
+	DatabaseName string    `json:"database_name"`
+	SchemaName   string    `json:"schema_name"`
+	TableName    string    `json:"table_name"`
+	ColumnName   string    `json:"column_name"`
+	OwnerUserID  *int64    `json:"owner_user_id"`
+	BusinessDesc string    `json:"business_desc"`
+	Tags         []string  `json:"tags"`
+	Sensitivity  string    `json:"sensitivity"`
+	StarredBy    []int64   `json:"starred_by"`
+	UpdatedBy    *int64    `json:"updated_by"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
@@ -65,14 +66,14 @@ type TableListFilter struct {
 // TableListItem 列表行：快照摘要 + 表级标注 + 热度。
 type TableListItem struct {
 	MetaSnapshot
-	OwnerID            *int64   `json:"owner_user_id"`
-	OwnerName          string   `json:"owner_name"`
-	BusinessDesc       string   `json:"business_desc"`
-	Tags               []string `json:"tags"`
-	Sensitivity        string   `json:"sensitivity"`
-	Starred            bool     `json:"starred"`
-	QueryCount30d      int64    `json:"query_count_30d"`
-	SensitiveColCount  int      `json:"sensitive_columns"`
+	OwnerID           *int64   `json:"owner_user_id"`
+	OwnerName         string   `json:"owner_name"`
+	BusinessDesc      string   `json:"business_desc"`
+	Tags              []string `json:"tags"`
+	Sensitivity       string   `json:"sensitivity"`
+	Starred           bool     `json:"starred"`
+	QueryCount30d     int64    `json:"query_count_30d"`
+	SensitiveColCount int      `json:"sensitive_columns"`
 }
 
 // MetadataRepository 资产元数据仓储。
@@ -94,6 +95,15 @@ func mustJSON(v any) json.RawMessage {
 
 // UpsertSnapshot 单表快照 upsert（按对象四元组唯一）。
 func (r *MetadataRepository) UpsertSnapshot(ctx context.Context, s *MetaSnapshot) error {
+	if e := requireConnection(ctx, r.pool, s.ConnectionID); e != nil {
+		return e
+	}
+	return upsertSnapshot(ctx, r.pool, s)
+}
+
+func upsertSnapshot(ctx context.Context, writer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, s *MetaSnapshot) error {
 	if s.RawColumns == nil {
 		s.RawColumns = json.RawMessage("[]")
 	}
@@ -103,12 +113,15 @@ func (r *MetadataRepository) UpsertSnapshot(ctx context.Context, s *MetaSnapshot
 	if s.RawKeys == nil {
 		s.RawKeys = json.RawMessage("[]")
 	}
-	return r.pool.QueryRow(ctx, `
+	if s.MetadataStatus == nil {
+		s.MetadataStatus = json.RawMessage("{}")
+	}
+	return writer.QueryRow(ctx, `
 		INSERT INTO sys_meta_snapshots
 			(connection_id, database_name, schema_name, table_name, table_type,
 			 table_comment, estimated_rows, data_bytes, raw_columns, raw_indexes,
-			 raw_keys, ddl_text, synced_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, NOW())
+			 raw_keys, ddl_text, metadata_status,synced_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, NOW())
 		ON CONFLICT ON CONSTRAINT uq_meta_snapshot_obj DO UPDATE SET
 			table_type = EXCLUDED.table_type,
 			table_comment = EXCLUDED.table_comment,
@@ -117,23 +130,13 @@ func (r *MetadataRepository) UpsertSnapshot(ctx context.Context, s *MetaSnapshot
 			raw_columns = EXCLUDED.raw_columns,
 			raw_indexes = EXCLUDED.raw_indexes,
 			raw_keys = EXCLUDED.raw_keys,
-			ddl_text = EXCLUDED.ddl_text,
+			ddl_text = EXCLUDED.ddl_text,metadata_status=EXCLUDED.metadata_status,
 			synced_at = NOW()
 		RETURNING id, synced_at`,
 		s.ConnectionID, s.DatabaseName, s.SchemaName, s.TableName, s.TableType,
 		s.TableComment, s.EstimatedRows, s.DataBytes, s.RawColumns, s.RawIndexes,
-		s.RawKeys, s.DDLText,
+		s.RawKeys, s.DDLText, s.MetadataStatus,
 	).Scan(&s.ID, &s.SyncedAt)
-}
-
-// PruneDatabase 删除指定库本次未采集到的过期快照（按表名集合）。
-func (r *MetadataRepository) PruneDatabase(ctx context.Context, connID int64, database string, keep []string) error {
-	_, err := r.pool.Exec(ctx, `
-		DELETE FROM sys_meta_snapshots
-		WHERE connection_id = $1 AND database_name = $2
-		  AND ($3 = '{}' OR table_name <> ALL($3))`,
-		connID, database, keep)
-	return err
 }
 
 // ListTables 资产列表（带表级标注与 Owner 用户名）。
@@ -151,6 +154,7 @@ func (r *MetadataRepository) ListTables(ctx context.Context, f TableListFilter) 
 	}
 	conds := []wcond{}
 	add := func(tmpl string, vals ...any) { conds = append(conds, wcond{tmpl: tmpl, vals: vals}) }
+	add(connectionScope(ctx, "s.connection_id"))
 	if f.ConnectionID > 0 {
 		add("s.connection_id = ?", f.ConnectionID)
 	}
@@ -226,7 +230,7 @@ func (r *MetadataRepository) ListTables(ctx context.Context, f TableListFilter) 
 	listSQL := `
 		SELECT s.id, s.connection_id, s.database_name, s.schema_name, s.table_name,
 		       s.table_type, s.table_comment, s.estimated_rows, s.data_bytes,
-		       s.raw_columns, s.raw_indexes, s.raw_keys, s.ddl_text, s.synced_at,
+		       s.raw_columns, s.raw_indexes, s.raw_keys, s.ddl_text, s.synced_at,s.metadata_status,
 		       a.owner_user_id, COALESCE(u.username, ''),
 		       COALESCE(a.business_desc, ''),
 		       COALESCE(a.tags, '{}'),
@@ -255,7 +259,7 @@ func (r *MetadataRepository) ListTables(ctx context.Context, f TableListFilter) 
 		if err := rows.Scan(
 			&it.ID, &it.ConnectionID, &it.DatabaseName, &it.SchemaName, &it.TableName,
 			&it.TableType, &it.TableComment, &it.EstimatedRows, &it.DataBytes,
-			&it.RawColumns, &it.RawIndexes, &it.RawKeys, &it.DDLText, &it.SyncedAt,
+			&it.RawColumns, &it.RawIndexes, &it.RawKeys, &it.DDLText, &it.SyncedAt, &it.MetadataStatus,
 			&it.OwnerID, &it.OwnerName, &it.BusinessDesc, &it.Tags, &it.Sensitivity,
 			&it.Starred, &it.SensitiveColCount,
 		); err != nil {
@@ -272,14 +276,14 @@ func (r *MetadataRepository) GetSnapshot(ctx context.Context, connID int64, data
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, connection_id, database_name, schema_name, table_name, table_type,
 		       table_comment, estimated_rows, data_bytes, raw_columns, raw_indexes,
-		       raw_keys, ddl_text, synced_at
+		       raw_keys, ddl_text, synced_at,metadata_status
 		FROM sys_meta_snapshots
 		WHERE connection_id = $1 AND database_name = $2
-		  AND schema_name = COALESCE(NULLIF($3, ''), schema_name) AND table_name = $4`,
+		  AND schema_name = COALESCE(NULLIF($3, ''), schema_name) AND table_name = $4 AND `+connectionScope(ctx, "connection_id"),
 		connID, database, schema, table,
 	).Scan(&s.ID, &s.ConnectionID, &s.DatabaseName, &s.SchemaName, &s.TableName,
 		&s.TableType, &s.TableComment, &s.EstimatedRows, &s.DataBytes,
-		&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt)
+		&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt, &s.MetadataStatus)
 	if err == pgx.ErrNoRows {
 		return nil, ErrNotFound
 	}
@@ -293,11 +297,11 @@ func (r *MetadataRepository) GetSnapshot(ctx context.Context, connID int64, data
 func (r *MetadataRepository) ListSnapshots(ctx context.Context, connID int64) ([]MetaSnapshot, error) {
 	q := `SELECT id, connection_id, database_name, schema_name, table_name, table_type,
 	             table_comment, estimated_rows, data_bytes, '[]'::jsonb,
-	             '[]'::jsonb, '[]'::jsonb, '', synced_at
-	      FROM sys_meta_snapshots`
+	             '[]'::jsonb, '[]'::jsonb, '', synced_at,metadata_status
+	      FROM sys_meta_snapshots WHERE ` + connectionScope(ctx, "connection_id")
 	args := []any{}
 	if connID > 0 {
-		q += ` WHERE connection_id = $1`
+		q += ` AND connection_id = $1`
 		args = append(args, connID)
 	}
 	q += ` ORDER BY database_name, schema_name, table_name`
@@ -311,7 +315,7 @@ func (r *MetadataRepository) ListSnapshots(ctx context.Context, connID int64) ([
 		var s MetaSnapshot
 		if err := rows.Scan(&s.ID, &s.ConnectionID, &s.DatabaseName, &s.SchemaName, &s.TableName,
 			&s.TableType, &s.TableComment, &s.EstimatedRows, &s.DataBytes,
-			&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt); err != nil {
+			&s.RawColumns, &s.RawIndexes, &s.RawKeys, &s.DDLText, &s.SyncedAt, &s.MetadataStatus); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -341,7 +345,7 @@ func (r *MetadataRepository) SearchColumns(ctx context.Context, keyword string, 
 		       c.col->>'name', c.col->>'data_type', COALESCE(c.col->>'comment', '')
 		FROM sys_meta_snapshots s,
 		     LATERAL jsonb_array_elements(s.raw_columns) AS c(col)
-		WHERE c.col->>'name' ILIKE $1 OR c.col->>'comment' ILIKE $1
+		WHERE `+connectionScope(ctx, "s.connection_id")+` AND (c.col->>'name' ILIKE $1 OR c.col->>'comment' ILIKE $1)
 		ORDER BY s.connection_id, s.database_name, s.schema_name, s.table_name
 		LIMIT $2`, like, limit)
 	if err != nil {
@@ -375,6 +379,9 @@ type AnnotationInput struct {
 }
 
 func (r *MetadataRepository) UpsertAnnotation(ctx context.Context, in *AnnotationInput) error {
+	if e := requireConnection(ctx, r.pool, in.ConnectionID); e != nil {
+		return e
+	}
 	if in.Sensitivity == "" {
 		in.Sensitivity = "normal"
 	}
@@ -400,6 +407,9 @@ func (r *MetadataRepository) UpsertAnnotation(ctx context.Context, in *Annotatio
 
 // ListAnnotations 批量取若干表的全部标注（表级与列级）。
 func (r *MetadataRepository) ListAnnotations(ctx context.Context, connID int64, database string) ([]AssetAnnotation, error) {
+	if e := requireConnection(ctx, r.pool, connID); e != nil {
+		return nil, e
+	}
 	q := `SELECT id, connection_id, database_name, schema_name, table_name, column_name,
 	             owner_user_id, business_desc, tags, sensitivity,
 	             COALESCE(starred_by, '{}'), updated_by, updated_at
@@ -419,6 +429,9 @@ func (r *MetadataRepository) ListAnnotations(ctx context.Context, connID int64, 
 
 // SetStar 收藏/取消收藏（幂等数组增删）。
 func (r *MetadataRepository) SetStar(ctx context.Context, connID int64, database, schema, table string, userID int64, star bool) error {
+	if e := requireConnection(ctx, r.pool, connID); e != nil {
+		return e
+	}
 	// 先确保表级标注行存在，再更新数组。
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO sys_asset_annotations
@@ -461,18 +474,18 @@ func (r *MetadataRepository) Overview(ctx context.Context) (*OverviewCounts, err
 	var o OverviewCounts
 	err := r.pool.QueryRow(ctx, `
 		SELECT
-		  (SELECT COUNT(*) FROM sys_connections),
-		  (SELECT COUNT(*) FROM sys_meta_snapshots WHERE table_type='table'),
-		  (SELECT COUNT(*) FROM sys_meta_snapshots WHERE table_type='view'),
+		  (SELECT COUNT(*) FROM sys_connections WHERE user_id=`+fmt.Sprint(ActorID(ctx))+`),
+		  (SELECT COUNT(*) FROM sys_meta_snapshots WHERE table_type='table' AND `+connectionScope(ctx, "connection_id")+`),
+		  (SELECT COUNT(*) FROM sys_meta_snapshots WHERE table_type='view' AND `+connectionScope(ctx, "connection_id")+`),
 		  (SELECT COUNT(DISTINCT (s.connection_id,s.database_name,s.schema_name,s.table_name))
 		     FROM sys_meta_snapshots s
 		     JOIN sys_asset_annotations a
 		       ON a.connection_id=s.connection_id AND a.database_name=s.database_name
 		      AND a.schema_name=s.schema_name AND a.table_name=s.table_name
 		      AND a.column_name=''
-		    WHERE a.owner_user_id IS NOT NULL),
+		    WHERE a.owner_user_id IS NOT NULL AND `+connectionScope(ctx, "s.connection_id")+`),
 		  (SELECT COUNT(*) FROM sys_asset_annotations
-		    WHERE column_name <> '' AND sensitivity <> 'normal')`).Scan(
+		    WHERE column_name <> '' AND sensitivity <> 'normal' AND `+connectionScope(ctx, "connection_id")+`)`).Scan(
 		&o.ConnectionTotal, &o.TableTotal, &o.ViewTotal, &o.OwnedTables, &o.SensitiveFields)
 	return &o, err
 }
@@ -510,7 +523,7 @@ func (r *MetadataRepository) HeatMap(ctx context.Context, days int) (map[string]
 	}
 	rows, err := r.pool.Query(ctx, `
 		SELECT connection_id, sql_text FROM sys_query_history
-		WHERE status = 1 AND created_at >= NOW() - make_interval(days => $1)
+		WHERE `+connectionScope(ctx, "connection_id")+` AND status = 1 AND created_at >= NOW() - make_interval(days => $1)
 		ORDER BY created_at DESC LIMIT 5000`, days)
 	if err != nil {
 		return nil, err

@@ -5,34 +5,46 @@ package queryapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/target"
 )
 
 // Handler 查询工作台处理器。
 type Handler struct {
-	conns   *db.ConnectionRepository
-	tunnels *db.TunnelRepository
-	history *db.HistoryRepository
-	log     *slog.Logger
+	conns    *db.ConnectionRepository
+	tunnels  *db.TunnelRepository
+	history  *db.HistoryRepository
+	log      *slog.Logger
+	txs      *transactions
+	jobs     *jobs
+	controls *db.QueryControls
+	metrics  *queryMetrics
+	drivers  *target.Runtime
 }
 
-func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger) *Handler {
-	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log}
+func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger, controls *db.QueryControls, runtimes ...*target.Runtime) *Handler {
+	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls, metrics: newQueryMetrics(), drivers: target.Default(runtimes)}
 }
 
 type executeRequest struct {
-	ConnectionID int64  `json:"connection_id"`
-	Database     string `json:"database"`
-	SQL          string `json:"sql"`
+	RequestID     string         `json:"request_id"`
+	ConnectionID  int64          `json:"connection_id"`
+	Database      string         `json:"database"`
+	SQL           string         `json:"sql"`
+	TransactionID string         `json:"transaction_id"`
+	TimeoutMS     int            `json:"timeout_ms"`
+	MaxRows       int            `json:"max_rows"`
+	Params        map[string]any `json:"params"`
 }
 
 func claimsOf(r *http.Request) *auth.Claims {
@@ -49,14 +61,29 @@ func (h *Handler) loadOwnedConnection(r *http.Request, connID int64) (*db.Connec
 	if err != nil {
 		return nil, "", nil, mapNotFound(err)
 	}
-	// 数据源为团队共享资源，所有登录用户均可使用；只读角色在执行引擎内禁止写语句。
+	auditctx.Update(r.Context(), func(d *auditctx.Data) {
+		d.ConnectionID = conn.ID
+		d.SourceFamilyID = conn.DefinitionFamilyID
+		d.DatabaseAccount = conn.Username
+		d.Driver = conn.Type
+		if conn.DefinitionRevisionID != nil {
+			d.DefinitionID = *conn.DefinitionRevisionID
+		}
+		if conn.Definition != nil {
+			d.Revision = conn.Definition.Revision
+		}
+		if conn.Template != nil {
+			d.Driver = conn.Template.Driver.ArtifactID
+		}
+	})
+	// 仓储严格校验当前用户的个人连接，绝不回退到发布者凭据。
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
 		t, err := h.tunnels.GetSecrets(r.Context(), *conn.SSHTunnelID)
 		if err != nil {
 			return nil, "", nil, mapNotFound(err)
 		}
-		if !isAdmin(c) && t.UserID != c.Subject {
+		if t.UserID != c.Subject {
 			return nil, "", nil, httpx.BadRequest("所选 SSH 隧道不可用")
 		}
 		tunnel = t
@@ -77,68 +104,11 @@ func (h *Handler) openRelational(r *http.Request, connID int64, database string)
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	handle, err := target.OpenRelational(ctx, conn, password, tunnel)
+	handle, err := h.drivers.OpenRelational(ctx, conn, password, tunnel)
 	if err != nil {
 		return nil, nil, nil, httpx.BadRequest("打开目标数据库失败: " + safeErr(err))
 	}
 	return handle, conn, handle.Close, nil
-}
-
-// Execute POST /api/v1/query/execute
-func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
-	var in executeRequest
-	if err := httpx.DecodeJSON(w, r, &in); err != nil {
-		httpx.Fail(w, err)
-		return
-	}
-	in.SQL = strings.TrimSpace(in.SQL)
-	if in.ConnectionID <= 0 {
-		httpx.Fail(w, httpx.BadRequest("connection_id 非法"))
-		return
-	}
-	if in.SQL == "" {
-		httpx.Fail(w, httpx.BadRequest("SQL 内容不能为空"))
-		return
-	}
-
-	conn, password, tunnel, err := h.loadOwnedConnection(r, in.ConnectionID)
-	if err != nil {
-		httpx.Fail(w, err)
-		return
-	}
-	if conn.Type == "redis" {
-		httpx.Fail(w, httpx.BadRequest("Redis 不支持 SQL，请使用键浏览功能"))
-		return
-	}
-	if in.Database != "" {
-		conn.Database = in.Database
-	}
-
-	openCtx, openCancel := context.WithTimeout(r.Context(), 20*time.Second)
-	handle, err := target.OpenRelational(openCtx, conn, password, tunnel)
-	openCancel()
-	if err != nil {
-		h.recordHistory(r.Context(), c, in, conn, 0, nil, err)
-		httpx.Fail(w, httpx.BadRequest("打开目标数据库失败: "+safeErr(err)))
-		return
-	}
-	defer handle.Close()
-
-	forceReadOnly := c.Role == "readonly"
-	result, execErr := target.Execute(r.Context(), handle, in.SQL, forceReadOnly)
-	if execErr != nil {
-		h.recordHistory(r.Context(), c, in, conn, 0, nil, execErr)
-		httpx.Fail(w, httpx.BadRequest(safeErr(execErr)))
-		return
-	}
-	var affected *int64
-	if result.Kind == "write" {
-		n := result.AffectedRows
-		affected = &n
-	}
-	h.recordHistory(r.Context(), c, in, conn, result.DurationMS, affected, nil)
-	httpx.OK(w, result)
 }
 
 func (h *Handler) recordHistory(ctx context.Context, c *auth.Claims, in executeRequest, conn *db.Connection, durationMS int64, affected *int64, execErr error) {
@@ -146,6 +116,8 @@ func (h *Handler) recordHistory(ctx context.Context, c *auth.Claims, in executeR
 	if dbName == "" {
 		dbName = conn.Database
 	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
 	rec := &db.QueryHistory{
 		ConnectionID: in.ConnectionID,
 		UserID:       c.Subject,
@@ -272,8 +244,7 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	columns, rows, total, err := target.PreviewTable(r.Context(), handle,
-		q.Get("database"), q.Get("schema"), table, pageSize+1, (page-1)*pageSize)
+	columns, rows, total, err := h.previewWithPolicies(r, handle, q.Get("database"), q.Get("schema"), table, pageSize+1, (page-1)*pageSize)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -302,7 +273,7 @@ func (h *Handler) RedisOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	info, err := target.RedisOverviewInfo(r.Context(), handle.Client)
+	info, err := target.RedisOverviewInfo(r.Context(), handle)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -321,7 +292,7 @@ func (h *Handler) RedisKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	keys, err := target.ScanKeys(r.Context(), handle.Client, q.Get("pattern"), max)
+	keys, err := target.ScanKeys(r.Context(), handle, q.Get("pattern"), max)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -344,7 +315,7 @@ func (h *Handler) RedisValue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer closeFn()
-	val, err := target.InspectKey(r.Context(), handle.Client, key)
+	val, err := target.InspectKey(r.Context(), handle, key)
 	if err != nil {
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
@@ -362,7 +333,7 @@ func (h *Handler) openRedis(r *http.Request, connID int64) (*target.RedisClient,
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	handle, err := target.OpenRedis(ctx, conn, password, tunnel)
+	handle, err := h.drivers.OpenRedis(ctx, conn, password, tunnel)
 	if err != nil {
 		return nil, nil, httpx.BadRequest("打开 Redis 失败: " + safeErr(err))
 	}
@@ -439,6 +410,15 @@ func atoiDefault(s string, fallback int) int {
 func intPtr(n int) *int { return &n }
 
 func mapNotFound(err error) error {
+	if errors.Is(err, db.ErrCatalogDisabled) {
+		return httpx.BadRequest("数据源定义、驱动或连接规则已停用")
+	}
+	if errors.Is(err, db.ErrConnectionChanged) {
+		return httpx.Conflict(err.Error())
+	}
+	if errors.Is(err, db.ErrSourceAccessDenied) {
+		return httpx.Forbidden(err.Error())
+	}
 	if errors.Is(err, db.ErrNotFound) {
 		return &httpx.AppError{Code: httpx.CodeNotFound, Message: "记录不存在"}
 	}
@@ -459,4 +439,41 @@ func firstN(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// previewWithPolicies applies the same server policy to preview and its count.
+func (h *Handler) previewWithPolicies(r *http.Request, handle *target.RelDB, database, schema, table string, limit, offset int) ([]string, [][]any, int64, error) {
+	name := quoted(table, handle.Conn.SQLDialect())
+	if handle.Conn.SQLDialect() == "postgres" {
+		if schema == "" {
+			schema = "public"
+		}
+		name = quoted(schema, handle.Conn.SQLDialect()) + "." + name
+	} else {
+		if database == "" {
+			database = handle.Conn.Database
+		}
+		name = quoted(database, handle.Conn.SQLDialect()) + "." + name
+	}
+	c := claimsOf(r)
+	query, args, e := h.applyPolicies(r.Context(), handle, c.Subject, c.Role, "SELECT * FROM "+name, nil)
+	if e != nil {
+		return nil, nil, 0, e
+	}
+	count, e := target.ExecuteWithOptions(r.Context(), handle, "SELECT COUNT(*) FROM ("+query+") AS dbhub_visible", true, target.ExecuteOptions{Args: args})
+	if e != nil {
+		return nil, nil, 0, e
+	}
+	var total int64
+	if len(count.Rows) > 0 {
+		_, e = fmt.Sscan(fmt.Sprint(count.Rows[0][0]), &total)
+		if e != nil {
+			return nil, nil, 0, e
+		}
+	}
+	result, e := target.ExecuteWithOptions(r.Context(), handle, query+fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset), true, target.ExecuteOptions{Args: args, MaxRows: limit})
+	if e != nil {
+		return nil, nil, 0, e
+	}
+	return result.Columns, result.Rows, total, nil
 }

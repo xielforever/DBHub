@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -14,9 +13,9 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auth"
+	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/target"
 )
 
 // Handler 数据资产处理器。
@@ -27,13 +26,14 @@ type Handler struct {
 	users   *db.UserRepository
 	history *db.HistoryRepository
 	log     *slog.Logger
+	drivers *target.Runtime
 }
 
 func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository,
 	meta *db.MetadataRepository, users *db.UserRepository,
-	history *db.HistoryRepository, log *slog.Logger) *Handler {
+	history *db.HistoryRepository, log *slog.Logger, runtimes ...*target.Runtime) *Handler {
 	return &Handler{conns: conns, tunnels: tunnels, meta: meta, users: users,
-		history: history, log: log}
+		history: history, log: log, drivers: target.Default(runtimes)}
 }
 
 // ---------------- 同步字典 ----------------
@@ -42,6 +42,7 @@ type syncResult struct {
 	ConnectionID   int64        `json:"connection_id"`
 	ConnectionName string       `json:"connection_name"`
 	Type           string       `json:"type"`
+	Status         string       `json:"status"`
 	Skipped        bool         `json:"skipped,omitempty"` // 非关系型数据源跳过
 	Databases      []string     `json:"databases"`
 	Tables         int          `json:"tables"`
@@ -67,21 +68,30 @@ type syncSummary struct {
 // Sync POST /api/v1/assets/sync （请求体可空：空=同步全部关系型数据源；
 // 传 {"connection_id":N} 仅同步指定数据源）。
 func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
-	// 请求体允许为空（EOF）；有内容时必须是合法 JSON。
-	var in struct {
-		ConnectionID int64 `json:"connection_id"`
+	var in *struct {
+		ConnectionID json.RawMessage `json:"connection_id"`
 	}
-	if r.Body != nil {
-		dec := json.NewDecoder(r.Body)
-		if err := dec.Decode(&in); err != nil && !errors.Is(err, io.EOF) {
-			httpx.Fail(w, httpx.BadRequest("请求参数格式错误: "+err.Error()))
+	present, err := httpx.DecodeOptionalJSON(w, r, &in)
+	if err != nil {
+		httpx.Fail(w, err)
+		return
+	}
+	if present && in == nil {
+		httpx.Fail(w, httpx.BadRequest("同步参数必须为 JSON 对象"))
+		return
+	}
+	var connectionID int64
+	single := in != nil && len(in.ConnectionID) > 0
+	if single {
+		if err := json.Unmarshal(in.ConnectionID, &connectionID); err != nil || connectionID <= 0 {
+			httpx.Fail(w, httpx.BadRequest("connection_id 必须为正整数"))
 			return
 		}
 	}
 
 	var targets []*db.Connection
-	if in.ConnectionID > 0 {
-		conn, _, err := h.conns.GetSecrets(r.Context(), in.ConnectionID)
+	if single {
+		conn, err := h.conns.Get(r.Context(), connectionID)
 		if err != nil {
 			httpx.Fail(w, mapNotFound(err))
 			return
@@ -105,6 +115,10 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 	summary := &syncSummary{Connections: []*syncResult{}}
 	for _, conn := range targets {
 		res := h.syncConnection(ctx, conn)
+		if single && res.Status == "busy" {
+			httpx.Fail(w, httpx.Conflict(db.ErrSyncBusy.Error()))
+			return
+		}
 		summary.Connections = append(summary.Connections, res)
 		summary.Tables += res.Tables
 		summary.Views += res.Views
@@ -118,11 +132,13 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		ConnectionID:   conn.ID,
 		ConnectionName: conn.Name,
 		Type:           conn.Type,
+		Status:         "failed",
 		Databases:      []string{},
 		ByDatabase:     []dbSyncStat{},
 	}
-	if conn.Type != "postgres" && conn.Type != "mysql" {
+	if conn.Type != "postgres" && conn.Type != "mysql" && conn.Type != "jdbc" {
 		res.Skipped = true
+		res.Status = "skipped"
 		return res
 	}
 	full, password, err := h.conns.GetSecrets(ctx, conn.ID)
@@ -131,6 +147,12 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		return res
 	}
 	conn = full
+	if !h.drivers.Capabilities(conn).Collect {
+		res.Skipped = true
+		res.Status = "skipped"
+		res.Errors = []string{"此驱动尚未验证完整结构采集，可先浏览结构"}
+		return res
+	}
 	var tunnel *db.SSHTunnel
 	if conn.SSHTunnelID != nil {
 		t, err := h.tunnels.GetSecrets(ctx, *conn.SSHTunnelID)
@@ -140,9 +162,19 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		}
 		tunnel = t
 	}
+	batch, err := h.meta.BeginSync(ctx, conn.ID, conn.UpdatedAt)
+	if err != nil {
+		if errors.Is(err, db.ErrSyncBusy) {
+			res.Status = "busy"
+		}
+		res.Errors = []string{safeErr(err)}
+		return res
+	}
+	defer batch.Close()
+	snapshots := []*db.MetaSnapshot{}
 
 	openConn := *conn
-	rootHandle, err := target.OpenRelational(ctx, &openConn, password, tunnel)
+	rootHandle, err := h.drivers.OpenRelational(ctx, &openConn, password, tunnel)
 	if err != nil {
 		res.Errors = append(res.Errors, "打开目标数据库失败: "+safeErr(err))
 		return res
@@ -156,20 +188,20 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 
 	for _, item := range dbNames {
 		dbName := item.Name
-		if !target.IsUserDatabase(conn.Type, dbName) {
+		if !target.IsUserDatabase(conn.SQLDialect(), dbName) {
 			res.SkippedDBs = append(res.SkippedDBs, dbName)
 			continue
 		}
 		dbConn := *conn
 		dbConn.Database = dbName
-		handle, err := target.OpenRelational(ctx, &dbConn, password, tunnel)
+		handle, err := h.drivers.OpenRelational(ctx, &dbConn, password, tunnel)
 		if err != nil {
 			res.Errors = append(res.Errors, dbName+": 连接失败 "+safeErr(err))
 			continue
 		}
 		stat := dbSyncStat{Database: dbName}
 		schemas := []string{""}
-		if conn.Type == "postgres" {
+		if conn.Type == "postgres" || conn.Type == "jdbc" {
 			list, err := target.Schemas(ctx, handle)
 			if err != nil {
 				handle.Close()
@@ -178,14 +210,13 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 			}
 			schemas = schemas[:0]
 			for _, s := range list {
-				if target.IsUserSchema(conn.Type, s) {
+				if target.IsUserSchema(conn.SQLDialect(), s) {
 					schemas = append(schemas, s)
 				}
 			}
 		} else {
 			schemas = []string{dbName}
 		}
-		keep := make([]string, 0)
 		for _, schema := range schemas {
 			metas, err := target.IntrospectSchema(ctx, handle, dbName, schema)
 			if err != nil {
@@ -213,13 +244,9 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 					RawColumns:    jsonRaw(m.Columns),
 					RawIndexes:    jsonRaw(m.Indexes),
 					RawKeys:       jsonRaw(m.Keys),
-					DDLText:       m.DDL,
+					DDLText:       m.DDL, MetadataStatus: jsonRaw(m.MetadataStatus),
 				}
-				if err := h.meta.UpsertSnapshot(ctx, snap); err != nil {
-					res.Errors = append(res.Errors, dbName+"."+m.Name+": 快照失败 "+safeErr(err))
-					continue
-				}
-				keep = append(keep, m.Name)
+				snapshots = append(snapshots, snap)
 				if m.Type == "view" {
 					res.Views++
 					stat.Views++
@@ -230,11 +257,25 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 			}
 		}
 		handle.Close()
-		if err := h.meta.PruneDatabase(ctx, conn.ID, dbName, keep); err != nil {
-			h.log.Warn("清理过期快照失败", "error", err)
-		}
 		res.Databases = append(res.Databases, dbName)
 		res.ByDatabase = append(res.ByDatabase, stat)
+	}
+	if len(res.Errors) == 0 {
+		if err := batch.Publish(ctx, snapshots); err != nil {
+			h.log.Warn("发布字典快照失败", "connection_id", conn.ID, "error", err)
+			if errors.Is(err, db.ErrMetadataPublishUnknown) {
+				res.Status = "unknown"
+				res.Errors = append(res.Errors, "发布响应未确认，请刷新数据目录核实快照；未自动重试。")
+			} else {
+				res.Errors = append(res.Errors, "本次采集未发布，旧快照已保留: "+safeErr(err))
+			}
+		} else {
+			res.Status = "succeeded"
+		}
+	}
+	if res.Status != "succeeded" {
+		res.Tables, res.Views = 0, 0
+		res.Databases, res.ByDatabase = []string{}, []dbSyncStat{}
 	}
 	return res
 }
@@ -290,7 +331,10 @@ func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Internal("加载快照失败", err))
 		return
 	}
-	type snapKey struct{ conn int64; db, schema, table string }
+	type snapKey struct {
+		conn              int64
+		db, schema, table string
+	}
 	_ = snapKey{}
 	byConn := map[int64]*treeConnection{}
 	order := []int64{}
@@ -302,8 +346,14 @@ func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
 		order = append(order, c.ID)
 	}
 	// 两级索引：(连接,库)→库下标；(连接,库,schema)→schema 下标
-	type dk struct{ conn int64; db string }
-	type sk struct{ conn int64; db, schema string }
+	type dk struct {
+		conn int64
+		db   string
+	}
+	type sk struct {
+		conn       int64
+		db, schema string
+	}
 	dbIdx := map[dk]int{}
 	scIdx := map[sk]int{}
 	for _, s := range snaps {
@@ -389,15 +439,15 @@ func (h *Handler) ListTables(w http.ResponseWriter, r *http.Request) {
 	for _, it := range items {
 		heatN := heat[db.HeatKeyOf(it.ConnectionID, it.DatabaseName, it.SchemaName, it.TableName)]
 		rows = append(rows, map[string]any{
-			"snapshot":        it.MetaSnapshot,
-			"connection_name": connMap[it.ConnectionID],
-			"owner_user_id":   it.OwnerID,
-			"owner_name":      it.OwnerName,
-			"business_desc":   it.BusinessDesc,
-			"tags":            it.Tags,
-			"sensitivity":     it.Sensitivity,
-			"starred":         it.Starred,
-			"query_count_30d": heatN,
+			"snapshot":          it.MetaSnapshot,
+			"connection_name":   connMap[it.ConnectionID],
+			"owner_user_id":     it.OwnerID,
+			"owner_name":        it.OwnerName,
+			"business_desc":     it.BusinessDesc,
+			"tags":              it.Tags,
+			"sensitivity":       it.Sensitivity,
+			"starred":           it.Starred,
+			"query_count_30d":   heatN,
 			"sensitive_columns": it.SensitiveColCount,
 		})
 	}
@@ -461,9 +511,9 @@ func (h *Handler) TableDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	heat, _ := h.meta.HeatMap(r.Context(), 30)
 	httpx.OK(w, map[string]any{
-		"snapshot":      snap,
-		"connection_name": connName,
-		"environment":   env,
+		"snapshot":           snap,
+		"connection_name":    connName,
+		"environment":        env,
 		"table_annotation":   tableAnno,
 		"column_annotations": cols,
 		"starred":            starred,

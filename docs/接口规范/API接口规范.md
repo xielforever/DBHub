@@ -1,5 +1,7 @@
 # 接口规范 (API Specification)
 
+本轮云端补齐的新增接口、错误语义和验收约束见 [云端后端补齐与验收契约](../开发指南/云端后端补齐验收.md)。与历史“占位/规划”描述冲突时，以该契约和已通过的集成验证为准。
+
 本规范定义了 DBHub 后端接口的交互标准。
 
 ## 1. 认证模块 (Auth)
@@ -137,8 +139,8 @@ curl http://localhost:8080/api/health
 
 ## 4. 数据源管理 (Connections)
 
-> 除标注外均需 Access Token（三通道任一）。写操作（POST/PUT/DELETE）仅 `admin`、`developer` 角色可用，`readonly` 返回 `40300`。
-> **数据源为团队共享资源**：任何登录用户均可查看完整连接列表，并可对全部数据源执行元数据浏览、表预览与（只读）SQL；列表与使用不再按创建人过滤。`user_id` 仅记录创建者用于审计，个人可见性维度预留给后续「个人连接」类型。写操作（增删改数据源、隧道）仍在路由层按角色鉴权。
+> 除标注外均需 Access Token（三通道任一）。`/connections` 表示当前用户的个人连接，所有登录角色均可创建、修改、删除和测试自己的连接；管理员也不例外。数据库执行仍独立检查平台角色和实际数据库账号权限。
+> 公共目标通过 `/datasource-definitions` 发布，不包含用户名或密码。使用者确认修订并配置个人身份后才能操作。其他用户的个人连接统一不可访问。完整流程与迁移见[共享数据源与个人连接](../开发指南/共享数据源与个人连接验收.md)。
 
 ### 4.1 连接列表
 **GET** `/api/v1/connections?type=postgres&keyword=prod`
@@ -182,13 +184,51 @@ curl http://localhost:8080/api/health
 
 ### 4.5 测试连接
 - **POST** `/api/v1/connections/test`：请求体同创建（用于保存前验证，口令不落库）
-- **POST** `/api/v1/connections/{id}/test`：使用已保存凭据测试
+- **POST** `/api/v1/connections/{id}/test`：空请求体使用已保存配置测试；携带完整连接配置时测试编辑草稿
+
+草稿测试仅限该个人连接的所有者，所有登录角色均可使用。目标与账号未变化时，口令留空复用本人已保存口令；修改数据库类型、主机、端口、数据库、账号、TLS 或代理/SSH 隧道后，必须重新输入口令。草稿测试不修改配置或已保存配置的检查记录。
 
 **Response data:**
 ```json
-{ "ok": true, "type": "postgres", "version": "PostgreSQL 16.4 ...", "elapsed_ms": 48 }
+{
+  "ok": true,
+  "type": "postgres",
+  "version": "PostgreSQL 16.15 ...",
+  "elapsed_ms": 48,
+  "started_at": "2026-10-17T10:00:00Z",
+  "checked_at": "2026-10-17T10:00:00.048Z",
+  "recorded": true,
+  "compatibility": {
+    "engine": "postgres",
+    "product": "PostgreSQL",
+    "version": "16.15",
+    "branch": "16",
+    "status": "verified",
+    "tested_version": "16.15",
+    "message": "该版本已通过基础兼容验证。"
+  }
+}
 ```
-失败返回 `40000`，消息为清洗后的驱动错误（不含口令片段）。
+失败返回 HTTP 400 / `40000`，消息为清洗后的驱动错误（不含口令片段），`data` 包含 `ok=false`、`error`、耗时与检查时间。保存配置的成功/失败检查都会持久化最近一条，列表/详情以可选 `last_check` 返回。`recorded=false` 表示草稿测试，或该结果因配置变更/较新检查而未记录；配置修改后旧检查失效，删除连接时级联删除记录。详情见[检查与采集可靠性](../开发指南/数据源检查与采集可靠性.md)。
+
+`version` 保留原有响应字段；`compatibility.version` 为规范化版本。`ok` 表示连接成功，兼容结论另见 `status`：`verified` 为实测补丁；`branch_verified` 为同分支其他补丁；`unverified` 为尚未验证的版本、兼容产品或 Redis 部署模式；`unknown` 为版本无法可靠识别。Redis 账号可以连接但无权读取 INFO 时返回成功与 `unknown`，不伪造验证结论。Redis 的 `compatibility.mode` 表示服务端报告的运行模式。具体边界见[数据源版本兼容](../开发指南/数据源版本兼容.md)。
+
+### 4.6 版本验证范围
+
+**GET** `/api/v1/connections/compatibility`，所有已登录角色可读，未登录返回 `401`。本接口只读取内嵌验证记录，不连接目标数据库。
+
+**Response data（节选）:**
+```json
+{
+  "items": [
+    { "engine": "mysql", "branch": "5.7", "tested_version": "5.7.44" },
+    { "engine": "postgres", "branch": "16", "tested_version": "16.15" }
+  ],
+  "scope": "基础 SQL、元数据和 Redis 单节点键值操作；不保证所有新语法或兼容产品"
+}
+```
+
+完整记录含 12 个分支；只有非空 `tested_version` 才表示已有实测。连接列表本身不自动探测版本，显示的是用户最近一次针对当前已保存配置的检查。
 
 ---
 
@@ -235,7 +275,7 @@ curl http://localhost:8080/api/health
 ### 6.1 执行 SQL
 **POST** `/api/v1/query/execute`
 ```json
-{ "connection_id": 1, "database": "orders", "sql": "SELECT id, name FROM users LIMIT 100" }
+{ "request_id": "d504b64a-cd47-42f9-8714-bde634f013ea", "connection_id": 1, "database": "orders", "sql": "SELECT id, name FROM users LIMIT 100" }
 ```
 查询类（SELECT / WITH / SHOW / DESC / EXPLAIN / TABLE / VALUES）返回：
 ```json
@@ -250,15 +290,32 @@ curl http://localhost:8080/api/health
 写入/DDL 类返回：`{ "kind": "write", "affected_rows": 2, "duration_ms": 5 }`。
 
 约束：
+- `request_id` 必填，使用非空 UUID。同一次请求的网络重放须沿用原编号；用户主动发起新的执行时生成新编号。工作台客户端已自动生成；直接调用 API 的客户端必须同步升级。
+- 以用户和请求编号为唯一键，在 PostgreSQL 元数据库中原子登记。已登记编号再次提交返回 HTTP 409，`data` 为原执行回执；不同 SQL、参数、目标、选项或角色不得复用同一编号。失败、超时、进程退出均不释放编号，服务端不会自动重跑。
 - 一次只允许执行一条语句（多语句返回 `40000`，防止批量注入）；
-- 单次结果最多返回 **1000 行**，超出 `truncated=true`；
-- 语句执行超时 30 秒；
-- `readonly` 角色由执行引擎按首关键字拦截：仅放行
-  SELECT/WITH/SHOW/DESC/EXPLAIN/TABLE/VALUES 等查询类语句，
-  INSERT/UPDATE/DELETE/DDL 等一律返回
-  `40000 只读角色禁止执行非查询语句: <KEYWORD>`（在平台引擎层拦截，
-  不依赖数据库侧只读事务，MySQL/PostgreSQL/代理连接池环境行为一致）；
-- 无论成功失败均写入查询历史（失败含 `error_message`）。
+- 默认最多返回 **1000 行**，超出 `truncated=true`；默认超时 30 秒。`max_rows`、`timeout_ms` 服从用户保存的更严格限制；硬上限分别为 10000 行、120 秒。返回行数限制不限制更新或删除的影响行数。
+- `readonly` 角色同时使用 SQL AST 检查和数据库只读事务。默认禁止没有 WHERE、或 WHERE 明显恒真的 UPDATE/DELETE；支持识别 `TRUE`、`1=1`、`OR 1=1` 等字面量条件，不证明任意条件的影响范围。
+- 普通执行使用独立连接；仅显式传入 `transaction_id` 时使用已有事务。事务内语句成功不表示事务已提交。
+- 执行完成后记录历史；请求登记和执行回执不保存 SQL、参数或查询结果行，不提供结果缓存。
+
+**GET** `/api/v1/query/executions/{request_id}`：查询本人执行回执，其他用户（含管理员）不能跨用户读取。示例 `data`：
+
+```json
+{
+  "request_id": "d504b64a-cd47-42f9-8714-bde634f013ea",
+  "connection_id": 1,
+  "database": "orders",
+  "status": "succeeded",
+  "transactional": false,
+  "kind": "write",
+  "affected_rows": 1,
+  "duration_ms": 5
+}
+```
+
+`status` 为 `queued`、`running`、`succeeded`、`failed`、`rejected` 或 `unknown`。`rejected` 表示未发送用户 SQL；`unknown` 表示结果不确定，不得解释为写入回滚。执行错误响应也可能携带回执，客户端应优先使用回执状态。元数据库暂时不可用时返回 503；重复编号返回 409；排队过载返回 429。未找到回执的 404 也不能单独证明原请求未执行。
+
+取消、超时、断网后只查询回执，不自动重新提交 SQL。超过 5 分钟未完成的排队/执行记录展示为 `unknown`，保持编号占用。回执不保存查询行，确认查询完成后只显示完成摘要。完整一致性与部署边界见 [执行可靠性](../开发指南/SQL工作台执行可靠性.md)。
 
 ### 6.2 对象浏览（均为 GET）
 | 接口 | 说明 |
@@ -315,8 +372,11 @@ curl http://localhost:8080/api/health
 | 能力 | admin | developer | readonly |
 | --- | --- | --- | --- |
 | 仪表盘/查看数据源 | ✅ | ✅ | ✅ |
-| 数据源/隧道增删改、测试连接 | ✅ | ✅ | ❌（403） |
-| 浏览共享数据源（库/模式/表/预览） | ✅ | ✅ | ✅ |
+| 个人连接增删改、测试连接 | ✅（本人） | ✅（本人） | ✅（本人） |
+| 全局驱动和数据源定义发布、启停 | ✅ | ❌ | ❌ |
+| 个人驱动配置与数据源定义 | ✅ | ✅ | ✅ |
+| SSH / 代理写操作 | ✅（本人） | ✅（本人） | ❌（403） |
+| 通过个人连接浏览已添加的数据源 | ✅ | ✅ | ✅ |
 | 执行 SELECT / SHOW / EXPLAIN 等查询 | ✅ | ✅ | ✅（引擎层关键字校验） |
 | 执行 INSERT/UPDATE/DDL 等写操作 | ✅ | ✅ | ❌（400 拒绝：只读角色禁止执行非查询语句） |
 | 用户与角色管理、审计日志 | ✅ | ❌ | ❌ |
@@ -335,10 +395,11 @@ curl http://localhost:8080/api/health
 
 ## 9. 仪表盘指标（Metrics）
 
+### 9.1 仪表盘汇总
+
 **GET** `/api/v1/metrics/overview?days=14`
 
-登录用户均可访问；`days` 取 1~90，缺省/越界均回落到 14。管理员可见全平台数据，
-普通用户的「最近查询」仅返回本人记录。慢查询阈值固定为 `execution_time_ms > 200`。
+登录用户均可访问；`days` 取 1~90，缺省/越界均回落到 14。连接、查询历史和数据目录按当前用户返回；管理员的运行指标与操作审计另行授权。慢查询阈值固定为 `execution_time_ms > 200`。
 
 响应 `data` 结构：
 
@@ -380,15 +441,39 @@ curl http://localhost:8080/api/health
 - `rank`：时间窗口内各数据源查询量降序，最多 8 条。
 - `recent`：最近查询记录，最多 8 条，结构同查询历史列表项。
 
+### 9.2 SQL 执行运行指标（管理员）
+
+**GET** `/api/v1/metrics/query`，或 `/api/v1/metrics/query?format=prometheus`。
+
+仅管理员可访问：未登录返回 401，其他角色返回 403。默认返回标准 JSON 信封；
+`format=json` 等同默认，`format=prometheus` 返回 Prometheus 0.0.4 文本，其他格式返回 400。
+两种格式均设置 `Cache-Control: no-store`，不包含 SQL、参数、用户、连接或请求编号标签。
+
+JSON 的 `data` 包含 `started_at`、`captured_at`、`uptime_seconds`、`requests`、
+`executions`、`counters`、`queue`、`process`、`metadata_pool` 和 `receipt_store_available`：
+
+- `requests` 统计进入执行处理器的请求，包含重复、冲突及拒绝；`executions` 仅统计实际开始的用户 SQL。
+  两者分别提供 `total`、`in_flight` 和按固定结果分类的 `completed` 耗时直方图，单位为秒。
+- `counters` 统计超时、取消、登记失败和回执写入失败。超时/取消是原因计数，可与请求结果重叠。
+- `queue` 提供运行/等待数量、进程峰值、接纳/拒绝/等待超时计数、等待耗时和当前执行限额；
+  `process` 提供 Go 堆、goroutine，Linux 另提供累计进程 CPU 秒和 RSS；`metadata_pool` 提供元数据库连接池占用与等待。
+- 数据库可读时附 `receipts_last_24h`，汇总近 24 小时创建的 queued/running/unknown，
+  超过 5 分钟未完成的记录计入 unknown，`stale` 是其子集。此处 unknown 是历史回执数量，不等于用户当前待办数。
+  汇总不可读时仍返回 200 及本进程指标，`receipt_store_available=false` 并省略持久化数量。
+
+进程计数和峰值在重启后清零，以 `started_at` 识别实例；多实例各自统计。
+详细口径、Prometheus 名称和可重复的 PostgreSQL/MySQL 压测步骤见
+[SQL 工作台运行指标与压测](../开发指南/SQL工作台运行指标与压测.md)。
+
 ---
 
-## 10. 数据资产 (Assets，M1)
+## 10. 数据目录 (Assets)
 
 > 所有接口需登录。**读接口**（overview/tree/tables/table/search/users-brief）任意登录角色可用；
-> **同步字典、写入标注**仅 `admin`、`developer`，`readonly` 返回 `40300`；**收藏**任意登录用户可用。
-> 资产快照由「同步字典」动作采集，人工标注独立存储，重新同步不覆盖人工内容。
+> **采集结构、写入标注**仅 `admin`、`developer`，`readonly` 返回 `40300`；**收藏**任意登录用户可用。
+> 结构快照由「采集结构」动作采集，人工标注独立存储，重新同步不覆盖人工内容。
 
-### 10.1 同步字典
+### 10.1 采集结构
 
 **POST** `/api/v1/assets/sync`（写角色，记审计）
 
@@ -396,8 +481,11 @@ curl http://localhost:8080/api/health
 ```json
 { "connection_id": 1 }
 ```
-串行采集，整体超时 4 分钟；非关系型（redis 等）标记 `skipped`；不可达数据源把清洗后的
-错误聚合进 `errors`，不中断其余数据源。每个业务库采集完成后按对象清单剪枝已消失的快照。
+空请求体或 `{}` 表示全量。显式 `connection_id` 必须为正整数，0、负数、null、未知字段或尾随 JSON 返回 400。
+
+串行采集，整体超时 4 分钟；非关系型（redis 等）标记 `skipped`。每个数据源的全部库/Schema 成功采集后，一次事务发布快照和清理过期对象；发布前的读取失败、取消、超时或配置变更均保留该源原快照，返回 `status=failed`、发布计数为 0。错误聚合进 `errors`，不中断其余数据源。
+
+同一元数据库下的同源采集跨后端互斥。单源请求重复采集返回 409；全量请求将冲突源标为 `busy` 并继续其他源。结果状态为 `succeeded | failed | busy | skipped | unknown`；提交确认丢失为 `unknown`，可能已经发布，刷新数据目录核实，不自动重试。
 
 **Response data:**
 ```json
@@ -405,6 +493,7 @@ curl http://localhost:8080/api/health
   "connections": [
     {
       "connection_id": 1, "connection_name": "订单核心库", "type": "postgres",
+      "status": "succeeded",
       "skipped": false,
       "databases": ["orders"],
       "tables": 24, "views": 2,
@@ -579,7 +668,7 @@ curl http://localhost:8080/api/health
 
 ## 11. 报表中心 (Reports，M3/M4)
 
-> 读：登录可用；写（创建/编辑/删除/收藏）：`admin`、`developer`，`readonly` 403；私有报表仅 owner/admin 可见。
+> 读：登录可用；写（创建/编辑/删除/收藏）：`admin`、`developer`，`readonly` 403；私有报表仅 owner 可见。
 
 ### 11.1 创建报表（M3 工作台另存为报表）
 
@@ -636,7 +725,7 @@ curl http://localhost:8080/api/health
 
 ### 11.5 仪表盘 CRUD（M4-FR-02）
 
-> 读：登录可用；写：`admin`/`developer`；私有仅 owner/admin 可见；收藏任意登录用户。
+> 读：登录可用；写：`admin`/`developer`；私有仅 owner 可见；收藏任意登录用户。
 
 - **POST** `/api/v1/dashboards` `{ name(必填≤128), description?, visibility?: private|shared, layout?: [{report_id,x,y,w,h}] }` → `{ id }`
   - `layout` 为 12 栅格：`w` 1~12，`x/y/h` 可选，M4 前端简化为报表 ID 列表组合
@@ -764,38 +853,21 @@ Dashboard 响应示例：
 
 ---
 
-## 14. 工单中心（Tickets，Step24 前端 Mock，后端规划 M6）
+## 14. 工单中心（Tickets）
 
-> **前端**：独立页面 `/tickets`（`TicketView`），侧栏 `数据` 分组 `工单中心`（`Ticket`），`glass-card` + KPI 5 卡，`localStorage dbhub_tickets_v1` 持久化，`ChangeTicketPane` 复用。
+工单已落库。申请人及管理员可查看；developer 可以为自己的个人连接提交变更，readonly 不可提交。审批和实际执行均限管理员。
 
-### 14.1 组件契约（现为前端 Mock）
+| 接口 | 载荷或响应 |
+| --- | --- |
+| GET `/api/v1/tickets?status=&q=&type=&page=&page_size=` | `{items,total,page,page_size}`，按可见范围过滤 |
+| GET `/api/v1/tickets/{id}` | 工单详情及执行摘要 |
+| POST `/api/v1/tickets` | `{title,type,table,database,connection_id,sql,risk,reason}`，返回工单；必须指定本人的连接 |
+| POST `/api/v1/tickets/{id}/status` | `{status:'approved'|'rejected'}`，仅能处理 pending |
+| POST `/api/v1/tickets/{id}/execute` | 原子领取 approved 工单，使用执行者本人对相同全局修订的连接，重复领取返回冲突 |
 
-**ChangeTicketPane Props / Emits**
-```ts
-props: {
-  tickets: TicketItem[]      // { id, title, type:'ddl'|'dml'|'index', table, sql, risk:'low'|'medium'|'high', status:'pending'|'approved'|'rejected'|'executed', requester, reason, created_at }
-  prefill?: { title?, table?, sql?, risk?, reason?, type? } | null
-}
-emits: (e:'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_at'>) | (e:'updateStatus', id:number, status:string)
-```
-- `prefill` 变更时 watch 自动填充表单并 `showCreate=true`
-- 列表支持状态筛选（全部/待审批/已批准/已执行/已拒绝）+ 关键字（标题/表名/SQL）+ 复制 SQL
+工单不接受 SELECT。全局目标的 `database` 不能覆盖发布的数据库。执行结果仅保留 `kind`、`affected_rows`、`duration_ms`，不提供执行者身份下的结果行或列。状态为 `pending|approved|rejected|executing|executed|failed`；失败或不确定执行不会自动重试。旧共享连接工单的迁移规则见文末 0022 说明。
 
-**TicketView 交互**
-- `GET /tickets?table=&db=&title=&sql=&risk=`：资产血缘一键建单入口；`incoming` 横幅 + `一键建单` 预填 `ALTER TABLE {{table}}`
-- 头部操作：加载示例、清空已办（仅保留 pending/approved）
-
-### 14.2 规划后端（M6 预留，详见 DB 设计 2.10）
-
-- **GET** `/api/v1/tickets?status=&q=&page=&page_size=` → `{ items, total }`
-- **POST** `/api/v1/tickets` `{ title, type, table, sql, risk, reason }` → `{ id }`（记审计）
-- **POST** `/api/v1/tickets/{id}/status` `{ status:'approved'|'rejected'|'executed' }`（`admin/developer` 审批，`readonly` 403）
-- 审计：创建、审批、执行均记 `sys_audit_logs`，字段 `resource_type=ticket`
-
-### 14.3 关联链路
-
-- 资产血缘 `DataLineagePane @create-ticket` → `router.push /tickets?table=&db=&title=` → 工单中心预填
-- 未来：工单执行将联动 `sys_query_history` 与 `sys_meta_snapshots` 变更对比
+资产血缘入口可通过 `/tickets?table=&db=&title=&sql=&risk=` 预填变更申请。
 
 ---
 
@@ -808,3 +880,75 @@ emits: (e:'create', payload: Omit<TicketItem,'id'|'status'|'requester'|'created_
 - 血缘 → 数据资产详情 `血缘` Tab（12）
 
 
+
+
+## 连接器目录、自定义数据源与能力
+
+所有接口使用 `Authorization: Bearer <access_token>`，沿用统一 envelope。驱动和连接规则支持 `visibility=private|global`，新增默认 private。所有登录用户可登记已安装制品的个人配置，仅当前 admin 可全局发布和管理全局版本。严格 JSON、审计和引用保护保留，不返回路径或凭据。
+
+| 方法/路径（/api/v1） | 行为 |
+| --- | --- |
+| GET /connector-drivers/available | 登录用户读取 JDBC 服务实际可加载、校验通过的制品 |
+| GET /connector-drivers | 已登记驱动摘要列表 |
+| POST /connector-drivers | 登记 `{ "artifact_id":"postgresql-42.7.7", "name":"PostgreSQL JDBC", "visibility":"private" }`；同范围重复制品 409 |
+| PATCH /connector-drivers/{id}/status | 个人所有者或全局 admin `{ "enabled": false }`；停用阻止新会话 |
+| DELETE /connector-drivers/{id} | 个人所有者或全局 admin 删除未引用版本，引用中返回 409 |
+| GET /datasource-templates | 登录用户读取模板列表；admin 可包含停用版本 |
+| POST /datasource-templates | 个人所有者或全局 admin 发布首个不可变修订 |
+| PUT /datasource-templates/{id} | 个人所有者或全局 admin 按相同 key 和范围追加修订，不改旧实例 |
+| PATCH /datasource-templates/{id}/status | 个人所有者或全局 admin 启停指定修订 |
+| DELETE /datasource-templates/{id} | 个人所有者或全局 admin 删除未引用修订，引用中返回 409 |
+| GET /connections/{id}/capabilities | 取得配置绑定和实际实现的能力，不触发目标 SQL |
+
+模板请求示例：
+
+```json
+{"template_key":"pg-jdbc","name":"PostgreSQL JDBC","product":"PostgreSQL","driver_id":1,"dialect":"postgres","url_template":"jdbc:postgresql://{host}:{port}/{database}","fields":[{"name":"host","label":"主机","type":"string","required":true},{"name":"port","label":"端口","type":"integer","required":true,"default":"5432"},{"name":"database","label":"数据库","type":"string","required":true}]}
+```
+
+fields 只定义 URL 占位参数，不接受凭据、任意 JDBC 属性或执行脚本。驱动对应可校验的 URL 结构；未知驱动须先加入部署制品清单；通用网络模板要求包含 `//{host}:{port}`，只提供结构浏览，不启用完整采集。特殊 URL、认证和范围映射需额外适配。`dialect` 默认为空，仅元数据；mysql/postgres 方言须与实际驱动家族匹配。URL 不含用户名和密码。缺字段、未知字段、非法 URL/模板返回 400；目标类型或传输能力未实现返回 400；制品或服务不可用返回 503；不存在返回 404；版本重复/被引用返回 409；无权限返回 403。
+
+JDBC 实例沿用 /connections CRUD 和测试接口，扩展如下字段：
+
+```json
+{"name":"分析库","type":"jdbc","template_revision_id":1,"parameters":{"host":"postgres","port":"5432","database":"analytics"},"host":"postgres","port":5432,"database":"analytics","username":"analyst","password":"<only-in-request>","ssl_mode":"disable","connection_timeout":10,"environment":"test"}
+```
+
+实例的 host/port/database 从模板参数规范化，不以重复字段覆盖模板。JDBC 第一版支持直连；PostgreSQL/MySQL 已验证 TLS 的可信 CA、主机名检查与失败关闭。H2 内存演示及未知产品不开放 TLS 选项，代理和 SSH 明确拒绝。编辑留空可复用口令，但模板、参数、身份、TLS 等目标信息变化时草稿测试要求重输；保存后检查按配置修订失效。实例响应增加 template_revision_id、parameters、template 摘要、capabilities，不返回口令。`type=jdbc` 只是兼容字段，产品、驱动、方言来自绑定的模板。
+
+能力响应示例：
+
+```json
+{"code":0,"message":"ok","data":{"sql":true,"format":true,"metadata":true,"collect":true,"keys":false,"transactions":true,"enforced_read_only":true}}
+```
+
+JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确小数和大整数以无损文本返回，二进制以显式编码返回，响应可附列类型。JDBC 的连接结果与兼容性分开，原生矩阵不自动授予 JDBC 已验证状态。元数据不支持的 DDL/统计由 metadata_status 标识，不以 0 或空文本冒充已读取；采集仍整轮原子发布。
+
+结构采集的 `status` 为 `succeeded|failed|busy|skipped|unknown`。`unknown` 表示元数据库提交确认丢失，可能已经发布；客户端提示刷新数据目录核实，不能将其表述为失败并保留旧快照。JDBC 默认只对实例配置库提供元数据，响应 `metadata_status` 记录不支持的 DDL/统计；完整采集单独检查 `collect`。
+
+
+## 共享数据源定义与个人绑定（0022）
+
+所有路由位于 `/api/v1`，需要登录。定义和凭据分别存储；全局写操作仅当前管理员可执行。
+
+| 路由 | 行为 |
+| --- | --- |
+| GET `/datasource-definitions` | 全局及本人私有的最新可见修订，附当前用户 `my_connection_id`、`my_revision_id` |
+| GET `/datasource-definitions/{id}/revisions?page=1&page_size=20` | 可见历史修订、相对上一可见版本的 `changes`；管理者另获 `binding_count`；每页最大 100 |
+| POST `/datasource-definitions` | `{name,description,visibility,config}`；config 只允许目标字段，拒绝认证字段 |
+| POST `/datasource-definitions/{id}/revisions` | 追加修订；旧绑定不变，相同内容的重复发布返回已有修订 |
+| PATCH `/datasource-definitions/{id}/status` | 启用 `{enabled:true}`；停用 `{enabled:false,confirmed:true,expected_binding_count:N}`，人数变化返回 409；仅影响指定修订的新操作 |
+| POST `/connections/{id}/publish` | 从本人的连接复制去凭据定义，`{visibility,description}`；代理与 SSH 暂不随定义发布 |
+| POST `/datasource-definitions/{id}/connections` | `{name,username,password,confirmed:true}`；创建个人绑定，重复返回 409 |
+| POST `/datasource-definitions/{id}/connections?test=true` | 同样的个人身份载荷，测试但不保存或改写检查记录 |
+| POST `/connections/{id}/revision` | `{definition_revision_id,name,username,password,confirmed:true}`；确认同一逻辑源的修订并重新输入凭据 |
+
+`/connections` 响应新增 `definition_revision_id`、`definition_family_id` 和 `definition` 摘要。全局关系型定义须指定库或服务；数据库选择和采集固定到发布的库，不能通过 API 覆盖。编辑公共绑定不能覆盖目标字段；修改身份或目标会使旧采集与检查失效。无数据库认证的 Redis 可保留空密码，关系型连接须明确填写自己的账号密码。
+
+公开查询结果与报表分享入口关闭，旧令牌迁移撤销。共享报表读取时使用查看者对同一发布修订的个人连接；未配置时 `connection_id=0`，客户端提示配置。管理员审批和执行工单时也需自己的匹配连接。管理员不能下载他人的导出或查看他人的私有查询任务与历史。
+
+0022 将引用他人连接的 pending/approved 旧工单改为 rejected，要求以个人连接重新提交，并将历史执行结果收敛为不含结果行的摘要。
+
+连接检查失败的 `data.diagnostic` 增加固定的 `{code,title,hint,action}`。已保存检查会持久化，草稿检查不保存；成功时不返回失败诊断。分类包括认证、权限、数据库不存在、TLS、DNS、网络、超时、容量、驱动服务、目标策略、配置、取消和未知原因，不回显底层异常。完整分类和修订管理契约见[数据源修订与连接诊断](../开发指南/数据源修订与连接诊断验收.md)。
+
+生产环境必须配置 `DBHUB_TARGET_ALLOWLIST`；未获允许的目标、代理及 SSH 端点不可连接。被驱动配置或其他资源引用的用户删除返回 409，可先停用用户并处理配置归属。

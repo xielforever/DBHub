@@ -94,7 +94,7 @@
           <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ viewDash.owner_name }}</span>
           <span class="px-2 py-0.5 rounded-full" :class="viewDash.visibility==='shared' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/8 text-white/50'">{{ viewDash.visibility }}</span>
           <span class="flex-1" />
-          <button class="ghost-button text-xs py-1 px-2 flex items-center gap-1" @click="openShare(viewDash)"><Share2 class="w-3.5 h-3.5" />分享</button>
+
           <button class="ghost-button text-xs py-1 px-2" @click="refreshAll">刷新全部</button>
         </div>
 
@@ -278,7 +278,8 @@ async function refreshAll() {
     if (!rep) continue
     reportLoading.value[cell.report_id] = true
     try {
-      const res = await workbenchApi.execute(rep.connection_id, rep.sql_text, rep.database_name)
+      if (!rep.connection_id) { ElMessage.warning('请先从数据源目录添加此报表对应修订的个人连接'); return }
+    const res = await workbenchApi.execute(rep.connection_id, rep.sql_text, rep.database_name)
       if (res.kind === 'query') {
         reportData.value[cell.report_id] = { columns: res.columns ?? [], rows: res.rows ?? [] }
       }
@@ -296,14 +297,6 @@ const lastShareToken = ref('')
 const shareSubject = ref<{ type: 'report' | 'dashboard'; id: number } | null>(null)
 const shareLink = computed(() => lastShareToken.value ? `${window.location.origin}/s/${lastShareToken.value}` : '')
 
-function openShare(d: DashboardItem | ReportItem) {
-  // 兼容报表与仪表盘
-  const isReport = (d as ReportItem).sql_text !== undefined
-  shareSubject.value = { type: isReport ? 'report' : 'dashboard', id: d.id }
-  lastShareToken.value = ''
-  shareOpen.value = true
-  loadShares()
-}
 async function loadShares() {
   if (!shareSubject.value) return
   shareLoading.value = true

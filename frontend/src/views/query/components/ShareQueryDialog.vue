@@ -17,14 +17,14 @@
             <el-option :label="'1 天'" :value="1" />
             <el-option :label="'7 天'" :value="7" />
             <el-option :label="'30 天'" :value="30" />
-            <el-option :label="'永久'" :value="0" />
+
           </el-select>
         </div>
         <div class="flex-1">
           <p class="text-xs text-white/50 mb-1">包含内容</p>
           <div class="flex flex-col gap-1.5 mt-1">
             <label class="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" v-model="form.includeParams" /> 参数值</label>
-            <label class="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" v-model="form.includeResult" /> 结果快照（前100行）</label>
+            <label class="flex items-center gap-2 text-xs text-white/60"><input type="checkbox" v-model="form.includeResult" /> 重新执行只读查询，分享前100行快照</label>
           </div>
         </div>
       </div>
@@ -54,7 +54,7 @@
           <p class="text-xs text-white/70 truncate">{{ s.name }}</p>
           <p class="text-[10px] text-white/30">{{ formatTime(s.created_at) }} · {{ s.expire_at ? '至 ' + formatTime(s.expire_at) : '永久' }}</p>
         </div>
-        <button class="ghost-button !py-1 !px-2 text-[10px]" @click="copyText(s.link)">复制</button>
+        <span class="text-[10px] text-white/35">{{ s.revoked ? "已撤销" : "有效" }}</span>
         <button class="ghost-button !py-1 !px-1.5 text-[10px] text-rose-300/60" @click="revokeShare(s.id)"><Trash2 class="w-3 h-3" /></button>
       </div>
     </div>
@@ -62,7 +62,8 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted } from 'vue'
+import { advancedApi, type QueryShare } from '../../../api/advanced'
 import { ElMessage } from 'element-plus'
 import { Copy, Share2, Trash2 } from 'lucide-vue-next'
 
@@ -88,63 +89,25 @@ const form = reactive({
 })
 
 const shareLink = ref('')
-const shareInfo = ref<any>(null)
-const recentShares = ref<any[]>([])
-
-try {
-  const raw = localStorage.getItem('dbhub_query_shares')
-  if (raw) recentShares.value = JSON.parse(raw)
-} catch {}
-
-function persist() {
-  try { localStorage.setItem('dbhub_query_shares', JSON.stringify(recentShares.value.slice(0, 20))) } catch {}
-}
-
+const shareInfo = ref<QueryShare | null>(null)
+const recentShares = ref<QueryShare[]>([])
+async function loadShares() {try { recentShares.value = (await advancedApi.shares()).items } catch {}}
+onMounted(loadShares)
 async function createShare() {
-  if (!form.name.trim()) return
-  // mock 生成链接
-  const token = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6)
-  const link = `${window.location.origin}/public/s/${token}?sql=${encodeURIComponent(props.sql.slice(0, 100))}`
-  shareLink.value = link
-  shareInfo.value = { access_count: 0 }
-
-  const item = {
-    id: Date.now(),
-    name: form.name.trim(),
-    link,
-    token,
-    sql: props.sql.slice(0, 200),
-    params: form.includeParams ? { ...props.params } : {},
-    result: form.includeResult ? { columns: props.columns, rows: props.rows.slice(0, 100) } : null,
-    expire_at: form.expireDays ? new Date(Date.now() + form.expireDays * 86400000).toISOString() : null,
-    created_at: new Date().toISOString(),
-  }
-  recentShares.value.unshift(item)
-  persist()
-
-  // 调用后端 mock
-  try {
-    const { shareApi } = await import('../../../api/share')
-    await shareApi.create({ subject_type: 'query', subject_id: props.connectionId, expire_days: form.expireDays || undefined } as any)
-  } catch {}
-
-  ElMessage.success('分享链接已生成')
-  emit('shared', link)
+ if (!form.name.trim()) return
+ try {
+  const res = await advancedApi.createShare({name: form.name.trim(), connection_id: props.connectionId, database: props.database, sql: props.sql, params: form.includeParams ? props.params : {}, expire_days: form.expireDays, include_result: form.includeResult})
+  shareLink.value = `${window.location.origin}/q/${encodeURIComponent(res.token)}`; shareInfo.value = res.share
+  await loadShares(); ElMessage.success('分享链接已生成，请仅发给可信接收者'); emit('shared', shareLink.value)
+ } catch(e: unknown) { ElMessage.error(e instanceof Error ? e.message : '创建分享失败') }
 }
 
 function copyLink() {
   navigator.clipboard.writeText(shareLink.value).then(() => ElMessage.success('已复制'))
 }
 
-function copyText(t: string) {
-  navigator.clipboard.writeText(t).then(() => ElMessage.success('已复制'))
-}
 
-function revokeShare(id: number) {
-  recentShares.value = recentShares.value.filter(x => x.id !== id)
-  persist()
-  ElMessage.success('已撤销')
-}
+async function revokeShare(id: number) { try { await advancedApi.revokeShare(id); if(shareInfo.value?.id === id) shareLink.value = ''; await loadShares(); ElMessage.success('已撤销') } catch {} }
 
 function formatTime(s: string) {
   return new Date(s).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })

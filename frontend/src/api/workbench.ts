@@ -1,7 +1,8 @@
 /**
- * SQL 工作台 API：执行、元数据浏览、表数据预览、查询历史
+ * 数据工作台 API：执行、元数据浏览、表数据预览、查询历史
  */
 import request from '../utils/request'
+import { newRequestId } from '../utils/request-id'
 import type { DbType } from './datasource'
 
 export interface ExecResult {
@@ -13,6 +14,19 @@ export interface ExecResult {
   duration_ms: number
 }
 
+/** 执行回执不含 SQL、参数或查询结果行。 */
+export interface ExecutionReceipt {
+  request_id: string
+  connection_id: number
+  database: string
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'rejected' | 'unknown'
+  transactional: boolean
+  kind?: 'query' | 'write'
+  affected_rows: number
+  duration_ms: number
+  message?: string
+}
+
 export interface TableInfo {
   schema: string
   name: string
@@ -22,6 +36,7 @@ export interface TableInfo {
 export interface ColumnInfo {
   name: string
   data_type: string
+  comment?: string
   is_nullable: boolean
   is_primary: boolean
   default?: string
@@ -60,6 +75,7 @@ export interface RedisOverview {
   connected_clients: number
   used_memory_mb: number
   total_commands: number
+  total_keys: number
   keyspaces: { db: string; keys: number; expires: number }[]
 }
 
@@ -78,19 +94,29 @@ export interface RedisValue {
 }
 
 export const workbenchApi = {
-  execute(connectionId: number, sql: string, database?: string, signal?: AbortSignal, params?: Record<string, string>) {
+  execute(connectionId: number, sql: string, database?: string, signal?: AbortSignal, params?: Record<string, string>, options?: {request_id?: string; transaction_id?: string; timeout_ms?: number; max_rows?: number}) {
     return request.post<unknown, ExecResult>('/query/execute', {
       connection_id: connectionId,
       sql,
       database: database || '',
       params: params || undefined,
+      ...options,
+      request_id: options?.request_id ?? newRequestId(),
     }, {
       signal,
-    } as any)
+      timeout:(options?.timeout_ms || 30000)+60000,
+      silentError: true,
+    })
   },
-  databases(connectionId: number) {
+  execution(requestId: string, signal?: AbortSignal) {
+    return request.get<unknown, ExecutionReceipt>(`/query/executions/${encodeURIComponent(requestId)}`, {
+      signal, timeout: 8000, silentError: true,
+    })
+  },
+  databases(connectionId: number, signal?: AbortSignal) {
     return request.get<unknown, { items: { name: string }[] }>('/metadata/databases', {
       params: { connection_id: connectionId },
+      signal,
     })
   },
   schemas(connectionId: number, database?: string) {

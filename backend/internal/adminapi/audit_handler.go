@@ -30,10 +30,20 @@ func (h *AuditHandler) AuditLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter := db.AuditFilter{
-		Username:     q.Get("username"),
+		Username: q.Get("username"), DatabaseAccount: q.Get("database_account"), Outcome: q.Get("outcome"),
 		Action:       q.Get("action"),
 		ResourceType: q.Get("resource_type"),
 		Status:       q.Get("status"),
+	}
+	switch filter.Status {
+	case "success":
+		filter.Status = "1"
+	case "failed":
+		filter.Status = "0"
+	case "":
+	default:
+		httpx.Fail(w, httpx.BadRequest("审计结果筛选无效"))
+		return
 	}
 	if days := atoiDefault(q.Get("days"), 0); days > 0 && days <= 365 {
 		filter.End = time.Now()

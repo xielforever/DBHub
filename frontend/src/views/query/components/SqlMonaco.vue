@@ -1,289 +1,136 @@
 <template>
-  <div class="relative w-full h-full min-h-[180px] flex flex-col overflow-hidden">
-    <div ref="containerRef" class="flex-1 w-full min-h-0" />
-    <div v-if="!monacoLoaded" class="absolute inset-0 flex items-center justify-center text-xs text-white/30">
-      编辑器加载中…
-    </div>
+  <div class="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
+    <div v-show="!fallback" ref="container" class="min-h-0 flex-1" />
+    <p v-if="!ready && !fallback" class="absolute inset-0 flex items-center justify-center text-xs text-white/50" role="status">编辑器加载中…</p>
+    <template v-if="fallback">
+      <p class="px-4 pt-2 text-[11px] text-amber-200/80">高级编辑器加载失败，已切换为基础编辑器。</p>
+      <textarea
+        ref="textarea"
+        :value="modelValue"
+        aria-label="SQL 编辑器"
+        placeholder="在此输入 SQL，例如 SELECT 1;"
+        spellcheck="false"
+        class="min-h-0 flex-1 resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-indigo-100 outline-none"
+        @input="onInput"
+        @select="updateSelection"
+        @keyup="updateSelection"
+        @click="updateSelection"
+        @keydown.ctrl.enter.prevent="emit('run')"
+        @keydown.meta.enter.prevent="emit('run')"
+        @keydown.ctrl.shift.f.prevent="emit('format')"
+        @keydown.meta.shift.f.prevent="emit('format')"
+      />
+    </template>
+    <p v-if="ready && !modelValue" class="pointer-events-none absolute left-[68px] top-3 text-[13px] text-white/40" aria-hidden="true">在此输入 SQL，例如 SELECT 1;</p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type * as Monaco from 'monaco-editor'
+import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
 
-const props = withDefaults(
-  defineProps<{
-    modelValue: string
-    tables?: string[]
-    columns?: string[]
-    placeholder?: string
-    minimap?: boolean
-    theme?: string
-    fontSize?: number
-    wordWrap?: 'on' | 'off'
-  }>(),
-  {
-    tables: () => [],
-    columns: () => [],
-    placeholder: '',
-    minimap: false,
-    theme: 'dbhub-dark',
-    fontSize: 13,
-    wordWrap: 'on',
-  },
-)
-
+;(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
+  getWorker: () => new EditorWorker(),
+}
+const props = defineProps<{ modelValue: string }>()
 const emit = defineEmits<{
-  (e: 'update:modelValue', v: string): void
-  (e: 'run'): void
-  (e: 'format'): void
-  (e: 'selection-change', len: number): void
+  (event: 'update:modelValue', value: string): void
+  (event: 'run'): void
+  (event: 'format'): void
 }>()
+const container = ref<HTMLDivElement | null>(null)
+const textarea = ref<HTMLTextAreaElement | null>(null)
+const ready = ref(false)
+const fallback = ref(false)
+const selectedLength = ref(0)
+let disposed = false
+let editor: Monaco.editor.IStandaloneCodeEditor | null = null
+let observer: ResizeObserver | null = null
+const subscriptions: Monaco.IDisposable[] = []
 
-const containerRef = ref<HTMLDivElement | null>(null)
-const monacoLoaded = ref(false)
-let editor: any = null
-let monaco: any = null
-let completionDisposable: any = null
-let resizeObserver: ResizeObserver | null = null
-
-const SQL_KEYWORDS = [
-  'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE',
-  'CREATE', 'TABLE', 'ALTER', 'DROP', 'INDEX', 'VIEW', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER',
-  'ON', 'GROUP BY', 'ORDER BY', 'HAVING', 'LIMIT', 'OFFSET', 'UNION', 'ALL', 'DISTINCT', 'AS',
-  'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'BETWEEN', 'IN', 'IS', 'NULL', 'NOT', 'LIKE', 'ILIKE',
-  'EXISTS', 'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'NOW', 'CURRENT_TIMESTAMP',
-]
-
-async function init() {
-  // 配置 worker，Vite 方式 - 仅需 editor worker 即可支持 SQL
-  const monacoModule = await import('monaco-editor')
-  monaco = monacoModule
-
-  // 简化：不自定义 MonacoEnvironment，使用 monaco 默认，Vite 会自动处理 worker
-  // 如需自定义，可在 vite.config.ts 中配置，此处留空避免 rolldown 解析失败
-
-  monaco.editor.defineTheme('dbhub-dark', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [
-      { token: 'keyword', foreground: 'A78BFA' },
-      { token: 'string', foreground: '6EE7B7' },
-      { token: 'number', foreground: 'FBBF24' },
-      { token: 'comment', foreground: '6B7280', fontStyle: 'italic' },
-    ],
-    colors: {
-      'editor.background': '#0E0E1A',
-      'editor.foreground': '#E0E7FF',
-      'editorLineNumber.foreground': '#4B5563',
-      'editorLineNumber.activeForeground': '#A5B4FC',
-      'editor.selectionBackground': '#6366F140',
-      'editor.inactiveSelectionBackground': '#6366F120',
-      'editor.lineHighlightBackground': '#FFFFFF08',
-      'editorCursor.foreground': '#A78BFA',
-      'editorGutter.background': '#0E0E1A',
-      'scrollbar.shadow': '#00000000',
-      'scrollbarSlider.background': '#FFFFFF15',
-      'scrollbarSlider.hoverBackground': '#FFFFFF25',
-    },
-  })
-  monaco.editor.defineTheme('dbhub-light', {
-    base: 'vs',
-    inherit: true,
-    rules: [
-      { token: 'keyword', foreground: '7C3AED' },
-      { token: 'string', foreground: '059669' },
-      { token: 'number', foreground: 'D97706' },
-    ],
-    colors: {
-      'editor.background': '#FFFFFF',
-      'editor.foreground': '#1F2937',
-      'editorLineNumber.foreground': '#9CA3AF',
-      'editor.selectionBackground': '#A5B4FC40',
-      'editor.lineHighlightBackground': '#F3F4F6',
-    },
-  })
-  monaco.editor.defineTheme('dbhub-hc', {
-    base: 'hc-black',
-    inherit: true,
-    rules: [],
-    colors: {},
-  })
-
-  if (!containerRef.value) return
-
-  editor = monaco.editor.create(containerRef.value, {
-    value: props.modelValue || '',
-    language: 'sql',
-    theme: props.theme || 'dbhub-dark',
-    fontSize: props.fontSize || 13,
-    lineHeight: 20,
-    fontFamily: 'JetBrains Mono, Fira Code, Cascadia Code, Menlo, monospace',
-    minimap: { enabled: !!props.minimap },
-    wordWrap: props.wordWrap || 'on',
-    scrollBeyondLastLine: false,
-    automaticLayout: false,
-    tabSize: 2,
-    lineNumbers: 'on',
-    glyphMargin: false,
-    folding: true,
-    renderLineHighlight: 'line',
-    padding: { top: 12, bottom: 12 },
-    suggest: {
-      showKeywords: true,
-      showSnippets: true,
-    },
-    quickSuggestions: true,
-  })
-
-  monacoLoaded.value = true
-
-  // 内容同步
-  editor.onDidChangeModelContent(() => {
-    const v = editor.getValue()
-    if (v !== props.modelValue) emit('update:modelValue', v)
-  })
-  // 选中变化
-  editor.onDidChangeCursorSelection((e: any) => {
-    try {
-      const model = editor.getModel()
-      const sel = model?.getValueInRange(e.selection) || ''
-      emit('selection-change', sel.length)
-    } catch {}
-  })
-
-  // 快捷键：Ctrl+Enter 运行
-  editor.addAction({
-    id: 'run-query',
-    label: '运行查询',
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
-    run: () => emit('run'),
-  })
-  // 格式化
-  editor.addAction({
-    id: 'format-sql',
-    label: '格式化 SQL',
-    keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF],
-    run: () => emit('format'),
-  })
-
-  // 自动补全
-  completionDisposable = monaco.languages.registerCompletionItemProvider('sql', {
-    triggerCharacters: ['.', ' ', '_'],
-    provideCompletionItems: (model: any, position: any) => {
-      const word = model.getWordUntilPosition(position)
-      const range = {
-        startLineNumber: position.lineNumber,
-        endLineNumber: position.lineNumber,
-        startColumn: word.startColumn,
-        endColumn: word.endColumn,
-      }
-      const suggestions: any[] = []
-      SQL_KEYWORDS.forEach((k) => {
-        suggestions.push({
-          label: k,
-          kind: monaco.languages.CompletionItemKind.Keyword,
-          insertText: k,
-          range,
-        })
-      })
-      props.tables.forEach((t) => {
-        suggestions.push({
-          label: t,
-          kind: monaco.languages.CompletionItemKind.Class,
-          insertText: t,
-          detail: '表',
-          range,
-        })
-      })
-      props.columns.forEach((c) => {
-        suggestions.push({
-          label: c,
-          kind: monaco.languages.CompletionItemKind.Field,
-          insertText: c,
-          detail: '列',
-          range,
-        })
-      })
-      return { suggestions }
-    },
-  })
-
-  // resize
-  resizeObserver = new ResizeObserver(() => {
-    editor?.layout()
-  })
-  resizeObserver.observe(containerRef.value)
-
-  // 占位提示：若为空且有 placeholder，用装饰器显示
-  if (!props.modelValue && props.placeholder) {
-    // 简易：在首行显示 placeholder 样式（通过 overlay）
+function getSelection(): string {
+  if (editor) {
+    const selection = editor.getSelection()
+    return selection ? editor.getModel()?.getValueInRange(selection) ?? '' : ''
   }
+  const input = textarea.value
+  return input ? input.value.slice(input.selectionStart, input.selectionEnd) : ''
+}
+function updateSelection() { selectedLength.value = getSelection().length }
+function onInput(event: Event) { emit('update:modelValue', (event.target as HTMLTextAreaElement).value) }
+
+function disposeEditor() {
+  observer?.disconnect()
+  subscriptions.splice(0).forEach(subscription => subscription.dispose())
+  const model = editor?.getModel()
+  editor?.dispose()
+  model?.dispose()
+  editor = null
 }
 
-watch(
-  () => props.modelValue,
-  (v) => {
-    if (editor && v !== editor.getValue()) {
-      editor.setValue(v)
-    }
-  },
-)
-
-watch(
-  () => props.minimap,
-  (v) => {
-    try {
-      editor?.updateOptions({ minimap: { enabled: !!v } })
-    } catch {}
-  },
-)
-watch(() => props.theme, (v) => {
-  try { monaco?.editor.setTheme(v || 'dbhub-dark') } catch {}
+onMounted(async () => {
+  try {
+    const monaco = await import('monaco-editor')
+    if (disposed || !container.value) return
+    monaco.editor.defineTheme('dbhub-dark', {
+      base: 'vs-dark', inherit: true,
+      rules: [
+        { token: 'keyword', foreground: 'A78BFA' },
+        { token: 'string', foreground: '6EE7B7' },
+        { token: 'number', foreground: 'FBBF24' },
+        { token: 'comment', foreground: '8792A7' },
+      ],
+      colors: {
+        'editor.background': '#161a2c', 'editor.foreground': '#E0E7FF',
+        'editorLineNumber.foreground': '#8792A7', 'editorLineNumber.activeForeground': '#C4B5FD',
+        'editor.selectionBackground': '#6366F150', 'editor.lineHighlightBackground': '#FFFFFF08',
+        'editorCursor.foreground': '#C4B5FD', 'editorGutter.background': '#161a2c',
+      },
+    })
+    editor = monaco.editor.create(container.value, {
+      value: props.modelValue, language: 'sql', theme: 'dbhub-dark', ariaLabel: 'SQL 编辑器',
+      fontSize: 13, lineHeight: 22, fontFamily: 'JetBrains Mono, Menlo, monospace',
+      minimap: { enabled: false }, wordWrap: 'on', scrollBeyondLastLine: false,
+      tabSize: 2, padding: { top: 12, bottom: 12 }, automaticLayout: false,
+    })
+    subscriptions.push(editor.onDidChangeModelContent(() => {
+      const value = editor?.getValue() ?? ''
+      if (value !== props.modelValue) emit('update:modelValue', value)
+    }))
+    subscriptions.push(editor.onDidChangeCursorSelection(updateSelection))
+    subscriptions.push(editor.addAction({
+      id: 'run-query', label: '运行 SQL',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+      run: () => emit('run'),
+    }))
+    subscriptions.push(editor.addAction({
+      id: 'format-sql', label: '格式化 SQL',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF],
+      run: () => emit('format'),
+    }))
+    observer = new ResizeObserver(() => editor?.layout())
+    observer.observe(container.value)
+    ready.value = true
+  } catch {
+    disposeEditor()
+    if (!disposed) { ready.value = false; fallback.value = true }
+  }
 })
-watch(() => props.fontSize, (v) => {
-  try { editor?.updateOptions({ fontSize: v || 13 }) } catch {}
-})
-watch(() => props.wordWrap, (v) => {
-  try { editor?.updateOptions({ wordWrap: v || 'on' }) } catch {}
-})
 
-watch(
-  () => [props.tables, props.columns],
-  () => {
-    // 补全会自动读取最新 props，无需重建
-  },
-)
-
-onMounted(() => {
-  init()
+watch(() => props.modelValue, value => {
+  if (!editor || value === editor.getValue()) return
+  const model = editor.getModel()
+  if (!model) return
+  editor.pushUndoStop()
+  editor.executeEdits('format-sql', [{ range: model.getFullModelRange(), text: value, forceMoveMarkers: true }])
+  editor.pushUndoStop()
 })
 
 onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
-  completionDisposable?.dispose?.()
-  editor?.dispose?.()
+  disposed = true
+  disposeEditor()
 })
 
-defineExpose({
-  focus: () => editor?.focus(),
-  getSelection: () => {
-    if (!editor) return ''
-    const sel = editor.getSelection()
-    if (!sel) return ''
-    return editor.getModel()?.getValueInRange(sel) || ''
-  },
-  insertText: (text: string) => {
-    if (!editor) return
-    const sel = editor.getSelection()
-    const op = { range: sel, text, forceMoveMarkers: true }
-    editor.executeEdits('insert', [op])
-    editor.focus()
-  },
-})
+defineExpose({ getSelection, selectedLength })
 </script>
-
-<style scoped>
-:deep(.monaco-editor) {
-  --vscode-editor-background: transparent;
-}
-</style>

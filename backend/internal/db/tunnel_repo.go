@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/user/dbhub/pkg/crypto"
 )
 
@@ -22,6 +21,7 @@ type SSHTunnel struct {
 	Port       int       `json:"port"`
 	Username   string    `json:"username"`
 	AuthType   string    `json:"auth_type"` // password | private_key
+	HostKey    string    `json:"host_key"`
 	PrivateKey string    `json:"private_key,omitempty"`
 	Passphrase string    `json:"passphrase,omitempty"`
 	Password   string    `json:"password,omitempty"`
@@ -49,12 +49,12 @@ const tunnelSelectCols = `
 	private_key IS NOT NULL AND private_key <> '',
 	passphrase   IS NOT NULL AND passphrase   <> '',
 	password     IS NOT NULL AND password     <> '',
-	created_at, updated_at`
+	created_at, updated_at, host_key`
 
 func scanTunnel(row pgx.Row) (*SSHTunnel, error) {
 	t := &SSHTunnel{}
 	err := row.Scan(&t.ID, &t.UserID, &t.Name, &t.Host, &t.Port, &t.Username, &t.AuthType,
-		&t.HasPrivateKey, &t.HasPassphrase, &t.HasPassword, &t.CreatedAt, &t.UpdatedAt)
+		&t.HasPrivateKey, &t.HasPassphrase, &t.HasPassword, &t.CreatedAt, &t.UpdatedAt, &t.HostKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -95,6 +95,9 @@ func (r *TunnelRepository) GetSecrets(ctx context.Context, id int64) (*SSHTunnel
 	t, err := r.Get(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if t.UserID != ActorID(ctx) {
+		return nil, ErrNotFound
 	}
 	var encPrivateKey, encPassphrase, encPassword *string
 	err = r.pool.QueryRow(ctx,
@@ -138,10 +141,10 @@ func (r *TunnelRepository) Create(ctx context.Context, t *SSHTunnel) error {
 	}
 	return r.pool.QueryRow(ctx, `
 		INSERT INTO sys_ssh_tunnels
-			(user_id, name, host, port, username, auth_type, private_key, passphrase, password)
-		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''))
+			(user_id, name, host, port, username, auth_type, private_key, passphrase, password, host_key)
+		VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULLIF($8,''),NULLIF($9,''),$10)
 		RETURNING id, created_at, updated_at`,
-		t.UserID, t.Name, t.Host, t.Port, t.Username, t.AuthType, priv, pass, pwd,
+		t.UserID, t.Name, t.Host, t.Port, t.Username, t.AuthType, priv, pass, pwd, t.HostKey,
 	).Scan(&t.ID, &t.CreatedAt, &t.UpdatedAt)
 }
 
@@ -182,9 +185,9 @@ func (r *TunnelRepository) Update(ctx context.Context, t *SSHTunnel) error {
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE sys_ssh_tunnels
-		SET name = $2, host = $3, port = $4, username = $5, auth_type = $6
+		SET name = $2, host = $3, port = $4, username = $5, auth_type = $6, host_key = $7
 		WHERE id = $1`,
-		t.ID, t.Name, t.Host, t.Port, t.Username, t.AuthType)
+		t.ID, t.Name, t.Host, t.Port, t.Username, t.AuthType, t.HostKey)
 	if err != nil {
 		return err
 	}

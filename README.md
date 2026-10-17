@@ -9,7 +9,9 @@
 ## ✨ 核心特性
 
 - **高端视觉体验**：采用 Fluid Glass Design，支持深色模式与细腻的微交互。
-- **多源数据支持**：统一管理 MySQL, PostgreSQL, Redis 等多种数据源。
+- **多源数据支持**：原生接入 MySQL、PostgreSQL、Redis；通过驱动登记、模板发布与固定修订实例接入自定义 JDBC 数据源。
+- **数据工作台**：按能力显示 SQL、Redis 键值或结构浏览；SQL 工具栏保留运行、格式化。
+- **版本兼容提示**：验证 MySQL 5.7/8.0/8.4、PostgreSQL 14–18、Redis 6.2/7.2/7.4/8.0；具体补丁版本和功能边界见[兼容说明](docs/开发指南/数据源版本兼容.md)。
 - **安全优先**：内置 RBAC 权限控制，PBKDF2 密码哈希、JWT 双令牌认证，全链路操作审计。
 - **智能辅助**：AI 驱动的 SQL 补全与性能优化建议（规划中）。
 - **云原生架构**：基于 Docker 容器化设计，一键部署，开箱即用。
@@ -23,7 +25,7 @@
 | **前端工程** | Vue Router 4, Pinia 3, Axios | 路由、状态管理、请求封装 |
 | **可视化** | ECharts 6 | 数据图表渲染 |
 | **动画** | GSAP, CSS Transitions | 微交互 |
-| **后端** | Go 1.25（标准库，零第三方运行时依赖） | 高性能 API 服务 |
+| **后端** | Go 1.25（pgx / MySQL / Redis 驱动，libpg_query AST） | 高性能 API 服务 |
 | **数据库** | PostgreSQL 16 (元数据), Redis 7 (缓存) | 自身存储 |
 | **部署** | Docker, Docker Compose | 全生命周期容器化 |
 
@@ -69,7 +71,13 @@ cd frontend && npm install && npm run dev
 - [系统架构总览](./docs/架构设计/系统架构总览.md)
 - [前端架构设计](./docs/架构设计/前端架构设计.md)
 - [后端架构设计](./docs/架构设计/后端架构设计.md)
+- [数据源连接器抽象设计](./docs/架构设计/数据源连接器抽象设计.md)
+- [功能命名与自定义数据源](./docs/项目管控/功能命名与自定义数据源规划.md)
 - [API 接口规范](./docs/接口规范/API接口规范.md)
+- [数据源授权、目录与 openGauss 验收](./docs/开发指南/数据源授权目录与openGauss验收.md)
+- [连接器与 JDBC 自定义数据源验收](./docs/开发指南/连接器与JDBC自定义数据源验收.md)
+- [数据源版本兼容](./docs/开发指南/数据源版本兼容.md)
+- [数据源检查与采集可靠性](./docs/开发指南/数据源检查与采集可靠性.md)
 - [数据库模型设计](./docs/数据库设计/数据库模型设计.md)
 - [低保真 UX 线框图](./docs/界面设计/wireframes/README.md)
 - [UI 设计规范](./docs/界面设计/UI设计规范.md)
@@ -88,10 +96,11 @@ dbhub/
 ├── frontend/               # Vue 3 前端
 │   └── src/
 │       ├── layouts/        # 主框架布局（导航栏 + 侧边栏 + 顶栏）
-│       ├── views/          # 登录 / 仪表盘 / 数据源 / SQL 工作台 / 审计 / 设置
+│       ├── views/          # 登录 / 仪表盘 / 数据源 / 数据工作台 / 审计 / 设置
 │       ├── stores/         # Pinia 状态仓库
 │       ├── router/         # 路由与登录守卫
 │       └── utils/          # Axios 封装
+├── services/jdbc-runner/    # 可选 JDK 17 JDBC 服务与固定制品清单
 ├── docs/                   # 设计文档（文档驱动开发）
 ├── docker-compose.yaml     # frontend / backend / postgres / redis
 └── .env                    # 本地开发环境变量样例
@@ -104,3 +113,9 @@ dbhub/
 ## 📄 许可证
 
 [MIT](./LICENSE)
+
+## Cloud 完整后端
+
+使用 `./scripts/cloud/setup.sh` 安装、编译并执行真实 PostgreSQL/MySQL/Redis/JDBC 集成测试，再用 `./scripts/cloud/start.sh` 启动。配置和服务命令见 [Cloud 开发环境](scripts/cloud/README.md)，实现与边界见 [补齐验收契约](docs/开发指南/云端后端补齐验收.md)。AI 服务可稍后配置，未配置时界面明确提示不可用。
+
+根 `docker-compose.yaml` 用于开发；生产使用独立的 `docker-compose.prod.yaml`，构建、隔离验收、备份与回滚步骤见 [部署运维指南](docs/部署运维/部署运维指南.md)。

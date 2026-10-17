@@ -1,0 +1,10 @@
+{
+  "scope": "local-production-backend-replacement",
+  "verifiedAt": "2026-10-16T10:23:22.086Z",
+  "checks": [
+    "existing authenticated session survives backend replacement",
+    "durable receipt, duplicate rejection and request conflict survive backend replacement",
+    "confirmed write remains applied exactly once for the retained request ID"
+  ],
+  "cleanupSucceeded": true
+}

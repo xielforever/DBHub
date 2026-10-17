@@ -55,9 +55,8 @@ export const useUserStore = defineStore('user', () => {
   }
 
   /** 登出并清空本地会话 */
-  function logout() {
-    // TODO: 调用后端令牌吊销接口（JWT 黑名单写入 Redis）
-    clearAuth()
+  async function logout() {
+    try { await request.post('/auth/logout') } finally { clearAuth() }
   }
 
   return {

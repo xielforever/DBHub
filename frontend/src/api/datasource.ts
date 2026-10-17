@@ -2,12 +2,20 @@
  * 数据源（目标数据库连接）与 SSH 隧道 API
  */
 import request from '../utils/request'
+import type { DatasourceTemplate } from './connector'
+import type { SourceDefinition } from './source-catalog'
 
-export type DbType = 'mysql' | 'postgres' | 'redis'
+export interface Capabilities {sql: boolean;format: boolean;metadata: boolean;collect: boolean;keys: boolean;transactions: boolean;enforced_read_only: boolean;reason?: string}
+export function sourceLabel(c: ConnectionItem) {return c.template?.product || ({mysql:'MySQL',postgres:'PostgreSQL',redis:'Redis',jdbc:'自定义 JDBC'}[c.type] ?? c.type)}
+
+export type DbType = 'mysql' | 'postgres' | 'redis' | 'jdbc'
 export type EnvKind = 'dev' | 'test' | 'prod'
 
 export interface ConnectionItem {
   id: number
+  definition_revision_id?: number
+  definition_family_id?: string
+  definition?: SourceDefinition
   user_id: number
   ssh_tunnel_id: number | null
   proxy_id: number | null
@@ -26,6 +34,11 @@ export interface ConnectionItem {
   proxy_name?: string
   created_at: string
   updated_at: string
+  last_check?: TestResult
+  template_revision_id?: number | null
+  parameters?: Record<string,string>
+  template?: DatasourceTemplate
+  capabilities?: Capabilities
 }
 
 export interface ConnectionPayload {
@@ -43,6 +56,8 @@ export interface ConnectionPayload {
   connection_timeout: number
   color_label?: string
   environment?: EnvKind
+  template_revision_id?: number | null
+  parameters?: Record<string,string>
 }
 
 export interface SSHTunnelItem {
@@ -71,11 +86,41 @@ export interface SSHTunnelPayload {
   password?: string
 }
 
+export interface ConnectionDiagnostic {
+  code: string
+  title: string
+  hint: string
+  action: 'update_credentials' | 'review_target' | 'contact_admin' | 'retry_check'
+}
+
 export interface TestResult {
   ok: boolean
   type: string
   version: string
   elapsed_ms: number
+  compatibility?: VersionCompatibility
+  error?: string
+  diagnostic?: ConnectionDiagnostic
+  started_at?: string
+  checked_at?: string
+  recorded?: boolean
+}
+
+export interface VersionCompatibility {
+  engine: string
+  product: string
+  version: string
+  branch: string
+  status: 'verified' | 'branch_verified' | 'unverified' | 'unknown'
+  tested_version?: string
+  mode?: string
+  message: string
+}
+
+export interface TestedVersion {
+  engine: DbType
+  branch: string
+  tested_version: string
 }
 
 interface ListWrap<T> {
@@ -84,11 +129,17 @@ interface ListWrap<T> {
 }
 
 export const connectionApi = {
+  compatibility() {
+    return request.get<unknown, { items: TestedVersion[]; scope: string }>('/connections/compatibility', { silentError: true })
+  },
   list(params?: { type?: string; keyword?: string }) {
     return request.get<unknown, ListWrap<ConnectionItem>>('/connections', { params })
   },
   create(payload: ConnectionPayload) {
     return request.post<unknown, ConnectionItem>('/connections', payload)
+  },
+  get(id: number) {
+    return request.get<unknown, ConnectionItem>(`/connections/${id}`)
   },
   update(id: number, payload: ConnectionPayload) {
     return request.put<unknown, ConnectionItem>(`/connections/${id}`, payload)
@@ -96,11 +147,11 @@ export const connectionApi = {
   remove(id: number) {
     return request.delete<unknown, { id: number }>(`/connections/${id}`)
   },
-  testSaved(id: number) {
-    return request.post<unknown, TestResult>(`/connections/${id}/test`)
+  testSaved(id: number, draft?: ConnectionPayload) {
+    return request.post<unknown, TestResult>(`/connections/${id}/test`, draft, { timeout: 25_000 })
   },
   test(payload: ConnectionPayload) {
-    return request.post<unknown, TestResult>('/connections/test', payload)
+    return request.post<unknown, TestResult>('/connections/test', payload, { timeout: 25_000 })
   },
 }
 

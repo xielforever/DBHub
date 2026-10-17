@@ -1,0 +1,52 @@
+[
+  {
+    "id": "gson-2.13.2",
+    "name": "gson",
+    "version": "2.13.2",
+    "class_name": "",
+    "file": "gson-2.13.2.jar",
+    "sha256": "dd0ce1b55a3ed2080cb70f9c655850cda86c206862310009dcb5e5c95265a5e0",
+    "url": "https://repo.maven.apache.org/maven2/com/google/code/gson/gson/2.13.2/gson-2.13.2.jar",
+    "upstream_sha1": "48b8230771e573b54ce6e867a9001e75977fe78e"
+  },
+  {
+    "id": "postgresql-42.7.7",
+    "name": "postgresql",
+    "version": "42.7.7",
+    "class_name": "org.postgresql.Driver",
+    "file": "postgresql-42.7.7.jar",
+    "sha256": "157963d60ae66d607e09466e8c0cdf8087e9cb20d0159899ffca96bca2528460",
+    "url": "https://repo.maven.apache.org/maven2/org/postgresql/postgresql/42.7.7/postgresql-42.7.7.jar",
+    "upstream_sha1": "67f8093e8d8104c74bbf588392ac3229803f5d17"
+  },
+  {
+    "id": "mysql-8.4.0",
+    "name": "mysql",
+    "version": "8.4.0",
+    "class_name": "com.mysql.cj.jdbc.Driver",
+    "file": "mysql-connector-j-8.4.0.jar",
+    "sha256": "d77962877d010777cff997015da90ee689f0f4bb76848340e1488f2b83332af5",
+    "url": "https://repo.maven.apache.org/maven2/com/mysql/mysql-connector-j/8.4.0/mysql-connector-j-8.4.0.jar",
+    "upstream_sha1": "b1bc0f47bcad26ad5f9bceefb63fcb920d868fca"
+  },
+  {
+    "id": "h2-2.4.240",
+    "name": "h2",
+    "version": "2.4.240",
+    "class_name": "org.h2.Driver",
+    "file": "h2-2.4.240.jar",
+    "sha256": "29b70e427cc1c40cdc376283adbb0cc62853073797bb5fe5761f81fe73d57ce0",
+    "url": "https://repo.maven.apache.org/maven2/com/h2database/h2/2.4.240/h2-2.4.240.jar",
+    "upstream_sha1": "686180ad33981ad943fdc0ab381e619b2c2fdfe5"
+  },
+  {
+    "id": "opengauss-6.0.0-og",
+    "name": "opengauss",
+    "version": "6.0.0-og",
+    "class_name": "org.opengauss.Driver",
+    "file": "opengauss-jdbc-6.0.0-og.jar",
+    "sha256": "b70742a49dec51af3d6fd21a1bad884a2ea86422c29515e7e8b4c3050c7b6ca5",
+    "url": "https://repo.maven.apache.org/maven2/org/opengauss/opengauss-jdbc/6.0.0-og/opengauss-jdbc-6.0.0-og.jar",
+    "upstream_sha1": "2447cd9de2ff2e7ae284c1407ac59a6ae121b827"
+  }
+]

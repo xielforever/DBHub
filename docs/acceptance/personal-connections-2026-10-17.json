@@ -1,0 +1,153 @@
+{
+  "date": "2026-10-17",
+  "scope": "Global or private driver configuration and credential-free datasource definitions with personal database identities",
+  "source_revision_before_changes": "a1c3b8553cd90ea2c948d08f4affef9a99842df9",
+  "working_tree_changes_included": true,
+  "fingerprint_algorithm": "SHA-256 over sorted relative path, NUL, file bytes, NUL for each selected source file",
+  "fingerprints": {
+    "backend_go_sha256": "d18828b9c67c67f956d99f87b9557776388a80a1c8ecc64a024a53364a00ed31",
+    "backend_migrations_sha256": "96c155b4e6d2eaf20d08820ca4eb46101e57e6334f3687f27efa5e1c15631df6",
+    "frontend_source_sha256": "c7c5ac8a6d85f83b849a1b52187553dc14ac6c0c95207acf963d3f6fdfbb1371",
+    "jdbc_source_sha256": "d6554691262a6bc346e9728deb1c96bb087471e288c307d2d8051b33fe94f911"
+  },
+  "backend": {
+    "command": "go test -timeout 180s -race -p=4 -json ./...",
+    "passed_packages": 12,
+    "passed_test_items": 125,
+    "failed_test_items": [],
+    "skipped_tests": [
+      "TestVersionMatrixTarget"
+    ],
+    "skip_reason": "The explicit-target native version matrix is a separate acceptance run and was not rerun for this identity change.",
+    "json_log_sha256": "14f9eabcecebb33c760491de72c9bbf6caf3a940af942cdb465219bec1536f26",
+    "vet": "passed"
+  },
+  "frontend": {
+    "execution_state_tests": 14,
+    "type_check": "passed",
+    "build": "passed",
+    "warning": "Existing bundle chunks above 500 kB."
+  },
+  "browser": {
+    "personal_connections": {
+      "passed_checks": 13,
+      "checks": [
+        "administrator uses an installed and verified globally published JDBC driver",
+        "administrator publishes reusable global connection rules in settings",
+        "publishing the inventory source shares the target without administrator credentials",
+        "administrators can publish an inventory target without configuring any database credentials",
+        "a newly invited user has no inherited administrator connections",
+        "mobile users explicitly confirm the target and test their own credentials",
+        "the saved inventory binding belongs only to the current user",
+        "JDBC SQL executes as the personal database principal and retains two workspace actions",
+        "ordinary users can add private configurations without publishing them globally",
+        "published revisions leave existing bindings unchanged until the user confirms and re-enters credentials",
+        "readonly users configure their own identity while platform write restrictions remain enforced",
+        "a second user and administrator cannot use another personal binding or private driver",
+        "desktop and mobile complete without browser page errors"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "3ccaf4cd6936c705ce06e36bbdf3f918d7bbad9f582dc24aae73e61d5e6b3b1b"
+    },
+    "sql_workspace": {
+      "passed_checks": 18,
+      "checks": [
+        "anonymous API access requires authentication",
+        "real PostgreSQL, two actions, unchanged SQL and no implicit transaction",
+        "mobile SQL and result visible without page overflow",
+        "FETCH FIRST remains valid without automatic LIMIT",
+        "keyboard shortcut runs only the selected statement",
+        "multiple statements and SQL errors are clearly reported",
+        "real truncation count and virtual scrolling to the last row",
+        "duplicate shortcuts make one request; canceled server query reports uncertain outcome",
+        "refresh restores only the pending execution ID and requires verification before a new run",
+        "fresh execution succeeds after cancellation",
+        "lost committed-write response is recovered from a receipt without repeating the write",
+        "real MySQL execution and dialect-aware formatting",
+        "no advanced panels or background feature requests",
+        "production target requires confirmation; cancel sends no SQL and confirm sends once",
+        "developer workbench access, server authorization and unchanged protected data",
+        "developer revoked session returns to login instead of executing SQL",
+        "readonly workbench access, server authorization and unchanged protected data",
+        "readonly revoked session returns to login instead of executing SQL"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "44c6d5f19419bf071b57b96f7059949c18e4339ffdc6c969c4bd832dd44ae948"
+    },
+    "connection_checks": {
+      "passed_checks": 15,
+      "checks": [
+        "real postgres version is displayed on the saved connection",
+        "real mysql version is displayed on the saved connection",
+        "real redis version is displayed on the saved connection",
+        "saved checks survive a page reload",
+        "editing a saved connection tests with its stored password without exposing it",
+        "changing a target requires an explicit password before testing",
+        "editing a target clears the previous verified result",
+        "late connection-test response cannot verify an edited target",
+        "contract fixture: protocol-compatible product is shown as unverified",
+        "mobile connection form keeps the version result readable",
+        "a changed target cannot retain a password without explicit re-entry",
+        "saving a changed connection invalidates its previous check",
+        "failed checks survive a page reload",
+        "restoring a target requires the user to provide their own password",
+        "an unchanged destination can retain the personal credential when editing its alias"
+      ],
+      "page_errors": [],
+      "raw_report_sha256": "adbbb9a7288fbb946148669c42f499edba4012f821119723fdeeb10d88bf2943"
+    }
+  },
+  "identity_evidence": {
+    "database": "PostgreSQL 16.15 via JDBC 42.7.7",
+    "distinct_database_roles": 2,
+    "reader_role": "SELECT-only target privileges, developer platform role",
+    "writer_role": "SELECT and UPDATE target privileges, readonly platform role",
+    "actual_identity_assertion": "SELECT current_user equals the credential owner, checked by integration test and browser",
+    "concurrent_duplicate_binding_requests": 12,
+    "concurrent_binding_successes": 1,
+    "unconfirmed_revision_target_contacts": 0,
+    "additional_checks": [
+      "Administrator cannot read, test, export, collect or execute another user personal connection",
+      "Global publication payload rejects authentication fields",
+      "Private driver configuration is hidden from other users and administrators",
+      "Demoted publisher cannot manage global revisions",
+      "Existing bindings and passwords remain on their confirmed revision",
+      "Published database cannot be overridden by API requests",
+      "SELECT tickets rejected and UPDATE RETURNING exposes only an execution summary",
+      "Real 0021 migration preserves creator passwords and revokes legacy shared results"
+    ]
+  },
+  "cloud": {
+    "migration_count": 22,
+    "base_services_running": 6,
+    "backend_health": "HTTP 200",
+    "frontend_health": "HTTP 200",
+    "jdbc_protocol": 1,
+    "jdbc_sessions_after_cleanup": 0,
+    "owned_fixture_users_remaining": 0,
+    "owned_fixture_database_roles_remaining": 0,
+    "owned_fixture_tables_remaining": 0,
+    "owned_fixture_definitions_remaining": 0,
+    "owned_fixture_driver_configs_remaining": 0,
+    "owned_fixture_rules_remaining": 0,
+    "owned_browser_container_removed": true,
+    "baseline_development_connections_preserved": 3,
+    "private_credentials_not_staged": true
+  },
+  "limits": [
+    "Instance-wide invited-user directory and personal identity isolation; independent customer organization tenancy is not implemented.",
+    "GaussDB is a requirement example; no GaussDB JAR or real server was validated.",
+    "Only installed checksum-verified JDBC artifacts can be referenced; browser JAR upload is not supported.",
+    "Production requires DBHUB_TARGET_ALLOWLIST with exact approved host and port pairs.",
+    "Public result links are disabled; shared reports require a viewer-owned binding to the exact published revision.",
+    "Historical revisions are retained; source-definition purge and independent shared report lifecycle are deferred.",
+    "SQL can access only what the personal database account allows; a fixed configured database does not restrict privileged cross-database SQL.",
+    "Full native version matrix and isolated JDBC image/TLS suites were verified in the preceding release and were not rerun in this change.",
+    "No production deployment or main merge."
+  ],
+  "screenshots": [
+    "images/personal-catalog-desktop.png",
+    "images/personal-connections-mobile.png",
+    "images/personal-workspace-mobile.png"
+  ]
+}

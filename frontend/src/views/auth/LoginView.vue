@@ -75,7 +75,7 @@
             <input v-model="remember" type="checkbox" class="accent-indigo-400 w-3.5 h-3.5" />
             记住我
           </label>
-          <button type="button" class="text-white/45 hover:text-white/80 transition-colors">
+          <button type="button" class="text-white/45 hover:text-white/80 transition-colors" @click="ElMessage.info('请联系管理员重置密码')">
             忘记密码？
           </button>
         </div>
@@ -91,9 +91,7 @@
 
       <!-- 开发期默认账号提示 -->
       <p class="mt-6 text-center text-xs text-white/45 leading-relaxed">
-        开发环境默认账号
-        <code class="text-white/55">admin / admin123</code>
-        ，生产环境请通过环境变量注入
+        管理员账号由部署配置管理，请联系环境维护者获取登录信息
       </p>
 
       <!-- 后端状态 -->

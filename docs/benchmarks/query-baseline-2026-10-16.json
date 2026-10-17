@@ -1,0 +1,2034 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-16T06:48:47.119346828Z",
+  "finished_at": "2026-10-16T06:51:05.650238983Z",
+  "source_revision": "e5fbefa791259e8e5cab3d2a7e99bc6794c89097",
+  "source_dirty": false,
+  "environment": "development",
+  "backend_version": "0.1.0-dev",
+  "backend_process_before": {
+    "go_version": "go1.25.5",
+    "gomaxprocs": 4,
+    "logical_cpus": 5,
+    "goroutines": 9,
+    "go_heap_alloc_bytes": 1684440,
+    "go_heap_sys_bytes": 16187392,
+    "cpu_seconds_total": 0.345049,
+    "rss_bytes": 27918336
+  },
+  "limits": {
+    "global_concurrent": 8,
+    "per_user_concurrent": 2,
+    "max_tasks": 100,
+    "max_user_tasks": 10,
+    "wait_seconds": 30
+  },
+  "metadata_max_connections": 10,
+  "rows_per_table": 10000,
+  "users": 4,
+  "duration_per_phase_seconds": 5,
+  "sampling_interval_seconds": 0.5,
+  "load_model": "closed-loop, zero think time; four isolated developer users; separate runner container",
+  "runner_go_version": "go1.25.5",
+  "target_versions": {
+    "mysql": "8.4.11",
+    "postgres": "PostgreSQL 16.15 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit"
+  },
+  "phases": [
+    {
+      "database": "postgres",
+      "workload": "point",
+      "concurrency": 1,
+      "elapsed_seconds": 5.01124852,
+      "requests": 564,
+      "http_statuses": {
+        "200": 564
+      },
+      "success_rps": 112.54680300708775,
+      "attempt_rps": 112.54680300708775,
+      "response_payload_bytes": 94576,
+      "success_latency": {
+        "count": 564,
+        "p50_ms": 8.495516,
+        "p95_ms": 11.507266,
+        "p99_ms": 13.980864,
+        "max_ms": 15.772242
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 564,
+        "p50_ms": 8.495516,
+        "p95_ms": 11.507266,
+        "p99_ms": 13.980864,
+        "max_ms": 15.772242
+      },
+      "backend_average_cpu_percent": 38.503031656271425,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 1,
+        "waiting": 0,
+        "rss_bytes": 29298688,
+        "go_heap_alloc_bytes": 3139872,
+        "goroutines": 12,
+        "metadata_acquired_connections": 1,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 4,
+            "active": 2
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 564,
+        "executions": 564,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 564,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.006875608156028371,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "point",
+      "concurrency": 4,
+      "elapsed_seconds": 5.008809507,
+      "requests": 1309,
+      "http_statuses": {
+        "200": 1309
+      },
+      "success_rps": 261.33954548892774,
+      "attempt_rps": 261.33954548892774,
+      "response_payload_bytes": 219973,
+      "success_latency": {
+        "count": 1309,
+        "p50_ms": 14.904057,
+        "p95_ms": 20.981333,
+        "p99_ms": 26.20761,
+        "max_ms": 37.455119
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1309,
+        "p50_ms": 14.904057,
+        "p95_ms": 20.981333,
+        "p99_ms": 26.20761,
+        "max_ms": 37.455119
+      },
+      "backend_average_cpu_percent": 85.9188066263024,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 3,
+        "waiting": 0,
+        "rss_bytes": 30818304,
+        "go_heap_alloc_bytes": 3820872,
+        "goroutines": 22,
+        "metadata_acquired_connections": 3,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 8,
+            "active": 4
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1309,
+        "executions": 1309,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1309,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.00939924522536288,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 3,
+        "metadata_wait_seconds": 0.016356953
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "point",
+      "concurrency": 8,
+      "elapsed_seconds": 5.021065217,
+      "requests": 1834,
+      "http_statuses": {
+        "200": 1834
+      },
+      "success_rps": 365.26113896918935,
+      "attempt_rps": 365.26113896918935,
+      "response_payload_bytes": 308629,
+      "success_latency": {
+        "count": 1834,
+        "p50_ms": 21.024753,
+        "p95_ms": 31.099864,
+        "p99_ms": 38.604824,
+        "max_ms": 53.717268
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1834,
+        "p50_ms": 21.024753,
+        "p95_ms": 31.099864,
+        "p99_ms": 38.604824,
+        "max_ms": 53.717268
+      },
+      "backend_average_cpu_percent": 107.41068968488896,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 7,
+        "waiting": 0,
+        "rss_bytes": 31911936,
+        "go_heap_alloc_bytes": 4623736,
+        "goroutines": 33,
+        "metadata_acquired_connections": 7,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 15,
+            "active": 9
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1834,
+        "executions": 1834,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1834,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.010862383315158094,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 3,
+        "metadata_wait_seconds": 0.018385936000000002
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "point",
+      "concurrency": 16,
+      "elapsed_seconds": 5.034336598,
+      "requests": 1910,
+      "http_statuses": {
+        "200": 1910
+      },
+      "success_rps": 379.39457619079127,
+      "attempt_rps": 379.39457619079127,
+      "response_payload_bytes": 321524,
+      "success_latency": {
+        "count": 1910,
+        "p50_ms": 40.8605,
+        "p95_ms": 58.506353,
+        "p99_ms": 70.076551,
+        "max_ms": 81.69831
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1910,
+        "p50_ms": 40.8605,
+        "p95_ms": 58.506353,
+        "p99_ms": 70.076551,
+        "max_ms": 81.69831
+      },
+      "backend_average_cpu_percent": 109.73471313597403,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 7,
+        "rss_bytes": 33423360,
+        "go_heap_alloc_bytes": 5893968,
+        "goroutines": 56,
+        "metadata_acquired_connections": 10,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 19,
+            "active": 9
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1910,
+        "executions": 1910,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1910,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 11.6362135790576,
+        "queue_wait_p95_upper_ms": 25,
+        "metadata_empty_acquires": 470,
+        "metadata_wait_seconds": 0.21070279199999997
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "point",
+      "concurrency": 32,
+      "elapsed_seconds": 5.067939187,
+      "requests": 1945,
+      "http_statuses": {
+        "200": 1945
+      },
+      "success_rps": 383.7851892519167,
+      "attempt_rps": 383.7851892519167,
+      "response_payload_bytes": 327442,
+      "success_latency": {
+        "count": 1945,
+        "p50_ms": 82.223492,
+        "p95_ms": 101.6669,
+        "p99_ms": 111.216296,
+        "max_ms": 131.011019
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1945,
+        "p50_ms": 82.223492,
+        "p95_ms": 101.6669,
+        "p99_ms": 111.216296,
+        "max_ms": 131.011019
+      },
+      "backend_average_cpu_percent": 107.72124013530575,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 22,
+        "rss_bytes": 34185216,
+        "go_heap_alloc_bytes": 6531776,
+        "goroutines": 86,
+        "metadata_acquired_connections": 8,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 17,
+            "active": 10
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1945,
+        "executions": 1945,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1945,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 52.501993333161906,
+        "queue_wait_p95_upper_ms": 100,
+        "metadata_empty_acquires": 607,
+        "metadata_wait_seconds": 0.5686900779999999
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "range100",
+      "concurrency": 1,
+      "elapsed_seconds": 5.010132641,
+      "requests": 564,
+      "http_statuses": {
+        "200": 564
+      },
+      "success_rps": 112.57186993105798,
+      "attempt_rps": 112.57186993105798,
+      "response_payload_bytes": 1369963,
+      "success_latency": {
+        "count": 564,
+        "p50_ms": 8.432715,
+        "p95_ms": 10.657549,
+        "p99_ms": 12.147222,
+        "max_ms": 17.956168
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 564,
+        "p50_ms": 8.432715,
+        "p95_ms": 10.657549,
+        "p99_ms": 12.147222,
+        "max_ms": 17.956168
+      },
+      "backend_average_cpu_percent": 38.53419339359296,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 1,
+        "waiting": 0,
+        "rss_bytes": 33542144,
+        "go_heap_alloc_bytes": 5377448,
+        "goroutines": 43,
+        "metadata_acquired_connections": 1,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 12,
+            "active": 2
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 564,
+        "executions": 564,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 564,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.007341452127901264,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "range100",
+      "concurrency": 4,
+      "elapsed_seconds": 5.009917284,
+      "requests": 1281,
+      "http_statuses": {
+        "200": 1281
+      },
+      "success_rps": 255.69284428928307,
+      "attempt_rps": 255.69284428928307,
+      "response_payload_bytes": 3147682,
+      "success_latency": {
+        "count": 1281,
+        "p50_ms": 14.203515,
+        "p95_ms": 20.968369,
+        "p99_ms": 35.845231,
+        "max_ms": 148.571374
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1281,
+        "p50_ms": 14.203515,
+        "p95_ms": 20.968369,
+        "p99_ms": 35.845231,
+        "max_ms": 148.571374
+      },
+      "backend_average_cpu_percent": 80.38045298675098,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 4,
+        "waiting": 0,
+        "rss_bytes": 33505280,
+        "go_heap_alloc_bytes": 5241952,
+        "goroutines": 49,
+        "metadata_acquired_connections": 3,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 15,
+            "active": 5
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1281,
+        "executions": 1281,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1281,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.007799740827608148,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "range100",
+      "concurrency": 8,
+      "elapsed_seconds": 5.023537526,
+      "requests": 1726,
+      "http_statuses": {
+        "200": 1726
+      },
+      "success_rps": 343.5825832029427,
+      "attempt_rps": 343.5825832029427,
+      "response_payload_bytes": 4274214,
+      "success_latency": {
+        "count": 1726,
+        "p50_ms": 22.165646,
+        "p95_ms": 31.820977,
+        "p99_ms": 37.918353,
+        "max_ms": 81.488387
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1726,
+        "p50_ms": 22.165646,
+        "p95_ms": 31.820977,
+        "p99_ms": 37.918353,
+        "max_ms": 81.488387
+      },
+      "backend_average_cpu_percent": 104.95416603207724,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 6,
+        "waiting": 0,
+        "rss_bytes": 33873920,
+        "go_heap_alloc_bytes": 5860952,
+        "goroutines": 57,
+        "metadata_acquired_connections": 7,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 17,
+            "active": 6
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1726,
+        "executions": 1726,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1726,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.010606179605990348,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "range100",
+      "concurrency": 16,
+      "elapsed_seconds": 5.035100514,
+      "requests": 1748,
+      "http_statuses": {
+        "200": 1748
+      },
+      "success_rps": 347.16288088782335,
+      "attempt_rps": 347.16288088782335,
+      "response_payload_bytes": 4330292,
+      "success_latency": {
+        "count": 1748,
+        "p50_ms": 44.818386,
+        "p95_ms": 62.401522,
+        "p99_ms": 72.001049,
+        "max_ms": 91.737163
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1748,
+        "p50_ms": 44.818386,
+        "p95_ms": 62.401522,
+        "p99_ms": 72.001049,
+        "max_ms": 91.737163
+      },
+      "backend_average_cpu_percent": 106.98222070455232,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 5,
+        "rss_bytes": 33935360,
+        "go_heap_alloc_bytes": 6388480,
+        "goroutines": 73,
+        "metadata_acquired_connections": 10,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 17,
+            "active": 9
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1748,
+        "executions": 1748,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1748,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 12.870184040046077,
+        "queue_wait_p95_upper_ms": 25,
+        "metadata_empty_acquires": 497,
+        "metadata_wait_seconds": 0.20609212200000004
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "range100",
+      "concurrency": 32,
+      "elapsed_seconds": 5.076567862,
+      "requests": 1781,
+      "http_statuses": {
+        "200": 1781
+      },
+      "success_rps": 350.8275765072398,
+      "attempt_rps": 350.8275765072398,
+      "response_payload_bytes": 4414285,
+      "success_latency": {
+        "count": 1781,
+        "p50_ms": 89.486938,
+        "p95_ms": 112.538942,
+        "p99_ms": 126.918647,
+        "max_ms": 152.620194
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1781,
+        "p50_ms": 89.486938,
+        "p95_ms": 112.538942,
+        "p99_ms": 126.918647,
+        "max_ms": 152.620194
+      },
+      "backend_average_cpu_percent": 113.67167367319084,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 23,
+        "rss_bytes": 34467840,
+        "go_heap_alloc_bytes": 6267448,
+        "goroutines": 85,
+        "metadata_acquired_connections": 9,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 18,
+            "active": 11
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1781,
+        "executions": 1781,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1781,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 57.88495513026405,
+        "queue_wait_p95_upper_ms": 100,
+        "metadata_empty_acquires": 453,
+        "metadata_wait_seconds": 0.33012681200000005
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "overload",
+      "concurrency": 64,
+      "elapsed_seconds": 1.618424619,
+      "requests": 64,
+      "http_statuses": {
+        "200": 40,
+        "429": 24
+      },
+      "success_rps": 24.715392691391084,
+      "attempt_rps": 39.54462830622573,
+      "response_payload_bytes": 15552,
+      "success_latency": {
+        "count": 40,
+        "p50_ms": 975.085589,
+        "p95_ms": 1612.645193,
+        "p99_ms": 1612.744007,
+        "max_ms": 1612.744007
+      },
+      "rejected_latency": {
+        "count": 24,
+        "p50_ms": 38.163634,
+        "p95_ms": 40.721529,
+        "p99_ms": 41.175664,
+        "max_ms": 41.175664
+      },
+      "all_latency": {
+        "count": 64,
+        "p50_ms": 350.462655,
+        "p95_ms": 1611.823503,
+        "p99_ms": 1612.744007,
+        "max_ms": 1612.744007
+      },
+      "backend_average_cpu_percent": 9.587477906806829,
+      "observed_peaks": {
+        "samples": 5,
+        "running": 8,
+        "waiting": 24,
+        "rss_bytes": 35459072,
+        "go_heap_alloc_bytes": 6570320,
+        "goroutines": 112,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 19,
+            "active": 9
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 64,
+        "executions": 40,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 24,
+          "succeeded": 40,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 24,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 635.4664467749998,
+        "queue_wait_p95_upper_ms": 2500,
+        "metadata_empty_acquires": 311,
+        "metadata_wait_seconds": 1.141898659
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "execution_timeout_probe",
+      "concurrency": 1,
+      "elapsed_seconds": 1.01582498,
+      "requests": 1,
+      "http_statuses": {
+        "400": 1
+      },
+      "success_rps": 0,
+      "attempt_rps": 0.984421548680561,
+      "response_payload_bytes": 508,
+      "success_latency": {
+        "count": 0
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1,
+        "p50_ms": 1010.328991,
+        "p95_ms": 1010.328991,
+        "p99_ms": 1010.328991,
+        "max_ms": 1010.328991
+      },
+      "backend_average_cpu_percent": 1.001787695614308,
+      "observed_peaks": {
+        "samples": 4,
+        "running": 1,
+        "waiting": 0,
+        "rss_bytes": 35471360,
+        "go_heap_alloc_bytes": 6725624,
+        "goroutines": 74,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 12,
+            "active": 2
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1,
+        "executions": 1,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 0,
+          "unavailable": 0,
+          "unknown": 1
+        },
+        "timeouts": 1,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.04281499997205174,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "client_cancel_probe",
+      "concurrency": 1,
+      "elapsed_seconds": 0.047764443,
+      "requests": 1,
+      "http_statuses": {
+        "0": 1
+      },
+      "success_rps": 0,
+      "attempt_rps": 20.936075816900033,
+      "response_payload_bytes": 0,
+      "success_latency": {
+        "count": 0
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1,
+        "p50_ms": 18.713632,
+        "p95_ms": 18.713632,
+        "p99_ms": 18.713632,
+        "max_ms": 18.713632
+      },
+      "backend_average_cpu_percent": 22.304881237064496,
+      "observed_peaks": {
+        "samples": 2,
+        "running": 0,
+        "waiting": 0,
+        "rss_bytes": 35508224,
+        "go_heap_alloc_bytes": 6896480,
+        "goroutines": 72,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 1,
+            "active": 2
+          },
+          "postgres": {
+            "total": 11,
+            "active": 1
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1,
+        "executions": 1,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 0,
+          "unavailable": 0,
+          "unknown": 1
+        },
+        "timeouts": 0,
+        "canceled": 1,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.016614999992725643,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "point",
+      "concurrency": 1,
+      "elapsed_seconds": 5.007788235,
+      "requests": 1036,
+      "http_statuses": {
+        "200": 1036
+      },
+      "success_rps": 206.87775748169193,
+      "attempt_rps": 206.87775748169193,
+      "response_payload_bytes": 173836,
+      "success_latency": {
+        "count": 1036,
+        "p50_ms": 4.627112,
+        "p95_ms": 6.092789,
+        "p99_ms": 8.487869,
+        "max_ms": 13.433218
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1036,
+        "p50_ms": 4.627112,
+        "p95_ms": 6.092789,
+        "p99_ms": 8.487869,
+        "max_ms": 13.433218
+      },
+      "backend_average_cpu_percent": 41.22191843977346,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 1,
+        "waiting": 0,
+        "rss_bytes": 36311040,
+        "go_heap_alloc_bytes": 6478728,
+        "goroutines": 76,
+        "metadata_acquired_connections": 1,
+        "database_connections": {
+          "mysql": {
+            "total": 2,
+            "active": 3
+          },
+          "postgres": {
+            "total": 11,
+            "active": 2
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1036,
+        "executions": 1036,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 1036,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.005182236485350579,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "point",
+      "concurrency": 4,
+      "elapsed_seconds": 5.007965295,
+      "requests": 2808,
+      "http_statuses": {
+        "200": 2808
+      },
+      "success_rps": 560.7067610479517,
+      "attempt_rps": 560.7067610479517,
+      "response_payload_bytes": 473122,
+      "success_latency": {
+        "count": 2808,
+        "p50_ms": 6.732251,
+        "p95_ms": 9.795978,
+        "p99_ms": 12.829001,
+        "max_ms": 22.838121
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 2808,
+        "p50_ms": 6.732251,
+        "p95_ms": 9.795978,
+        "p99_ms": 12.829001,
+        "max_ms": 22.838121
+      },
+      "backend_average_cpu_percent": 94.03222587803471,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 4,
+        "waiting": 0,
+        "rss_bytes": 36089856,
+        "go_heap_alloc_bytes": 6752776,
+        "goroutines": 87,
+        "metadata_acquired_connections": 4,
+        "database_connections": {
+          "mysql": {
+            "total": 5,
+            "active": 2
+          },
+          "postgres": {
+            "total": 11,
+            "active": 5
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 2808,
+        "executions": 2808,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 2808,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.00735818340511292,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "point",
+      "concurrency": 8,
+      "elapsed_seconds": 5.006555071,
+      "requests": 3677,
+      "http_statuses": {
+        "200": 3677
+      },
+      "success_rps": 734.4371424772049,
+      "attempt_rps": 734.4371424772049,
+      "response_payload_bytes": 619894,
+      "success_latency": {
+        "count": 3677,
+        "p50_ms": 10.360725,
+        "p95_ms": 15.16088,
+        "p99_ms": 19.922871,
+        "max_ms": 26.94607
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 3677,
+        "p50_ms": 10.360725,
+        "p95_ms": 15.16088,
+        "p99_ms": 19.922871,
+        "max_ms": 26.94607
+      },
+      "backend_average_cpu_percent": 114.48983425353576,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 7,
+        "waiting": 0,
+        "rss_bytes": 35999744,
+        "go_heap_alloc_bytes": 6608168,
+        "goroutines": 101,
+        "metadata_acquired_connections": 8,
+        "database_connections": {
+          "mysql": {
+            "total": 6,
+            "active": 3
+          },
+          "postgres": {
+            "total": 11,
+            "active": 7
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 3677,
+        "executions": 3677,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 3677,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.010246223008555924,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "point",
+      "concurrency": 16,
+      "elapsed_seconds": 5.012748854,
+      "requests": 4366,
+      "http_statuses": {
+        "200": 4366
+      },
+      "success_rps": 870.9792026616461,
+      "attempt_rps": 870.9792026616461,
+      "response_payload_bytes": 736240,
+      "success_latency": {
+        "count": 4366,
+        "p50_ms": 17.597797,
+        "p95_ms": 25.528625,
+        "p99_ms": 29.832005,
+        "max_ms": 50.901125
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 4366,
+        "p50_ms": 17.597797,
+        "p95_ms": 25.528625,
+        "p99_ms": 29.832005,
+        "max_ms": 50.901125
+      },
+      "backend_average_cpu_percent": 121.92976563825218,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 5,
+        "rss_bytes": 35667968,
+        "go_heap_alloc_bytes": 7227648,
+        "goroutines": 115,
+        "metadata_acquired_connections": 10,
+        "database_connections": {
+          "mysql": {
+            "total": 9,
+            "active": 4
+          },
+          "postgres": {
+            "total": 11,
+            "active": 11
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 4366,
+        "executions": 4366,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 4366,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 2.169936569171139,
+        "queue_wait_p95_upper_ms": 10,
+        "metadata_empty_acquires": 31700,
+        "metadata_wait_seconds": 10.251106306
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "point",
+      "concurrency": 32,
+      "elapsed_seconds": 5.030242187,
+      "requests": 4250,
+      "http_statuses": {
+        "200": 4250
+      },
+      "success_rps": 844.8897373139541,
+      "attempt_rps": 844.8897373139541,
+      "response_payload_bytes": 716676,
+      "success_latency": {
+        "count": 4250,
+        "p50_ms": 36.702018,
+        "p95_ms": 49.111053,
+        "p99_ms": 55.262794,
+        "max_ms": 67.864188
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 4250,
+        "p50_ms": 36.702018,
+        "p95_ms": 49.111053,
+        "p99_ms": 55.262794,
+        "max_ms": 67.864188
+      },
+      "backend_average_cpu_percent": 126.37811701826995,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 20,
+        "rss_bytes": 36196352,
+        "go_heap_alloc_bytes": 7291624,
+        "goroutines": 130,
+        "metadata_acquired_connections": 10,
+        "database_connections": {
+          "mysql": {
+            "total": 9,
+            "active": 2
+          },
+          "postgres": {
+            "total": 11,
+            "active": 11
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 4250,
+        "executions": 4250,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 4250,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 20.777428902588284,
+        "queue_wait_p95_upper_ms": 50,
+        "metadata_empty_acquires": 30886,
+        "metadata_wait_seconds": 11.020541584
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "range100",
+      "concurrency": 1,
+      "elapsed_seconds": 5.008135423,
+      "requests": 917,
+      "http_statuses": {
+        "200": 917
+      },
+      "success_rps": 183.10207742958633,
+      "attempt_rps": 183.10207742958633,
+      "response_payload_bytes": 2229381,
+      "success_latency": {
+        "count": 917,
+        "p50_ms": 5.074943,
+        "p95_ms": 6.916062,
+        "p99_ms": 9.419743,
+        "max_ms": 19.215083
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 917,
+        "p50_ms": 5.074943,
+        "p95_ms": 6.916062,
+        "p99_ms": 9.419743,
+        "max_ms": 19.215083
+      },
+      "backend_average_cpu_percent": 42.81787888579897,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 1,
+        "waiting": 0,
+        "rss_bytes": 34922496,
+        "go_heap_alloc_bytes": 6398496,
+        "goroutines": 76,
+        "metadata_acquired_connections": 1,
+        "database_connections": {
+          "mysql": {
+            "total": 2,
+            "active": 3
+          },
+          "postgres": {
+            "total": 11,
+            "active": 2
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 917,
+        "executions": 917,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 917,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.005452109051335572,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "range100",
+      "concurrency": 4,
+      "elapsed_seconds": 5.007914971,
+      "requests": 2184,
+      "http_statuses": {
+        "200": 2184
+      },
+      "success_rps": 436.10964096778395,
+      "attempt_rps": 436.10964096778395,
+      "response_payload_bytes": 5436012,
+      "success_latency": {
+        "count": 2184,
+        "p50_ms": 8.636599,
+        "p95_ms": 12.396956,
+        "p99_ms": 14.974764,
+        "max_ms": 20.97663
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 2184,
+        "p50_ms": 8.636599,
+        "p95_ms": 12.396956,
+        "p99_ms": 14.974764,
+        "max_ms": 20.97663
+      },
+      "backend_average_cpu_percent": 112.08697388029817,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 4,
+        "waiting": 0,
+        "rss_bytes": 35221504,
+        "go_heap_alloc_bytes": 7209352,
+        "goroutines": 85,
+        "metadata_acquired_connections": 4,
+        "database_connections": {
+          "mysql": {
+            "total": 4,
+            "active": 2
+          },
+          "postgres": {
+            "total": 11,
+            "active": 5
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 2184,
+        "executions": 2184,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 2184,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.007326713369767216,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "range100",
+      "concurrency": 8,
+      "elapsed_seconds": 5.016228822,
+      "requests": 2962,
+      "http_statuses": {
+        "200": 2962
+      },
+      "success_rps": 590.4834299044263,
+      "attempt_rps": 590.4834299044263,
+      "response_payload_bytes": 7406995,
+      "success_latency": {
+        "count": 2962,
+        "p50_ms": 12.967784,
+        "p95_ms": 17.779256,
+        "p99_ms": 20.223398,
+        "max_ms": 36.22671
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 2962,
+        "p50_ms": 12.967784,
+        "p95_ms": 17.779256,
+        "p99_ms": 20.223398,
+        "max_ms": 36.22671
+      },
+      "backend_average_cpu_percent": 150.91140117680757,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 7,
+        "waiting": 0,
+        "rss_bytes": 35463168,
+        "go_heap_alloc_bytes": 7227320,
+        "goroutines": 96,
+        "metadata_acquired_connections": 8,
+        "database_connections": {
+          "mysql": {
+            "total": 7,
+            "active": 3
+          },
+          "postgres": {
+            "total": 11,
+            "active": 6
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 2962,
+        "executions": 2962,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 2962,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.0097038598922992,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "range100",
+      "concurrency": 16,
+      "elapsed_seconds": 5.020619995,
+      "requests": 3017,
+      "http_statuses": {
+        "200": 3017
+      },
+      "success_rps": 600.9217991014275,
+      "attempt_rps": 600.9217991014275,
+      "response_payload_bytes": 7545117,
+      "success_latency": {
+        "count": 3017,
+        "p50_ms": 25.506662,
+        "p95_ms": 36.409159,
+        "p99_ms": 44.334801,
+        "max_ms": 57.965081
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 3017,
+        "p50_ms": 25.506662,
+        "p95_ms": 36.409159,
+        "p99_ms": 44.334801,
+        "max_ms": 57.965081
+      },
+      "backend_average_cpu_percent": 156.6602973489087,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 4,
+        "rss_bytes": 36130816,
+        "go_heap_alloc_bytes": 7153312,
+        "goroutines": 113,
+        "metadata_acquired_connections": 10,
+        "database_connections": {
+          "mysql": {
+            "total": 8,
+            "active": 2
+          },
+          "postgres": {
+            "total": 11,
+            "active": 10
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 3017,
+        "executions": 3017,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 3017,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 5.015679283394261,
+        "queue_wait_p95_upper_ms": 25,
+        "metadata_empty_acquires": 6548,
+        "metadata_wait_seconds": 2.1725374670000015
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "range100",
+      "concurrency": 32,
+      "elapsed_seconds": 5.056002113,
+      "requests": 2999,
+      "http_statuses": {
+        "200": 2999
+      },
+      "success_rps": 593.1563976781115,
+      "attempt_rps": 593.1563976781115,
+      "response_payload_bytes": 7499757,
+      "success_latency": {
+        "count": 2999,
+        "p50_ms": 51.833095,
+        "p95_ms": 71.692488,
+        "p99_ms": 82.44824,
+        "max_ms": 103.146345
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 2999,
+        "p50_ms": 51.833095,
+        "p95_ms": 71.692488,
+        "p99_ms": 82.44824,
+        "max_ms": 103.146345
+      },
+      "backend_average_cpu_percent": 157.87361463213512,
+      "observed_peaks": {
+        "samples": 12,
+        "running": 8,
+        "waiting": 21,
+        "rss_bytes": 36749312,
+        "go_heap_alloc_bytes": 8120736,
+        "goroutines": 129,
+        "metadata_acquired_connections": 10,
+        "database_connections": {
+          "mysql": {
+            "total": 9,
+            "active": 4
+          },
+          "postgres": {
+            "total": 11,
+            "active": 9
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 2999,
+        "executions": 2999,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 2999,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 31.585347708569724,
+        "queue_wait_p95_upper_ms": 50,
+        "metadata_empty_acquires": 6380,
+        "metadata_wait_seconds": 2.520965154999999
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "overload",
+      "concurrency": 64,
+      "elapsed_seconds": 1.591202133,
+      "requests": 64,
+      "http_statuses": {
+        "200": 40,
+        "429": 24
+      },
+      "success_rps": 25.138226734642018,
+      "attempt_rps": 40.221162775427224,
+      "response_payload_bytes": 15512,
+      "success_latency": {
+        "count": 40,
+        "p50_ms": 962.604604,
+        "p95_ms": 1586.198191,
+        "p99_ms": 1587.480286,
+        "max_ms": 1587.480286
+      },
+      "rejected_latency": {
+        "count": 24,
+        "p50_ms": 32.121494,
+        "p95_ms": 34.911233,
+        "p99_ms": 35.18109,
+        "max_ms": 35.18109
+      },
+      "all_latency": {
+        "count": 64,
+        "p50_ms": 344.230556,
+        "p95_ms": 1585.768774,
+        "p99_ms": 1587.480286,
+        "max_ms": 1587.480286
+      },
+      "backend_average_cpu_percent": 10.087831911241164,
+      "observed_peaks": {
+        "samples": 5,
+        "running": 8,
+        "waiting": 24,
+        "rss_bytes": 36831232,
+        "go_heap_alloc_bytes": 6031128,
+        "goroutines": 120,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 9,
+            "active": 10
+          },
+          "postgres": {
+            "total": 11,
+            "active": 1
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 64,
+        "executions": 40,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 24,
+          "succeeded": 40,
+          "unavailable": 0,
+          "unknown": 0
+        },
+        "timeouts": 0,
+        "canceled": 0,
+        "queue_overload": 24,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 630.0545874999983,
+        "queue_wait_p95_upper_ms": 2500,
+        "metadata_empty_acquires": 322,
+        "metadata_wait_seconds": 1.1786999169999994
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "execution_timeout_probe",
+      "concurrency": 1,
+      "elapsed_seconds": 1.009835138,
+      "requests": 1,
+      "http_statuses": {
+        "400": 1
+      },
+      "success_rps": 0,
+      "attempt_rps": 0.9902606498527288,
+      "response_payload_bytes": 508,
+      "success_latency": {
+        "count": 0
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1,
+        "p50_ms": 1007.585382,
+        "p95_ms": 1007.585382,
+        "p99_ms": 1007.585382,
+        "max_ms": 1007.585382
+      },
+      "backend_average_cpu_percent": 0.796679738385419,
+      "observed_peaks": {
+        "samples": 4,
+        "running": 1,
+        "waiting": 0,
+        "rss_bytes": 36831232,
+        "go_heap_alloc_bytes": 6203928,
+        "goroutines": 75,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 2,
+            "active": 3
+          },
+          "postgres": {
+            "total": 11,
+            "active": 1
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1,
+        "executions": 1,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 0,
+          "unavailable": 0,
+          "unknown": 1
+        },
+        "timeouts": 1,
+        "canceled": 0,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.010055000018382998,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "mysql",
+      "workload": "client_cancel_probe",
+      "concurrency": 1,
+      "elapsed_seconds": 0.040262098,
+      "requests": 1,
+      "http_statuses": {
+        "0": 1
+      },
+      "success_rps": 0,
+      "attempt_rps": 24.8372551276389,
+      "response_payload_bytes": 0,
+      "success_latency": {
+        "count": 0
+      },
+      "rejected_latency": {
+        "count": 0
+      },
+      "all_latency": {
+        "count": 1,
+        "p50_ms": 13.535465,
+        "p95_ms": 13.535465,
+        "p99_ms": 13.535465,
+        "max_ms": 13.535465
+      },
+      "backend_average_cpu_percent": 18.430227405400913,
+      "observed_peaks": {
+        "samples": 2,
+        "running": 0,
+        "waiting": 0,
+        "rss_bytes": 36835328,
+        "go_heap_alloc_bytes": 6378680,
+        "goroutines": 72,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 3,
+            "active": 4
+          },
+          "postgres": {
+            "total": 11,
+            "active": 1
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 1,
+        "executions": 1,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 0,
+          "succeeded": 0,
+          "unavailable": 0,
+          "unknown": 1
+        },
+        "timeouts": 0,
+        "canceled": 1,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 0,
+        "queue_wait_mean_ms": 0.008863000005021604,
+        "queue_wait_p95_upper_ms": 1,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    },
+    {
+      "database": "postgres",
+      "workload": "queue_wait_timeout_probe",
+      "concurrency": 3,
+      "elapsed_seconds": 30.052547961,
+      "requests": 3,
+      "http_statuses": {
+        "0": 2,
+        "429": 1
+      },
+      "success_rps": 0,
+      "attempt_rps": 0.09982514640333262,
+      "response_payload_bytes": 403,
+      "success_latency": {
+        "count": 0
+      },
+      "rejected_latency": {
+        "count": 1,
+        "p50_ms": 30007.030586,
+        "p95_ms": 30007.030586,
+        "p99_ms": 30007.030586,
+        "max_ms": 30007.030586
+      },
+      "all_latency": {
+        "count": 3,
+        "p50_ms": 30021.071559,
+        "p95_ms": 30021.161399,
+        "p99_ms": 30021.161399,
+        "max_ms": 30021.161399
+      },
+      "backend_average_cpu_percent": 0.3632864715399744,
+      "observed_peaks": {
+        "samples": 62,
+        "running": 2,
+        "waiting": 1,
+        "rss_bytes": 37138432,
+        "go_heap_alloc_bytes": 7470656,
+        "goroutines": 76,
+        "metadata_acquired_connections": 0,
+        "database_connections": {
+          "mysql": {
+            "total": 3,
+            "active": 4
+          },
+          "postgres": {
+            "total": 13,
+            "active": 3
+          }
+        },
+        "sampling_errors": 0
+      },
+      "metrics_delta": {
+        "requests": 3,
+        "executions": 2,
+        "request_outcomes": {
+          "conflict": 0,
+          "duplicate": 0,
+          "failed": 0,
+          "internal_error": 0,
+          "rejected": 1,
+          "succeeded": 0,
+          "unavailable": 0,
+          "unknown": 2
+        },
+        "timeouts": 1,
+        "canceled": 2,
+        "queue_overload": 0,
+        "queue_wait_timeouts": 1,
+        "queue_wait_mean_ms": 10000.086652000013,
+        "queue_wait_p95_upper_ms": 60000,
+        "metadata_empty_acquires": 0,
+        "metadata_wait_seconds": 0
+      },
+      "valid": true
+    }
+  ],
+  "cleanup_succeeded": true,
+  "valid": true
+}

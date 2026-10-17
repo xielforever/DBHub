@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/user/dbhub/internal/auth"
@@ -255,10 +256,17 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, id int64, passwordH
 	return nil
 }
 
-// DeleteUser 删除用户（级联删除其连接、隧道、历史等）。
+var ErrUserResourcesInUse = errors.New("用户仍有驱动配置或被引用的数据源，请先停用该用户并处理配置归属")
+
+// DeleteUser removes private records atomically; referenced catalog ownership
+// requires explicit handling rather than silently breaking other users' bindings.
 func (r *UserRepository) DeleteUser(ctx context.Context, id int64) error {
 	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_users WHERE id = $1`, id)
 	if err != nil {
+		var constraint *pgconn.PgError
+		if errors.As(err, &constraint) && constraint.Code == "23503" {
+			return ErrUserResourcesInUse
+		}
 		return fmt.Errorf("删除用户失败: %w", err)
 	}
 	if tag.RowsAffected() == 0 {

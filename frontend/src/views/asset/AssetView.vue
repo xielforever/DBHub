@@ -2,8 +2,8 @@
   <div class="space-y-5">
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h1 class="text-xl font-semibold">数据资产</h1>
-        <p class="text-sm text-white/45 mt-1">元数据字典、业务标注与查询热度；点击「同步字典」从数据源采集最新结构</p>
+        <h1 class="text-xl font-semibold">数据目录</h1>
+        <p class="text-sm text-white/45 mt-1">元数据字典、业务标注与查询热度；点击「采集结构」从数据源采集最新结构</p>
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <button class="ghost-button flex items-center gap-2 lg:hidden" @click="treeDrawer = true">
@@ -16,7 +16,7 @@
           @click="onSync"
         >
           <RefreshCw class="w-4 h-4" :class="syncing ? 'animate-spin' : ''" />
-          {{ syncing ? '同步中…' : '同步字典' }}
+          {{ syncing ? '采集中…' : '采集结构' }}
         </button>
       </div>
     </header>
@@ -51,7 +51,7 @@
           <div v-loading="treeLoading" class="max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
             <TreeView :tree="tree" :selection="selection" @select="onTreeSelect" @open-table="onTreeOpenTable" />
             <p v-if="!treeLoading && !tree.length" class="text-xs text-white/35 px-2 py-6 text-center">
-              暂无字典，请先同步数据源
+              暂无结构快照，请先采集结构
             </p>
           </div>
         </div>
@@ -100,7 +100,7 @@
           </div>
         </div>
 
-        <!-- 表清单 M2：增加标签与同步时间列 -->
+        <!-- 表清单 M2：增加标签与采集时间列 -->
         <div v-loading="listLoading" class="glass-card overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-sm min-w-[1080px]">
@@ -113,7 +113,7 @@
                   <th class="font-medium px-3 py-3">分级</th>
                   <th class="font-medium px-3 py-3 text-right">行数(估)</th>
                   <th class="font-medium px-3 py-3 text-right">30天查询</th>
-                  <th class="font-medium px-3 py-3">同步时间</th>
+                  <th class="font-medium px-3 py-3">采集时间</th>
                 </tr>
               </thead>
               <tbody>
@@ -165,7 +165,7 @@
                     </span>
                     <span v-else class="text-white/25 text-xs">—</span>
                   </td>
-                  <td class="px-3 py-3 text-right text-white/60 text-xs tabular-nums">{{ formatNum(row.snapshot.estimated_rows) }}</td>
+                  <td class="px-3 py-3 text-right text-white/60 text-xs tabular-nums">{{ row.snapshot.metadata_status?.statistics === 'unsupported' ? '未提供' : formatNum(row.snapshot.estimated_rows) }}</td>
                   <td class="px-3 py-3 text-right text-xs tabular-nums" :class="row.query_count_30d ? 'text-indigo-300' : 'text-white/25'">
                     {{ row.query_count_30d }}
                   </td>
@@ -223,7 +223,7 @@
             30天查询 {{ detail.query_count_30d }}
           </span>
           <span class="px-2 py-0.5 rounded-full bg-white/5 text-white/40 text-[11px]">
-            同步 {{ formatTime(detail.snapshot.synced_at) }}
+            采集 {{ formatTime(detail.snapshot.synced_at) }}
           </span>
         </div>
 
@@ -336,6 +336,7 @@
             </div>
           </el-tab-pane>
           <el-tab-pane label="DDL" name="ddl">
+            <p v-if="detail.snapshot.metadata_status?.ddl === 'unsupported'" class="text-xs text-amber-200 mb-3">当前驱动尚未提供 DDL 读取能力。</p>
             <pre class="text-[11px] leading-relaxed font-mono text-white/70 bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ detail.snapshot.ddl_text || '—' }}</pre>
           </el-tab-pane>
           <el-tab-pane label="血缘" name="lineage">
@@ -455,7 +456,7 @@
     </el-dialog>
 
     <!-- 同步结果 -->
-    <el-dialog v-model="syncResultOpen" title="字典同步结果" width="640px" class="glass-dialog">
+    <el-dialog v-model="syncResultOpen" title="结构采集结果" width="640px" class="glass-dialog">
       <div class="space-y-3">
         <p class="text-sm text-white/60">
           本次共采集 <b class="text-white">{{ syncSummary?.tables ?? 0 }}</b> 张表、
@@ -466,7 +467,10 @@
             <span class="font-medium">{{ r.connection_name }}</span>
             <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/8 text-white/55">{{ r.type }}</span>
             <span v-if="r.skipped" class="text-[11px] text-amber-300">类型不支持，已跳过</span>
-            <span v-else class="text-[11px] text-white/45">{{ r.tables }} 表 / {{ r.views }} 视图</span>
+            <span v-else-if="r.status === 'failed'" class="text-[11px] text-rose-300">采集未发布，旧快照已保留</span>
+            <span v-else-if="r.status === 'unknown'" class="text-[11px] text-amber-300">发布结果待确认，请刷新目录核实</span>
+            <span v-else-if="r.status === 'busy'" class="text-[11px] text-amber-300">该数据源正在采集，本次已跳过</span>
+            <span v-else class="text-[11px] text-white/45">已更新 {{ r.tables }} 表 / {{ r.views }} 视图</span>
           </div>
           <div v-for="e in r.errors ?? []" :key="e" class="text-[11px] text-rose-300/90 mt-1">⚠ {{ e }}</div>
         </div>
@@ -860,7 +864,7 @@ function onLineageCreateTicket() {
   if (!detail.value) return
   const s = detail.value.snapshot
   router.push({ path: '/tickets', query: { table: s.table_name, db: s.database_name, risk: 'medium', title: `${s.table_name} 变更（血缘影响）` } })
-  ElMessage.success('已跳转工单中心，可基于血缘影响创建变更单')
+  ElMessage.success('已跳转变更工单，可基于血缘影响创建变更单')
 }
 
 // ---------- 同步 ----------
