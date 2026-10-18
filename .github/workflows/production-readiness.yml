@@ -34,6 +34,8 @@ jobs:
           python-version: "3.12"
       - name: 启动真实依赖
         run: ./scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
+      - name: 校验工作流语法和上下文
+        run: ./scripts/cloud/dev.sh run --rm --no-deps -w /tmp -e GOFLAGS=-mod=mod backend go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 /app/.github/workflows/production-readiness.yml /app/.github/workflows/datasource-compatibility.yml
       - name: 后端全量、竞态与静态检查
         run: ./scripts/cloud/dev.sh run --rm --no-deps backend sh -ec 'go test -race -p=4 ./... -count=1; go vet ./...'
       - name: 锁文件安装、依赖审计、前端回归与构建
