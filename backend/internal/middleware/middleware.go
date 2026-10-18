@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -25,6 +26,18 @@ const RequestIDKey ctxKey = "request_id"
 
 // Middleware HTTP 中间件函数签名。
 type Middleware func(http.Handler) http.Handler
+
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Frame-Options", "DENY")
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 // Chain 按声明顺序包裹中间件（最先声明的位于最外层）。
 func Chain(h http.Handler, mws ...Middleware) http.Handler {
@@ -155,6 +168,12 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 				return
 			}
 			user, e := users.FindByUsername(r.Context(), claims.Username)
+			if auth.UserStoreUnavailable(e) {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "identity_service_unavailable" })
+				w.Header().Set("Retry-After", "2")
+				httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "身份服务暂不可用，请稍后重试"})
+				return
+			}
 			if e != nil || user.ID != claims.Subject {
 				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "user_unavailable" })
 				httpx.Fail(w, httpx.Unauthorized("用户不可用"))
@@ -233,20 +252,19 @@ func (w *statusWriter) WriteHeader(code int) {
 }
 
 func clientIP(r *http.Request) string {
-	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
-		if idx := strings.IndexByte(ip, ','); idx > 0 {
-			return strings.TrimSpace(ip[:idx])
-		}
-		return strings.TrimSpace(ip)
+	if value, ok := r.Context().Value(ctxKey("client_ip")).(string); ok {
+		return value
 	}
-	host := r.RemoteAddr
-	if idx := strings.LastIndex(host, ":"); idx > 0 {
-		host = host[:idx]
+	return auth.ClientIP(r, nil)
+}
+
+func TrustedClientIP(prefixes []netip.Prefix) Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ip := auth.ClientIP(r, prefixes)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey("client_ip"), ip)))
+		})
 	}
-	// IPv6 形式 [::1] 去除方括号，保证可写入 PostgreSQL inet 字段
-	host = strings.TrimPrefix(host, "[")
-	host = strings.TrimSuffix(host, "]")
-	return host
 }
 
 func containsOrigin(set map[string]struct{}, origin string) bool {

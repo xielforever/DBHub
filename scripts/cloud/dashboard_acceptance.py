@@ -41,6 +41,9 @@ admin_token = ''
 report = {'schema': schema, 'reader_role': reader, 'artifacts': str(artifacts), 'completed': False}
 env_path = artifacts / 'runtime.env'
 fixture = False
+backend_image = os.environ.get('DBHUB_DASHBOARD_BACKEND_IMAGE', 'dbhub-backend:managed-reports')
+frontend_image = os.environ.get('DBHUB_DASHBOARD_FRONTEND_IMAGE', 'dbhub-frontend:managed-reports')
+use_image = os.environ.get('DBHUB_DASHBOARD_USE_IMAGE') == '1'
 
 def docker(*args, check=True):
     return subprocess.run(['docker', *args], text=True, capture_output=True, check=check)
@@ -70,6 +73,16 @@ def passed(name):
     checks.append(name)
     print('PASS ' + name, flush=True)
 
+def wait_condition(page, expression, timeout=15):
+    # Playwright's in-page waitForFunction uses eval, which a strict production
+    # CSP rejects. Poll through the automation protocol without relaxing CSP.
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if page.evaluate('() => (' + expression + ')'):
+            return
+        time.sleep(0.1)
+    raise AssertionError('Browser condition did not become true: ' + expression)
+
 def key():
     return str(uuid.uuid4())
 
@@ -91,8 +104,9 @@ def login(browser, name, viewport=None):
     return context, page
 
 try:
-    assert (state / 'dbhub-dashboard-server').is_file(), 'Build the dashboard backend binary first'
-    assert (repo / 'frontend/dist/index.html').is_file(), 'Build frontend/dist first'
+    if not use_image:
+        assert (state / 'dbhub-dashboard-server').is_file(), 'Build the dashboard backend binary first'
+        assert (repo / 'frontend/dist/index.html').is_file(), 'Build frontend/dist first'
     fixture = True
     pg(f"""CREATE SCHEMA {schema};
 CREATE ROLE {reader} LOGIN PASSWORD '{reader_password}';
@@ -118,10 +132,12 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
     docker('volume', 'create', '--label', 'dbhub.task=dashboard-acceptance', volume); owned.append(('volume', volume))
     cloud_network = os.environ.get('DBHUB_COMPOSE_PROJECT', 'dbhub-cloud') + '_default'
     owned.append(('container', backend))
-    docker('run', '-d', '--name', backend, '--network', cloud_network, '--env-file', str(env_path), '--read-only', '--cap-drop=ALL', '--security-opt', 'no-new-privileges', '--cpus=2', '--memory=512m', '--mount', f'type=bind,src={state}/dbhub-dashboard-server,dst=/app/server,readonly', '--mount', f'type=volume,src={volume},dst=/var/lib/dbhub/audit', 'dbhub-backend:managed-reports')
+    backend_mounts = [] if use_image else ['--mount', f'type=bind,src={state}/dbhub-dashboard-server,dst=/app/server,readonly']
+    docker('run', '-d', '--name', backend, '--network', cloud_network, '--env-file', str(env_path), '--read-only', '--cap-drop=ALL', '--security-opt', 'no-new-privileges', '--cpus=2', '--memory=512m', *backend_mounts, '--mount', f'type=volume,src={volume},dst=/var/lib/dbhub/audit', backend_image)
     docker('network', 'connect', '--alias', 'backend', network, backend)
     owned.append(('container', frontend))
-    docker('run', '-d', '--name', frontend, '--network', network, '--publish', f'127.0.0.1:{port}:80', '--mount', f'type=bind,src={repo}/frontend/dist,dst=/usr/share/nginx/html,readonly', '--cpus=1', '--memory=128m', 'dbhub-frontend:managed-reports')
+    frontend_mounts = [] if use_image else ['--mount', f'type=bind,src={repo}/frontend/dist,dst=/usr/share/nginx/html,readonly']
+    docker('run', '-d', '--name', frontend, '--network', network, '--publish', f'127.0.0.1:{port}:80', *frontend_mounts, '--cpus=1', '--memory=128m', frontend_image)
     for _ in range(45):
         try:
             with opener.open(origin + '/api/ready', timeout=2) as response:
@@ -173,7 +189,8 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
     passed('真实 PostgreSQL 五张报表与独立只读账号发布；查看者没有个人连接')
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
+        executable = os.environ.get('DBHUB_CHROMIUM_PATH', '/usr/bin/chromium')
+        browser = p.chromium.launch(**({'executable_path': executable} if Path(executable).is_file() else {}), headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
         author_context, page = login(browser, author_name)
         page.goto(origin + '/reports')
         page.get_by_role('tab', name='我的开发', exact=True).click()
@@ -285,7 +302,7 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
         assert view_page.get_by_role('button', name='自动刷新', exact=True).count() == 0
         # Chromium may deliver Playwright requestfinished notifications after a
         # subsequent request event. Measure overlap using browser timestamps.
-        view_page.wait_for_function('performance.getEntriesByType("resource").filter(r=>r.name.includes("/tiles/")&&r.name.endsWith("/execute")).length===5')
+        wait_condition(view_page, 'performance.getEntriesByType("resource").filter(r=>r.name.includes("/tiles/")&&r.name.endsWith("/execute")).length===5')
         timings = view_page.evaluate('performance.getEntriesByType("resource").filter(r=>r.name.includes("/tiles/")&&r.name.endsWith("/execute")).map(r=>[r.startTime,r.responseEnd])')
         peak = max(sum(start <= point < end for start, end in timings) for point, _ in timings)
         assert 1 <= peak <= 2, {'peak': peak, 'timings': timings}
@@ -297,7 +314,7 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
         view_page.screenshot(path=str(artifacts / 'dashboard-desktop.png'), full_page=True)
         passed('正式查看：真实1280.00与12，业务水位独立展示，无个人凭据或额外按钮')
         view_page.set_viewport_size({'width': 390, 'height': 844})
-        view_page.wait_for_function('document.querySelector("aside[aria-label=主导航]").getBoundingClientRect().right<=1')
+        wait_condition(view_page, 'document.querySelector("aside[aria-label=主导航]").getBoundingClientRect().right<=1')
         assert view_page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'), 'mobile horizontal overflow'
         widths = view_page.locator('.dashboard-grid>article').evaluate_all('(nodes)=>nodes.map(n=>Math.round(n.getBoundingClientRect().width))')
         assert max(widths) - min(widths) <= 1
@@ -349,7 +366,8 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
         passed('工作空间切换销毁旧结果，跨空间已知报表ID与数据源读取被拒绝')
         assert not errors, errors
         browser.close()
-    report.update(completed=True, checks=checks, errors=errors, server_sha256=hashlib.sha256((state/'dbhub-dashboard-server').read_bytes()).hexdigest(), runtime_readonly=True, chromium='system installed', source='current workspace build')
+    binary_sha = docker('exec', backend, 'sha256sum', '/app/server').stdout.split()[0]
+    report.update(completed=True, checks=checks, errors=errors, server_sha256=binary_sha, backend_image=docker('image','inspect',backend_image,'--format','{{.Id}}').stdout.strip(), frontend_image=docker('image','inspect',frontend_image,'--format','{{.Id}}').stdout.strip(), runtime_readonly=True, source='candidate images' if use_image else 'current workspace build')
 finally:
     for kind, name in reversed(owned):
         if kind == 'container':

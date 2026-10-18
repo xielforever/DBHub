@@ -49,6 +49,7 @@ func main() {
 			log.Error("Redis 配置无效")
 			os.Exit(1)
 		}
+		options.ContextTimeoutEnabled = true
 		sessionRedis = redis.NewClient(options)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		e = sessionRedis.Ping(ctx).Err()
@@ -134,7 +135,10 @@ func main() {
 		Addr:              ":" + cfg.Port,
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      180 * time.Second,
 		IdleTimeout:       75 * time.Second,
+		MaxHeaderBytes:    16 << 10,
 	}
 
 	// 优雅停机

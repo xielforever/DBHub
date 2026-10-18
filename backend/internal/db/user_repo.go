@@ -46,6 +46,18 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 	return &UserRepository{pool: scopedPool(pool)}
 }
 
+// Ready checks both identity/maintenance and tenant-scoped runtime connections.
+// No tenant data is read and no owner fallback is allowed.
+func (r *UserRepository) Ready(ctx context.Context) error {
+	if r.pool.runtime == nil {
+		return ErrWorkspaceRequired
+	}
+	if err := r.pool.maintenance.Ping(ctx); err != nil {
+		return err
+	}
+	return r.pool.runtime.Ping(ctx)
+}
+
 // FindByUsername 按用户名查找（含密码哈希与角色编码），禁用/不存在统一返回 auth 层错误。
 func (r *UserRepository) FindByUsername(ctx context.Context, username string) (*auth.User, error) {
 	const q = `

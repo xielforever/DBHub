@@ -58,13 +58,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	// 健康检查（不鉴权，供容器探针与负载均衡使用）
 	healthH := health.NewHandler(cfg.Env)
 	mux.HandleFunc("GET /api/health", healthH.Health)
-	mux.HandleFunc("GET /api/ready", func(w http.ResponseWriter, r *http.Request) {
-		if deps != nil && deps.Conns != nil && (deps.AuditJournal == nil || !deps.AuditJournal.Status().Ready) {
-			httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "审计存储尚未就绪"})
-			return
-		}
-		healthH.Health(w, r)
-	})
+	mux.HandleFunc("GET /api/ready", readinessHandler(cfg, healthH, deps))
 
 	// 认证模块
 	sessions := auth.NewSessionStore(nil)
@@ -478,6 +472,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	return workspaceRouting(middleware.Chain(
 		mux,
 		middleware.RequestID,
+		middleware.SecurityHeaders,
+		middleware.TrustedClientIP(cfg.TrustedProxyCIDRs),
 		middleware.RequestLogger(log),
 		middleware.Audit(auditJournal, log),
 		middleware.Recoverer(log),

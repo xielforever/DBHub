@@ -1,0 +1,64 @@
+name: 生产准入回归
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      DBHUB_STATE_DIR: ${{ runner.temp }}/dbhub-state
+      DBHUB_BUILD_ROOT: ${{ runner.temp }}/dbhub-build
+      DBHUB_DASHBOARD_BACKEND_IMAGE: dbhub-backend:release-check
+      DBHUB_DASHBOARD_FRONTEND_IMAGE: dbhub-frontend:release-check
+      DBHUB_DASHBOARD_USE_IMAGE: "1"
+      DBHUB_CHROMIUM_PATH: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 启动真实依赖
+        run: ./scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
+      - name: 后端全量、竞态与静态检查
+        run: ./scripts/cloud/dev.sh run --rm --no-deps backend sh -ec 'go test -race -p=4 ./... -count=1; go vet ./...'
+      - name: 锁文件安装、依赖审计、前端回归与构建
+        run: ./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm ci --no-audit --no-fund; npm audit --audit-level=low; npm run test:query; npm run test:report; npm run test:dashboard; npm run build'
+      - name: 构建实际生产镜像
+        run: |
+          docker build -t "$DBHUB_DASHBOARD_BACKEND_IMAGE" -f backend/Dockerfile backend
+          docker build -t "$DBHUB_DASHBOARD_FRONTEND_IMAGE" -f frontend/Dockerfile frontend
+      - name: 安装隔离浏览器
+        run: |
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium
+      - name: 报表与仪表盘真实浏览器回归
+        run: python scripts/cloud/dashboard_acceptance.py
+      - name: 故障恢复、限流与完整备份恢复
+        run: python scripts/cloud/production_acceptance.py --duration 0
+      - name: 保存无敏感内容的验收结论
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-readiness-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/dbhub-state/dashboard-artifacts/**/checks.json
+            ${{ runner.temp }}/dbhub-state/production-acceptance/**/checks.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: 清理本次依赖
+        if: always()
+        run: ./scripts/cloud/dev.sh down

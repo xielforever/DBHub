@@ -3,6 +3,9 @@ package config
 
 import (
 	"errors"
+	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -41,6 +44,10 @@ type Config struct {
 	JDBCURL, JDBCToken        string
 	AuditDir                  string
 	AuditMaxPending           int
+	LoginMaxAttempts          int
+	LoginIPMaxAttempts        int
+	LoginWindow               time.Duration
+	TrustedProxyCIDRs         []netip.Prefix
 }
 
 // AdminConfig 引导管理员账号配置。
@@ -115,8 +122,52 @@ func Load() (*Config, error) {
 	if cfg.IsProduction() && cfg.RedisURL == "" {
 		return nil, errors.New("生产环境必须配置 REDIS_URL")
 	}
+	for _, field := range []struct {
+		name          string
+		fallback, max int
+		value         *int
+	}{
+		{"DBHUB_LOGIN_MAX_ATTEMPTS", 10, 1000, &cfg.LoginMaxAttempts},
+		{"DBHUB_LOGIN_IP_MAX_ATTEMPTS", 60, 10000, &cfg.LoginIPMaxAttempts},
+	} {
+		value, err := strconv.Atoi(getenv(field.name, strconv.Itoa(field.fallback)))
+		if err != nil || value < 1 || value > field.max {
+			return nil, fmt.Errorf("%s 必须在 1–%d 之间", field.name, field.max)
+		}
+		*field.value = value
+	}
+	window, err := strconv.Atoi(getenv("DBHUB_LOGIN_WINDOW_SECONDS", "300"))
+	if err != nil || window < 10 || window > 3600 {
+		return nil, errors.New("DBHUB_LOGIN_WINDOW_SECONDS 必须在 10–3600 之间")
+	}
+	cfg.LoginWindow = time.Duration(window) * time.Second
+	for _, raw := range strings.Split(os.Getenv("DBHUB_TRUSTED_PROXY_CIDRS"), ",") {
+		if raw = strings.TrimSpace(raw); raw != "" {
+			prefix, err := netip.ParsePrefix(raw)
+			if err != nil {
+				return nil, errors.New("DBHUB_TRUSTED_PROXY_CIDRS 必须为有效 CIDR 列表")
+			}
+			cfg.TrustedProxyCIDRs = append(cfg.TrustedProxyCIDRs, prefix.Masked())
+		}
+	}
+	if cfg.IsProduction() {
+		rules := strings.TrimSpace(os.Getenv("DBHUB_TARGET_ALLOWLIST"))
+		if rules == "" {
+			return nil, errors.New("生产环境必须配置 DBHUB_TARGET_ALLOWLIST")
+		}
+		for _, rule := range strings.Split(rules, ",") {
+			host, port, err := net.SplitHostPort(strings.TrimSpace(rule))
+			number, parseErr := strconv.Atoi(port)
+			if err != nil || parseErr != nil || host == "" || strings.ContainsAny(host, "/\\@?#;=\r\n\t ") || number < 1 || number > 65535 {
+				return nil, errors.New("DBHUB_TARGET_ALLOWLIST 必须为主机:端口列表")
+			}
+		}
+	}
 	for _, origin := range strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",") {
 		if strings.TrimSpace(origin) != "" {
+			if cfg.IsProduction() && strings.TrimSpace(origin) == "*" {
+				return nil, errors.New("生产环境 CORS 不允许通配来源")
+			}
 			cfg.CORSOrigins = append(cfg.CORSOrigins, strings.TrimSpace(origin))
 		}
 	}

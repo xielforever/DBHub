@@ -11,7 +11,8 @@ export const ACCESS_COOKIE = 'dbhub_access_token'
 
 /** 写入认证 Cookie（同源会话级，SameSite=Lax）。 */
 export function setAuthCookie(token: string): void {
-  document.cookie = `${ACCESS_COOKIE}=${encodeURIComponent(token)}; path=/; SameSite=Lax`
+  const secure = window.location.protocol === 'https:' ? '; Secure' : ''
+  document.cookie = `${ACCESS_COOKIE}=${encodeURIComponent(token)}; path=/; SameSite=Lax${secure}`
 }
 
 /** 清除认证 Cookie（含历史 path 变体）。 */

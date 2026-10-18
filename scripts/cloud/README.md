@@ -88,3 +88,18 @@ python3 scripts/cloud/dashboard_acceptance.py
 ```
 
 脚本不会向开发工作空间注入演示看板。每次创建随机私有元数据/业务 Schema、独立只读目标身份和两只受资源限制的临时运行容器，测试五张真实报表从开发到发布，包含业务名称与小数位预览、送审缺权检查、独立报表补权发布、审批业务差异，再检查普通查看者、手机首屏两张指标卡、页面并发、部分刷新、传输故障、过期清除、离线和切空间。结束后删除本轮容器、网络、卷、数据库对象与凭据文件；截图、`checks.json` 和后端日志保存在私有状态目录 `dashboard-artifacts/<随机编号>/`。不要把 `runtime.env` 或目标密码提交到仓库。最新证据见[易用性改进验收](../../docs/开发指南/仪表盘易用性改进与验收.md)。
+
+## 生产可靠性验收
+
+生产依赖故障、登录防护、严格 CSP、会话保留和完整报表/仪表盘恢复使用独立验收脚本，不依赖开发库数据。先按[生产修复验收](../../docs/开发指南/生产可靠性修复与验收.md)构建候选镜像，再运行：
+
+```sh
+export DBHUB_DASHBOARD_BACKEND_IMAGE=dbhub-backend:production-fix-20261018
+export DBHUB_DASHBOARD_FRONTEND_IMAGE=dbhub-frontend:production-fix-20261018
+DBHUB_DASHBOARD_USE_IMAGE=1 python3 scripts/cloud/dashboard_acceptance.py
+python3 scripts/cloud/production_acceptance.py --duration 0
+# 发布前按实际时钟运行30分钟；合成负载不代替真实业务容量认证
+python3 scripts/cloud/production_acceptance.py --duration 1800 --clients 4
+```
+
+两个脚本复用宿主 Playwright/Chromium；浏览器路径可通过 `DBHUB_CHROMIUM_PATH` 指定。生产验收脚本创建独立元库、业务库、Redis、容器与卷，结束清理全部临时资源及凭据；`production-acceptance/<随机编号>/checks.json` 留作证据。CI 在 PR/main/手动触发时执行较短的完整故障恢复流程，30分钟负载在发布阶段单独执行。

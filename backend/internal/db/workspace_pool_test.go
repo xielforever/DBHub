@@ -93,6 +93,13 @@ func TestWorkspaceRuntimeRoleAndCompositeReferences(t *testing.T) {
 	if scoped.Stat().AcquiredConns() != 0 {
 		t.Fatal("scoped transactions leaked connections")
 	}
+	if err := users.Ready(ctx); err != nil {
+		t.Fatal("healthy metadata pools rejected", err)
+	}
+	scoped.runtime.Close()
+	if err := users.Ready(ctx); err == nil {
+		t.Fatal("runtime pool outage hidden by a healthy owner pool")
+	}
 }
 
 func TestConcurrentMigrationWithSingleConnectionPools(t *testing.T) {

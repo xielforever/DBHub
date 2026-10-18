@@ -87,8 +87,15 @@ async function refreshAccessToken(): Promise<string | null> {
     }
     setAuthCookie(data.access_token)
     return data.access_token
-  } catch {
-    return null
+  } catch (error) {
+    if (axios.isAxiosError(error) && [401, 403].includes(error.response?.status ?? 0))
+      return null
+    const failure = axios.isAxiosError<ApiResponse>(error) ? error : undefined
+    throw new ApiRequestError(
+      failure?.response?.data?.message || '暂时无法刷新会话，请稍后重试',
+      failure?.response?.status,
+      failure?.response?.data?.code,
+    )
   }
 }
 
@@ -125,7 +132,16 @@ request.interceptors.response.use(
     if (status === 401 && original && !original._retried && !isAuthEndpoint) {
       original._retried = true
       if (!refreshing) refreshing = refreshAccessToken().finally(() => { refreshing = null })
-      const newToken = await refreshing
+      let newToken: string | null
+      try {
+        newToken = await refreshing
+      } catch (refreshError) {
+        // An expired access token plus a temporary refresh outage is not a
+        // revoked session. Keep both tokens and allow an explicit later retry.
+        if (!original.silentError)
+          ElMessage.error(refreshError instanceof Error ? refreshError.message : '会话服务暂不可用')
+        return Promise.reject(refreshError)
+      }
       if (newToken) {
         original.headers.Authorization = `Bearer ${newToken}`
         original.headers['X-Access-Token'] = newToken

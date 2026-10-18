@@ -97,7 +97,7 @@ func TestAuditReadPermissionFailureAndMetadataBounds(t *testing.T) {
 		t.Fatal("GET permission denial not recorded")
 	}
 	a := sink.rows[0]
-	if a.Action != "AUTH_DENIED" || a.Context.ActorUsername != "developer" || a.Context.AuthFailure != "insufficient_role" || a.Context.HTTPStatus != 403 || a.Context.Route != "GET /api/v1/users" || a.IPAddress != "" || len(a.TraceID) > 64 {
+	if a.Action != "AUTH_DENIED" || a.Context.ActorUsername != "developer" || a.Context.AuthFailure != "insufficient_role" || a.Context.HTTPStatus != 403 || a.Context.Route != "GET /api/v1/users" || a.IPAddress != "192.0.2.1" || len(a.TraceID) > 64 {
 		t.Fatalf("bad denial metadata: %+v", a)
 	}
 }

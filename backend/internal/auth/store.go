@@ -12,6 +12,11 @@ import (
 // ErrUserNotFound 用户不存在。
 var ErrUserNotFound = errors.New("用户不存在或已禁用")
 
+// Infrastructure failures must not revoke a browser's otherwise valid session.
+func UserStoreUnavailable(err error) bool {
+	return err != nil && !errors.Is(err, ErrUserNotFound)
+}
+
 // User 系统用户实体（对齐 sys_users 表）。
 type User struct {
 	ID           int64

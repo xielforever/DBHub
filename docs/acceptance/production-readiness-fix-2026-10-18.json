@@ -1,0 +1,145 @@
+{
+  "checked_at": "2026-10-18T14:51:38.680015+08:00",
+  "status": "sustained_load_in_progress",
+  "base_commit": "227ca737d17262fe571912077cd1f70b9b167506",
+  "scope": "Production dependency security, readiness, identity-service outages, session preservation, login budgets, security headers, metadata/audit restore and release checks",
+  "source_sha256": {
+    "method": "SHA-256 of sorted relative path, NUL, content, NUL",
+    "backend_go_and_migrations": "ab00636e67700f9c940766b794f3422cb320f2126bc1a11389ecbcd033e8405f",
+    "frontend_src_and_tests": "ed7e7fd47c67b4b3cd7e1e3c5e8f6a5d6fc5f4c7b811bd9487b24e94957a1ea1",
+    "frontend_lockfile": "030259ecfe425013e68e3ab53cb62c75c5f9dbb86668a07f255ce7059edf0a12"
+  },
+  "checks": {
+    "backend_full_suite": {
+      "result": "passed",
+      "command": "go test ./... -count=1",
+      "server_package_seconds": 159.517
+    },
+    "backend_full_race": {
+      "result": "passed",
+      "command": "go test -race ./... -count=1",
+      "server_package_seconds": 329.895
+    },
+    "go_vet": "passed",
+    "frontend_tests": {
+      "query": 14,
+      "report": 18,
+      "dashboard": 10
+    },
+    "typescript_and_production_build": "passed",
+    "full_dependency_audit": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "production_dependency_audit": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "canonical_backup_digests": {
+      "result": "passed",
+      "object_classes": 16,
+      "session_timezones": [
+        "UTC",
+        "Pacific/Auckland"
+      ],
+      "canonical_timezone": "UTC",
+      "snapshot": "repeatable-read read-only"
+    },
+    "workflow_syntax": "passed",
+    "shell_syntax": "passed",
+    "git_diff_check": "passed"
+  },
+  "production_images": {
+    "backend": "sha256:05709f92a445c477edc6e579de4ecb4427a6f1efd96ec5585dfb8e9f9d58e4ab",
+    "frontend": "sha256:9319f81f74322b7f2b54c6e347b644a9c273ba37fdac56a7d47839030ad04166",
+    "backend_binary_sha256": "61e00ab455d5ba79dd496a47e07cef3bcf390b549c9a8dbfe3458509d7fa25a8",
+    "kind": "local Docker image IDs, not pushed registry digests"
+  },
+  "fault_restore_browser_acceptance": {
+    "result": "passed",
+    "checks": {
+      "candidate_images_and_35_migrations": true,
+      "approved_reports_dashboard_group_and_encrypted_account_fixture": true,
+      "default_login_limit_and_retry_after": {
+        "allowed_attempts": 10,
+        "next_http": 429
+      },
+      "redis_outage_503_liveness_and_same_session_recovery": true,
+      "postgres_outage_503_bounded_probe_session_and_durable_audit_recovery": true,
+      "monaco_query_runs_under_strict_production_csp": true,
+      "expired_access_refresh_503_preserves_both_tokens_and_recovers": true,
+      "security_headers_for_html_assets_errors_and_private_api": true,
+      "metadata_backup_restore_16_object_counts_and_digests": {
+        "objects": 16,
+        "old_acl_excluded": true,
+        "overwrite_refused": true,
+        "nonempty_restore_refused": true
+      },
+      "restored_encryption_groups_publications_permissions_and_audit_deduplication": true
+    },
+    "browser": {
+      "page_errors": 0,
+      "csp_violations": 0,
+      "refresh_503": "explicit browser transport mock"
+    },
+    "temporary_resources_removed": true,
+    "private_report": "/workspace/dbhub-cloud/production-acceptance/fdf80d5e61/checks.json"
+  },
+  "dashboard_browser": {
+    "result": "passed",
+    "checks": [
+      "真实 PostgreSQL 五张报表与独立只读账号发布；查看者没有个人连接",
+      "浏览器配置业务名称与4位小数，预览实时更新；保存草稿不改变正式展示",
+      "送审统一列出5项用户组缺权，从检查发起补权，独立报表发布生效后重查通过；审阅人无隐式数据权",
+      "浏览器开发：添加五张卡片、调整宽度、比较组和受众，冻结版本送审",
+      "浏览器审阅：冻结版本全部真实预览、验证、批准与显式发布",
+      "审批以当前正式版为基准，显示布局与人员变化及业务口径，技术JSON默认折叠",
+      "正式查看：真实1280.00与12，业务水位独立展示，无个人凭据或额外按钮",
+      "手机390px单列布局、无横向溢出，图表保留可读结果表",
+      "页面同时查询最多两张；单卡重查保持部分刷新，不改写最近完整查询时间",
+      "模拟503仅保留带旧时间标记的内存结果，不显示为新鲜数据",
+      "离线时不发起查询，恢复网络后要求手动刷新",
+      "计时推进31分钟：清空过期结果，期间没有自动执行查询",
+      "工作空间切换销毁旧结果，跨空间已知报表ID与数据源读取被拒绝"
+    ],
+    "page_errors": 0,
+    "runtime_readonly": true,
+    "source": "candidate production images",
+    "temporary_resources_removed": true,
+    "private_report": "/workspace/dbhub-cloud/dashboard-artifacts/bdb4bc1c4b/checks.json"
+  },
+  "load": {
+    "result": "running",
+    "command": "python3 scripts/cloud/production_acceptance.py --duration 1800 --clients 4",
+    "kind": "synthetic owned three-warehouse data, no actual production capacity certification"
+  },
+  "cloud": {
+    "result": "passed",
+    "readiness": 200,
+    "login": 200,
+    "workspace_dashboard_endpoints": 4,
+    "frontend": 200
+  },
+  "new_migrations": 0,
+  "latest_migration": "0035_dashboard_review_assignment_epoch.sql",
+  "new_services": 0,
+  "production_environment_remaining": [
+    "Actual production domain, HTTPS termination, metadata/Redis protection and trusted proxy CIDRs",
+    "Production-scale migration and workload capacity with real business SQL",
+    "Production backup retention/RPO/RTO and selected secure rollback image",
+    "Branch protection and actual remote CI execution; workflow is added and local commands validated"
+  ],
+  "not_claimed": [
+    "Deployment to actual production",
+    "A new full Go/JDBC/OS-image vulnerability scan",
+    "Full multi-instance deployment/failover qualification"
+  ]
+}

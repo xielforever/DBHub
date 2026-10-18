@@ -20,13 +20,14 @@ type Handler struct {
 	accessTTL, refreshTTL time.Duration
 	log                   *slog.Logger
 	sessions              *SessionStore
+	loginLimiter          *loginLimiter
 }
 
 func NewHandler(cfg *config.Config, users UserStore, log *slog.Logger, sessions *SessionStore) *Handler {
 	if sessions == nil {
 		sessions = NewSessionStore(nil)
 	}
-	return &Handler{users: users, secret: cfg.SecretKey, accessTTL: cfg.AccessTTL, refreshTTL: cfg.RefreshTTL, log: log, sessions: sessions}
+	return &Handler{users: users, secret: cfg.SecretKey, accessTTL: cfg.AccessTTL, refreshTTL: cfg.RefreshTTL, log: log, sessions: sessions, loginLimiter: newLoginLimiter(cfg, sessions.client)}
 }
 
 type loginRequest struct {
@@ -59,6 +60,14 @@ func sessionFailure(w http.ResponseWriter, e error) {
 		httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "会话服务暂不可用"})
 	}
 }
+func userFailure(w http.ResponseWriter, err error, message string) {
+	if UserStoreUnavailable(err) {
+		w.Header().Set("Retry-After", "2")
+		httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "身份服务暂不可用，请稍后重试"})
+		return
+	}
+	httpx.Fail(w, httpx.Unauthorized(message))
+}
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var in loginRequest
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
@@ -70,9 +79,26 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("用户名和密码不能为空"))
 		return
 	}
+	if len(in.Username) > 256 || len(in.Password) > 4096 {
+		httpx.Fail(w, httpx.BadRequest("用户名或密码过长"))
+		return
+	}
+	wait, err := h.loginLimiter.allow(r.Context(), in.Username, r)
+	if err != nil {
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "login_protection_unavailable" })
+		w.Header().Set("Retry-After", "2")
+		httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "登录服务暂不可用，请稍后重试"})
+		return
+	}
+	if wait > 0 {
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "login_throttled" })
+		w.Header().Set("Retry-After", strconv.FormatInt(int64((wait+time.Second-1)/time.Second), 10))
+		httpx.JSON(w, 429, httpx.Envelope{Code: 42900, Message: "登录尝试过于频繁，请稍后重试"})
+		return
+	}
 	user, e := h.users.FindByUsername(r.Context(), in.Username)
 	if e != nil {
-		httpx.Fail(w, httpx.Unauthorized("用户名或密码错误"))
+		userFailure(w, e, "用户名或密码错误")
 		return
 	}
 	valid, e := VerifyPassword(user.PasswordHash, in.Password)
@@ -109,7 +135,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	user, e := h.users.FindByUsername(r.Context(), claims.Username)
 	if e != nil {
-		httpx.Fail(w, httpx.Unauthorized("用户不可用"))
+		userFailure(w, e, "用户不可用")
 		return
 	}
 	if e = h.sessions.Validate(r.Context(), claims, user); e != nil {
@@ -138,7 +164,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	user, e := h.users.FindByUsername(ctx, claims.Username)
 	if e != nil {
-		httpx.Fail(w, httpx.Unauthorized("用户不可用"))
+		userFailure(w, e, "用户不可用")
 		return
 	}
 	httpx.OK(w, UserResponse{ID: user.ID, Username: user.Username, Role: user.Role})

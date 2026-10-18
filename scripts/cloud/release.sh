@@ -7,6 +7,7 @@ export DBHUB_COMPOSE_PROJECT=dbhub-release-check
 export DBHUB_COMPOSE_FILE="$dbhubrelease_root/docker-compose.prod.yaml"
 export DBHUB_BACKEND_IMAGE="${DBHUB_RELEASE_BACKEND_IMAGE:-dbhub-backend:phase1-release}"
 export DBHUB_FRONTEND_IMAGE="${DBHUB_RELEASE_FRONTEND_IMAGE:-dbhub-frontend:phase1-release}"
+export DBHUB_TARGET_ALLOWLIST="${DBHUB_TARGET_ALLOWLIST:-postgres:5432,mysql:3306,redis:6379}"
 export DBHUB_BUILD_ROOT="${DBHUB_BUILD_ROOT:-/tmp/dbhub-cloud-build}"
 mkdir -p "$DBHUB_BUILD_ROOT/release-data/postgres" "$DBHUB_BUILD_ROOT/release-data/mysql" "$DBHUB_BUILD_ROOT/release-data/redis"
 exec "$dbhubrelease_root/scripts/cloud/dev.sh" -f "$dbhubrelease_root/scripts/cloud/release.compose.yaml" "$@"
