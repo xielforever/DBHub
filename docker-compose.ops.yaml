@@ -8,7 +8,9 @@ services:
     read_only: true
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
-    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,uid=65532,gid=65532,mode=0700"]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,uid=65532,gid=65532,mode=0700
+      - /var/lib/postgresql/data:rw,noexec,nosuid,size=1m,uid=65532,gid=65532,mode=0700
     environment:
       PGSERVICE: ${DBHUB_BACKUP_SERVICE:-dbhub}
       PGSERVICEFILE: /run/dbhub-backup/pg_service.conf

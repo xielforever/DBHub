@@ -144,6 +144,7 @@ class AutomationRuntime(Runtime):
     def backup_once(self, config, want=0):
         self.backup_runs += 1; name = self.prefix + '-backup-' + str(self.backup_runs)
         self.run(name, '--read-only', '--cap-drop=ALL', '--security-opt', 'no-new-privileges', '--cpus=0.5', '--memory=128m',
+                 '--tmpfs', '/var/lib/postgresql/data:rw,noexec,nosuid,size=1m,uid=65532,gid=65532,mode=0700',
                  '--mount', f'type=volume,src={self.backups},dst=/var/lib/dbhub/backups', '--mount', f'type=volume,src={config},dst=/config,readonly',
                  '-e', 'PGSERVICEFILE=/config/pg_service.conf', '-e', 'PGPASSFILE=/config/pgpass', '-e', 'DBHUB_BACKUP_ONCE=1',
                  '-e', 'DBHUB_BACKUP_INTERVAL_SECONDS=60', '-e', 'DBHUB_BACKUP_RETENTION_DAYS=1', self.backup_image)
@@ -214,6 +215,10 @@ def main():
         runtime.start(); runtime.fixture(); runtime.source_jobs()
         runtime.api('POST', '/workspaces', {'request_id': key(), 'name': '隔离验收空间'})
         runtime.browser(); runtime.backups_and_restore()
+        # Exercise cleanup of an inherited image VOLUME as well as the normal
+        # tmpfs configuration; this container never receives credentials.
+        runtime.run(runtime.prefix + '-anonymous-cleanup-probe', '--read-only', '--cap-drop=ALL',
+                    '--entrypoint', 'sh', runtime.backup_image, '-ec', 'exit 0')
         runtime.result['completed'] = True
     finally:
         runtime.cleanup()

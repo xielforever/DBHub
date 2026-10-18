@@ -28,4 +28,4 @@ base=re.search(r'^FROM (\S+)',Path('scripts/ops/Dockerfile').read_text()).group(
 subprocess.run(['docker','run','--rm','-i','--network','none','--read-only','--cap-drop=ALL','--cap-add=CHOWN','--cap-add=FOWNER','--cap-add=DAC_OVERRIDE','--mount',f'type=volume,src={volume},dst=/private',base,'sh','-ec','umask 077; tar -xf - -C /private; chmod 700 /private; chmod 600 /private/pg_service.conf /private/pgpass; chown 65532:65532 /private/pg_service.conf /private/pgpass; chown 65532:65532 /private'],input=archive.getvalue(),check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 print('Private backup configuration prepared')
 PY
-scripts/cloud/dev.sh --profile operations up -d metadata-backup
+scripts/cloud/dev.sh --profile operations up -d --renew-anon-volumes metadata-backup

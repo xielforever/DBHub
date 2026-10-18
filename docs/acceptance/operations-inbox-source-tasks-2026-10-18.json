@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-18T18:05:53.925900+08:00",
+  "checked_at": "2026-10-18T18:13:37.788763+08:00",
   "status": "passed",
   "base_commit": "e21cea81602b68ba31adf58aa3aaeb2ecb073113",
   "source_snapshot": "Feature working tree, bound by hashes and tested image IDs; source_changed=true in raw reports",
@@ -9,7 +9,8 @@
     "backend_application_go_and_sql_excluding_tests": "c180bda164394501827d342691e99e70712e3eafca08bdf71276e16fdc94a3c7",
     "frontend_src_and_tests": "4dc0a88a03ec208e05c430225314199cc74961ff2fea325a8a355774da5bafa8",
     "frontend_lockfile": "030259ecfe425013e68e3ab53cb62c75c5f9dbb86668a07f255ce7059edf0a12",
-    "backup_scripts_and_dockerfile": "d0ec2c821e2b94c019f6ab1786071583e8259fd934dd8a372ad33b7f31b11e59"
+    "backup_scripts_and_dockerfile": "d0ec2c821e2b94c019f6ab1786071583e8259fd934dd8a372ad33b7f31b11e59",
+    "operations_config_and_acceptance_runners": "f997a0626da81662e63343ea0c34d4de706b8bc3d28b2d7d27014287b6a8c4c8"
   },
   "migrations": {
     "count": 36,
@@ -86,7 +87,8 @@
       "mocked_business_responses": 0
     },
     "temporary_resources_removed": true,
-    "private_report": "/workspace/dbhub-cloud/production-acceptance/ae01476228/checks.json"
+    "private_report": "/workspace/dbhub-cloud/production-acceptance/143ad9037f/checks.json",
+    "anonymous_volumes_checked": 0
   },
   "fault_restore_regression": {
     "checks": {
@@ -194,5 +196,18 @@
     "External production deployment",
     "New 30-minute workload or full Go/JDBC/OS-image vulnerability scan",
     "Business row-data replication or external email/IM delivery"
-  ]
+  ],
+  "tested_application_commit": "6e45d61651f7de63e772276e1770a60deefeac5f",
+  "resource_cleanup": {
+    "result": "passed",
+    "inherited_volume_probe": {
+      "anonymous_volumes_checked": 1,
+      "temporary_resources_removed": true,
+      "private_report": "/workspace/dbhub-cloud/production-acceptance/2c48ea39dd/checks.json"
+    },
+    "backup_pgdata_mount": "1 MiB tmpfs; no persistent anonymous PGDATA volume",
+    "additional_owned_empty_probe_volumes_removed": 10,
+    "unrelated_preexisting_volume_preserved": true,
+    "cleanup_failure_causes_nonzero_exit": true
+  }
 }

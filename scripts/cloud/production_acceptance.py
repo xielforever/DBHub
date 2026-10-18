@@ -471,19 +471,33 @@ GRANT SELECT ON business.inventory_report TO {self.reader};""", 'production_targ
 
     def cleanup(self):
         failures = []
+        anonymous = set()
         for kind, name in reversed(self.owned):
             if kind == 'container':
+                mounted = self.docker('inspect', name, '--format', '{{json .Mounts}}', check=False)
+                if mounted.returncode == 0:
+                    for mount in json.loads(mounted.stdout):
+                        volume = mount.get('Name', '')
+                        if mount.get('Type') == 'volume' and re.fullmatch('[0-9a-f]{64}', volume):
+                            anonymous.add(volume)
                 self.docker('stop', '-t', '15', name, check=False)
-                self.docker('rm', '-f', name, check=False)
+                self.docker('rm', '-f', '-v', name, check=False)
             else:
                 self.docker(kind, 'rm', name, check=False)
             if self.docker(kind, 'inspect', name, check=False).returncode == 0:
                 failures.append(name)
+        for volume in anonymous:
+            if self.docker('volume', 'inspect', volume, check=False).returncode == 0:
+                self.docker('volume', 'rm', volume, check=False)
+            if self.docker('volume', 'inspect', volume, check=False).returncode == 0:
+                failures.append(volume)
         for path in self.private_files:
             path.unlink(missing_ok=True)
-        self.result.update(temporary_resources_removed=not failures, cleanup_failures=failures)
+        self.result.update(temporary_resources_removed=not failures, anonymous_volumes_checked=len(anonymous), cleanup_failures=failures)
         (self.state / 'checks.json').write_text(json.dumps(self.result, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps({'completed': self.result['completed'], 'report': str(self.state / 'checks.json'), 'resources_removed': not failures}), flush=True)
+        if failures:
+            raise AssertionError('Owned acceptance resources could not be removed')
 
 
 def main():
