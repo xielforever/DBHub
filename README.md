@@ -31,7 +31,7 @@
 | **动画** | GSAP, CSS Transitions | 微交互 |
 | **后端** | Go 1.25（pgx / MySQL / Redis 驱动，libpg_query AST） | 高性能 API 服务 |
 | **数据库** | PostgreSQL 16 (元数据), Redis 7 (缓存) | 自身存储 |
-| **部署** | Docker, Docker Compose | 全生命周期容器化 |
+| **部署** | Docker Compose、Docker CLI、Helm/Kubernetes、源码/systemd | 四种部署入口及统一生产配置 |
 
 ## 🚀 快速开始
 
@@ -43,8 +43,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/your-org/dbhub.git
-cd dbhub
+git clone https://github.com/xielforever/DBHub.git
+cd DBHub
 
 # 2. 启动全部服务（前端 + 后端 + PostgreSQL + Redis）
 docker compose up -d
@@ -58,7 +58,7 @@ docker compose up -d
 
 ### 本地裸机开发（可选）
 
-不使用 Docker 时，需自行准备 Go 1.25+、Node 22+、PostgreSQL 与 Redis：
+不使用 Docker 时，需自行准备 Go 1.25.5、C 编译工具、Node 24.12.0、PostgreSQL 与 Redis：
 
 ```bash
 # 后端（热重载）
@@ -69,6 +69,8 @@ cd frontend && npm install && npm run dev
 ```
 
 ## 📖 文档指南
+
+生产部署支持 **Docker Compose、独立 Docker、Helm/Kubernetes、源码/systemd**，配置、命令及支持边界见[四种部署方式](deploy/README.md)。
 
 详细文档请查阅 [docs/](./docs/) 目录：
 
@@ -94,7 +96,6 @@ cd frontend && npm install && npm run dev
 - [数据源版本兼容](./docs/开发指南/数据源版本兼容.md)
 - [数据源检查与采集可靠性](./docs/开发指南/数据源检查与采集可靠性.md)
 - [数据库模型设计](./docs/数据库设计/数据库模型设计.md)
-- [低保真 UX 线框图](./docs/界面设计/wireframes/README.md)
 - [UI 设计规范](./docs/界面设计/UI设计规范.md)
 - [环境搭建指南](./docs/开发指南/环境搭建指南.md)
 - [编码规范](./docs/开发指南/编码规范.md)

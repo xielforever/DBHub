@@ -1,0 +1,31 @@
+[Unit]
+Description=DBHub backend
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=dbhub
+Group=dbhub
+WorkingDirectory=/var/lib/dbhub
+EnvironmentFile=/etc/dbhub/dbhub.env
+Environment=HTTP_BIND_HOST=127.0.0.1
+Environment=PORT=8080
+Environment=DBHUB_AUDIT_DIR=/var/lib/dbhub/audit
+ExecStart=/usr/bin/env APP_ENV=production HTTP_BIND_HOST=127.0.0.1 PORT=8080 DBHUB_AUDIT_DIR=/var/lib/dbhub/audit /opt/dbhub/current/bin/dbhub
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+StateDirectory=dbhub
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dbhub
+
+[Install]
+WantedBy=multi-user.target

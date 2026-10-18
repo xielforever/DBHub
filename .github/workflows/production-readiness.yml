@@ -21,6 +21,7 @@ jobs:
       DBHUB_DASHBOARD_BACKEND_IMAGE: dbhub-backend:release-check
       DBHUB_DASHBOARD_FRONTEND_IMAGE: dbhub-frontend:release-check
       DBHUB_BACKUP_IMAGE: dbhub-backup:release-check
+      DBHUB_JDBC_RUNTIME_IMAGE: dbhub-jdbc:release-check
       DBHUB_DASHBOARD_USE_IMAGE: "1"
       DBHUB_CHROMIUM_PATH: ""
     steps:
@@ -46,10 +47,29 @@ jobs:
           docker build -t "$DBHUB_DASHBOARD_BACKEND_IMAGE" -f backend/Dockerfile backend
           docker build -t "$DBHUB_DASHBOARD_FRONTEND_IMAGE" -f frontend/Dockerfile frontend
           docker build -t "$DBHUB_BACKUP_IMAGE" -f scripts/ops/Dockerfile scripts/ops
+          docker build --secret id=proxy_ca,src=/etc/ssl/certs/ca-certificates.crt -t "$DBHUB_JDBC_RUNTIME_IMAGE" -f services/jdbc-runner/Dockerfile services/jdbc-runner
       - name: 安装隔离浏览器
         run: |
           python -m pip install playwright==1.62.0
           python -m playwright install --with-deps chromium
+      - name: 验证四种部署方式的配置与 Kubernetes Schema
+        run: |
+          python -m pip install -r deploy/requirements-check.txt
+          python -m unittest discover -s scripts/deploy -p 'test_*.py'
+          python scripts/deploy/check.py --schema
+      - name: 构建源码部署包并验证 Docker、源码运行
+        # Source JDBC is compiled on the runner using the selected JDK below.
+        run: |
+          ./scripts/cloud/dev.sh run --rm --no-deps backend sh /app/deploy/source/build.sh backend /runtime/source-release
+          ./scripts/cloud/dev.sh run --rm --no-deps frontend sh /app/deploy/source/build.sh frontend /runtime/source-release
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: 编译源码 JDBC 并执行部署运行回归
+        run: |
+          sh deploy/source/build.sh jdbc "$DBHUB_STATE_DIR/source-release"
+          DBHUB_SOURCE_BUNDLE="$DBHUB_STATE_DIR/source-release" python scripts/deploy/runtime_check.py
       - name: 报表与仪表盘真实浏览器回归
         run: python scripts/cloud/dashboard_acceptance.py
       - name: 故障恢复、限流与完整备份恢复

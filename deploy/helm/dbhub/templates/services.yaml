@@ -1,0 +1,11 @@
+{{- range $component, $port := dict "backend" 8080 "frontend" 80 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dbhub.name" $ }}-{{ $component }}
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/instance: {{ $.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
+  ports: [{name: http, port: {{ $port }}, targetPort: http}]
+{{- end }}

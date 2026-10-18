@@ -1,0 +1,105 @@
+{
+  "checked_at": "2026-10-18T12:48:52.251010+00:00",
+  "base_commit": "272bf128ae167521e586fb4178c22d663baa9951",
+  "status": "deployment entrypoints validated; production gates remain separate",
+  "supported_entrypoints": [
+    "production Docker Compose",
+    "standalone Docker CLI",
+    "Helm/Kubernetes chart",
+    "Linux source bundle/systemd"
+  ],
+  "backend_replica_support": 1,
+  "schema_migration_added": false,
+  "helm": {
+    "version": "3.19.0",
+    "lint_variants_passed": 4,
+    "kubernetes_schema_version": "1.32.0",
+    "schema_resources_per_variant": [
+      7,
+      12,
+      6,
+      7
+    ],
+    "invalid_configurations_rejected": 6,
+    "kubernetes_cluster_install_tested": false,
+    "retained_pvcs": true,
+    "fsGroupChangePolicy": "OnRootMismatch"
+  },
+  "checks": {
+    "deployment_guard_unit_tests": 3,
+    "production_compose_render": "passed; JDBC and operations profiles",
+    "backend_config_race_tests": "passed",
+    "systemd_analyze_verify": "passed; syntax/command availability, services not installed",
+    "actionlint": "passed",
+    "source_backend_build": "Go 1.25.5/CGO with vendored dependencies",
+    "source_frontend_build": "Node 24.12.0; typecheck and production build passed",
+    "source_jdbc_build": "JDK 17; class major 61; artifacts checksum-verified"
+  },
+  "runtime": {
+    "completed": true,
+    "checks": {
+      "docker_launcher_real_login_and_sql": true,
+      "controlled_restart_preserves_audit_volume_metadata_and_session": true,
+      "helm_nginx_nonroot_and_csi_audit_directory_permissions_on_docker": true,
+      "source_bundle_nginx_proxy_and_loopback_only_backend": true,
+      "source_jdbc_java17_loopback_and_authenticated_api": true
+    },
+    "source_jdbc_executed": true,
+    "temporary_resources_removed": true,
+    "anonymous_volumes_checked": 1,
+    "cleanup_failures": []
+  },
+  "images": {
+    "dbhub-backend:deployment-check-20261018": "sha256:687b1006b75c3934232d9e1c151eb3f7d48d6dffab49b51c476bd4149fb68db1",
+    "dbhub-frontend:deployment-check-20261018": "sha256:b21ee364ddfafb873b3b34e3f9fe335148ab9ec6ae135ca80536f651f436960e",
+    "dbhub-jdbc:connector-20261017": "sha256:e688e434cf30c36f5b8ec753a8a62ed839525beff244ac49ab7b2fb314130fc3"
+  },
+  "source_files_sha256": {
+    ".github/workflows/production-readiness.yml": "78fe839aec802b4c395ab22df47dfb722c5ff09aefc246b51c3650d5b34ea501",
+    "backend/cmd/server/main.go": "6d15ed4c14bdc309cb4938a38c549305129b4f9421a994940d3cca9f0ebc32cb",
+    "backend/internal/config/config.go": "cfbdfd0da7d9a90d0979377c5b1867240ae0cfa75f21aabf068237d171b9d220",
+    "backend/internal/config/production_test.go": "dd2f997a987fa216ea98e06104f4ff75fa8b55e6b043c894520d269c9d6aa306",
+    "deploy/README.md": "821cb82a2dfb3f0ee0e643bba486ca1c5aea3a4eead487c6d396cb4346093a70",
+    "deploy/dbhub.env.example": "3ecaf1c8ffe3e21f21c2730059161bd6d5edac9bdf0c6779c23f0419a84a520d",
+    "deploy/docker/manage.py": "352523186c2b1d3fd540fe16409ec9697d71a13fe0831f6499d9494e8e2a14b1",
+    "deploy/helm/dbhub/Chart.yaml": "23cc752dff978b100894c48c211a1b064a9553a770ab639d5220252cba51d698",
+    "deploy/helm/dbhub/templates/NOTES.txt": "b703eae22b2e65b726ff7fb8295e912eae7f054a232f01097114d6528728d0b7",
+    "deploy/helm/dbhub/templates/_helpers.tpl": "f095fe13394518c3c7b59f51b34dc4954aba01d20c812f6f52d3ddb984afef2f",
+    "deploy/helm/dbhub/templates/backend.yaml": "ca2dad12646c7f67bdddb7b3720e1c9fef4a870c730e2887bd2daa602450c379",
+    "deploy/helm/dbhub/templates/backup.yaml": "328b267941a19d93b3b31257c431cb6951616086aca30fd37675447bc3be51da",
+    "deploy/helm/dbhub/templates/config.yaml": "6b6fa65da82dbe8d41b1fb32ba8a9cad9bb70088681266040a907ece37c02e83",
+    "deploy/helm/dbhub/templates/frontend.yaml": "687e039d2a5b90d78eca249b6de6eb7fdde631ee0933e9ac81d37de6db2577fe",
+    "deploy/helm/dbhub/templates/ingress.yaml": "663917d9600466f57268d914b0cc69d84737d3b1e1ceb801dcf7f319ce79e3de",
+    "deploy/helm/dbhub/templates/jdbc.yaml": "dd0fb59af2bc713a73242e929a96aa13afe81c374ae15ba95fda82834ce115c7",
+    "deploy/helm/dbhub/templates/persistence.yaml": "73e5d9f68ee8c1f2bad6f8f43cc6b5e7d14dd23b265fb7f6e646aa5783d4a964",
+    "deploy/helm/dbhub/templates/services.yaml": "f741f70aeadf7babd48f2e38292f21f31387493a3eff30cd30296067c0e04a67",
+    "deploy/helm/dbhub/values.schema.json": "a135120d093eb0d71b37e6af21313c896489159039fb9697b080f42891045ccf",
+    "deploy/helm/dbhub/values.yaml": "6d203918d823334f2b045bad7701725fa3c8e9ef47ba9470cf9baa10b58a135f",
+    "deploy/helm/values.example.yaml": "69ee92928bbe289222edb86bba4cb0113321c8ed255a383200aa0ffe4279416a",
+    "deploy/requirements-check.txt": "0969da99a0bc2a1b71ed50584560f4588a37567ac63af3ddbaf3c4617ca5621a",
+    "deploy/source/build.sh": "9160d0133ad2467e70e790b4597db7b51a784a5863bdfaafb94255f66cf1a2e3",
+    "deploy/source/dbhub-backup.service": "79bc9b3a3d9a1fd10d5ec59feb65c43edf4d0bb7d3dc683da29244a8ce81a7cd",
+    "deploy/source/dbhub-backup.timer": "2ba58255e986eafcb3062a943015b5d622fa7491261e699e147cdb8f52a8a7c1",
+    "deploy/source/dbhub-jdbc.service": "e8bfd6209efc983876f35af88459a249b59b07683b2461186f76b7719abe28f2",
+    "deploy/source/dbhub.service": "994e103c10c97e460cb5644e4ba8804448232d723c3bdc0c268264b69df96ca6",
+    "deploy/source/nginx.conf": "850cb8f0536bfa3536a3673701a96f9fe412fc801ffd6a71d330fa19418de48a",
+    "frontend/Dockerfile": "fee24804ac581c3df333bb4322eaaaee6ce1e71c8abad3dbdb27b1b76d125a37",
+    "scripts/deploy/check.py": "68ce39316ab1e0c5c7fa274573bf9e3e19a8267d75c4b0fc4b9c22f836235b0b",
+    "scripts/deploy/runtime_check.py": "45675f22efaffba95f93ce7a1cef781d85428cf474fa881261ace07d751d9eaa",
+    "scripts/deploy/test_deployment.py": "1e9c551d7aa64093da74dacd6eeba3c033e78021e947ad72b49740f06ee440b2",
+    "services/jdbc-runner/src/DBHubJdbc.java": "d868bad50ba4798ca5db7f83282ae7fc7cd5659630e8a71efae2fb55f1d60b96"
+  },
+  "cloud_health": {
+    "api_ready": 200,
+    "frontend": 200
+  },
+  "private_runtime_report": "/workspace/dbhub-cloud/production-acceptance/11c872969e/checks.json",
+  "source_bundle": "/workspace/dbhub-cloud/deployment-source-check; dirty-worktree test build, not a published release",
+  "not_verified": [
+    "Installation on a real Kubernetes cluster and its CSI/Ingress/Secret providers",
+    "Real production TLS/network/role provisioning, workload capacity and disaster recovery",
+    "Enabling native systemd services on a target Linux host",
+    "Multi-backend workbench routing/HA; chart rejects more than one backend replica"
+  ],
+  "note": "The JDBC runtime image supplied JRE17 only; the new source classes and locked artifacts were mounted from the freshly built source bundle. Failed intermediate fixture runs and private logs remain separate, all owned Docker resources were cleaned."
+}

@@ -13,8 +13,8 @@ RUN --mount=type=secret,id=proxy_ca \
 
 FROM nginx:1.30.6-alpine@sha256:970364228b1e4f932abc22d321932816782cca8a20b85a77552a7cfe9acfb3b5 AS runtime
 COPY --from=builder /app/dist /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-COPY security-headers.conf /etc/nginx/dbhub-security-headers.conf
+COPY --chmod=0644 nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=0644 security-headers.conf /etc/nginx/dbhub-security-headers.conf
 EXPOSE 80
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 CMD wget -Y off -q -O /dev/null http://127.0.0.1/healthz || exit 1
 CMD ["nginx", "-g", "daemon off;"]

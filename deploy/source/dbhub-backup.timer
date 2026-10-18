@@ -1,0 +1,10 @@
+[Unit]
+Description=DBHub daily metadata backup
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 UTC
+Persistent=true
+Unit=dbhub-backup.service
+
+[Install]
+WantedBy=timers.target

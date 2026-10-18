@@ -1,0 +1,25 @@
+[Unit]
+Description=DBHub optional JDBC connector
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dbhub-jdbc
+Group=dbhub-jdbc
+WorkingDirectory=/opt/dbhub/current/jdbc
+EnvironmentFile=/etc/dbhub/jdbc.env
+Environment=JDBC_BIND_HOST=127.0.0.1
+Environment=JDBC_ARTIFACT_LOCK=/opt/dbhub/current/jdbc/artifacts.lock.json
+Environment=JDBC_ARTIFACT_DIR=/opt/dbhub/current/jdbc/lib
+ExecStart=/usr/bin/java -Xms32m -Xmx256m -cp /opt/dbhub/current/jdbc/classes:/opt/dbhub/current/jdbc/lib/gson-2.13.2.jar DBHubJdbc
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+[Unit]
+Description=DBHub metadata backup
+After=network-online.target dbhub.service
+
+[Service]
+Type=oneshot
+User=dbhub
+Group=dbhub
+Environment=PGSERVICE=dbhub
+Environment=PGSERVICEFILE=/etc/dbhub/backup/pg_service.conf
+Environment=PGPASSFILE=/etc/dbhub/backup/pgpass
+Environment=DBHUB_BACKUP_ONCE=1
+Environment=DBHUB_BACKUP_DIR=/var/lib/dbhub/backups
+ExecStart=/bin/sh /opt/dbhub/current/ops/backup-loop.sh
+TimeoutStartSec=1100
+StateDirectory=dbhub
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dbhub

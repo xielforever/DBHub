@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -132,7 +133,7 @@ func main() {
 
 	router := server.NewRouter(cfg, log, users, deps)
 	srv := &http.Server{
-		Addr:              ":" + cfg.Port,
+		Addr:              net.JoinHostPort(cfg.BindHost, cfg.Port),
 		Handler:           router,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       15 * time.Second,

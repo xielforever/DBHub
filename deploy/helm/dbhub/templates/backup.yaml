@@ -1,0 +1,63 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "dbhub.name" . }}-backup
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: {{ add (int .Values.backup.timeoutSeconds) 120 }}
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, fsGroupChangePolicy: OnRootMismatch, seccompProfile: {type: RuntimeDefault}}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets: {{ toYaml . | nindent 12 }}
+          {{- end }}
+          initContainers:
+            - name: private-libpq
+              image: {{ include "dbhub.image" .Values.backup.image | quote }}
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              command: [sh, -ec]
+              args: ['umask 077; cp -L /input/* /credentials/; chmod 600 /credentials/*']
+              securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+              resources: {{ toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - {name: input, mountPath: /input, readOnly: true}
+                - {name: credentials, mountPath: /credentials}
+          containers:
+            - name: backup
+              image: {{ include "dbhub.image" .Values.backup.image | quote }}
+              imagePullPolicy: {{ .Values.backup.image.pullPolicy }}
+              securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+              env:
+                - {name: PGSERVICE, value: {{ .Values.backup.service | quote }}}
+                - {name: PGSERVICEFILE, value: /run/dbhub-backup/pg_service.conf}
+                - {name: PGPASSFILE, value: /run/dbhub-backup/pgpass}
+                - {name: DBHUB_BACKUP_ONCE, value: "1"}
+                - {name: DBHUB_BACKUP_DIR, value: /var/lib/dbhub/storage/backups}
+                - {name: DBHUB_BACKUP_TIMEOUT_SECONDS, value: {{ .Values.backup.timeoutSeconds | quote }}}
+                - {name: DBHUB_BACKUP_RETENTION_DAYS, value: {{ .Values.backup.retentionDays | quote }}}
+              resources: {{ toYaml .Values.backup.resources | nindent 16 }}
+              volumeMounts:
+                - {name: credentials, mountPath: /run/dbhub-backup, readOnly: true}
+                - {name: backups, mountPath: /var/lib/dbhub/storage}
+                - {name: tmp, mountPath: /tmp}
+                - {name: pgdata, mountPath: /var/lib/postgresql/data}
+          volumes:
+            - name: input
+              secret: {secretName: {{ required "backup.existingSecret is required" .Values.backup.existingSecret }}, defaultMode: 0440}
+            - {name: credentials, emptyDir: {medium: Memory, sizeLimit: 4Mi}}
+            - {name: tmp, emptyDir: {sizeLimit: 16Mi}}
+            - {name: pgdata, emptyDir: {sizeLimit: 1Mi}}
+            - name: backups
+              persistentVolumeClaim:
+                claimName: {{ default (printf "%s-backups" (include "dbhub.name" .)) .Values.backup.existingClaim }}
+{{- end }}

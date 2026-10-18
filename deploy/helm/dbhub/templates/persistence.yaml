@@ -1,0 +1,27 @@
+{{- if not .Values.backend.audit.existingClaim }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dbhub.name" . }}-audit
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if ne .Values.backend.audit.storageClass nil }}
+  storageClassName: {{ .Values.backend.audit.storageClass | quote }}
+  {{- end }}
+  resources: {requests: {storage: {{ .Values.backend.audit.size }}}}
+{{- end }}
+{{- if and .Values.backup.enabled (not .Values.backup.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dbhub.name" . }}-backups
+  annotations: {helm.sh/resource-policy: keep}
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- if ne .Values.backup.storageClass nil }}
+  storageClassName: {{ .Values.backup.storageClass | quote }}
+  {{- end }}
+  resources: {requests: {storage: {{ .Values.backup.size }}}}
+{{- end }}

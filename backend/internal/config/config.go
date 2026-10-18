@@ -19,6 +19,8 @@ type Config struct {
 	Env string
 	// Port HTTP 监听端口
 	Port string
+	// BindHost is empty for all interfaces; source deployments use 127.0.0.1.
+	BindHost string
 	// LogLevel 日志级别：debug / info / warn / error
 	LogLevel string
 
@@ -70,6 +72,7 @@ func Load() (*Config, error) {
 		JDBCURL: os.Getenv("DBHUB_JDBC_URL"), JDBCToken: os.Getenv("DBHUB_JDBC_TOKEN"),
 		Env:             getenv("APP_ENV", "development"),
 		Port:            getenv("PORT", "8080"),
+		BindHost:        os.Getenv("HTTP_BIND_HOST"),
 		LogLevel:        getenv("LOG_LEVEL", "info"),
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
 		MetaDBMaxConns:  int32(getenvInt("META_DB_MAX_CONNS", 10)),
@@ -81,6 +84,9 @@ func Load() (*Config, error) {
 			Username: getenv("APP_ADMIN_USERNAME", "admin"),
 			Password: getenv("APP_ADMIN_PASSWORD", "admin123"),
 		},
+	}
+	if cfg.BindHost != "" && net.ParseIP(cfg.BindHost) == nil {
+		return nil, errors.New("HTTP_BIND_HOST 必须为空或有效 IP 地址")
 	}
 	if raw := os.Getenv("DBHUB_AUDIT_MAX_PENDING"); raw != "" {
 		value, err := strconv.Atoi(raw)

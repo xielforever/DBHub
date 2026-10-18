@@ -1,0 +1,6 @@
+DBHub: single backend, external PostgreSQL/Redis, retained audit PVC.
+Frontend Service: {{ include "dbhub.name" . }}-frontend:80
+Inspect readiness before directing traffic. TLS, actual workload capacity,
+off-site backup and restore rehearsals remain operator release gates.
+Uninstall retains chart-created PVCs. Namespace deletion still deletes them.
+Secret rotation requires a controlled restart of backend/JDBC Pods.

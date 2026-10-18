@@ -1,0 +1,48 @@
+{{- if .Values.jdbc.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dbhub.name" . }}-jdbc
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: jdbc}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: jdbc}
+    spec:
+      automountServiceAccountToken: false
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, runAsGroup: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{ toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: jdbc
+          image: {{ include "dbhub.image" .Values.jdbc.image | quote }}
+          imagePullPolicy: {{ .Values.jdbc.image.pullPolicy }}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          env:
+            - name: DBHUB_JDBC_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ .Values.existingSecret }}, key: DBHUB_JDBC_TOKEN}}
+          ports: [{name: http, containerPort: 8090}]
+          startupProbe: {httpGet: {path: /health, port: http}, periodSeconds: 2, failureThreshold: 60}
+          readinessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 10}
+          resources: {{ toYaml .Values.jdbc.resources | nindent 12 }}
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            {{- with .Values.jdbc.extraVolumeMounts }}{{ toYaml . | nindent 12 }}{{- end }}
+      volumes:
+        - {name: tmp, emptyDir: {sizeLimit: 64Mi}}
+        {{- with .Values.jdbc.extraVolumes }}{{ toYaml . | nindent 8 }}{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dbhub.name" . }}-jdbc
+spec:
+  type: ClusterIP
+  selector: {app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: jdbc}
+  ports: [{name: http, port: 8090, targetPort: http}]
+{{- end }}

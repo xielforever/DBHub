@@ -70,7 +70,7 @@ public final class DBHubJdbc {
         System.setProperty("sun.net.httpserver.maxReqTime","20");
         System.setProperty("sun.net.httpserver.maxRspTime","130");
         System.setProperty("sun.net.httpserver.nodelay","true");
-        HttpServer server=HttpServer.create(new InetSocketAddress(8090),32);
+        HttpServer server=HttpServer.create(new InetSocketAddress(System.getenv().getOrDefault("JDBC_BIND_HOST","0.0.0.0"),8090),32);
         server.setExecutor(new ThreadPoolExecutor(8,8,0,TimeUnit.SECONDS,new ArrayBlockingQueue<>(64),daemon("jdbc-http"),new ThreadPoolExecutor.AbortPolicy()));
         server.createContext("/health",x->{if(!x.getRequestMethod().equals("GET")){send(x,405,obj("ok",false));return;}send(x,200,obj("ok",true,"protocol",1,"sessions",SESSIONS.size()));});
         server.createContext("/v1/",DBHubJdbc::handle);

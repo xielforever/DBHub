@@ -1,0 +1,22 @@
+# Replace all example repositories/tags, DNS names and existing Secret names.
+existingSecret: dbhub-runtime
+config:
+  DBHUB_TARGET_ALLOWLIST: inventory.example.com:5432
+backend:
+  image: {repository: registry.example.com/dbhub/backend, tag: YOUR_RELEASE}
+  audit: {size: 2Gi}
+frontend:
+  image: {repository: registry.example.com/dbhub/frontend, tag: YOUR_RELEASE}
+ingress:
+  enabled: true
+  host: dbhub.example.com
+  tlsSecretName: dbhub-tls
+# Enable after preparing the verified JDBC image and DBHUB_JDBC_TOKEN in the runtime Secret.
+jdbc:
+  enabled: false
+  image: {repository: registry.example.com/dbhub/jdbc, tag: YOUR_RELEASE}
+# This PVC is a local archive, not an off-site backup.
+backup:
+  enabled: false
+  image: {repository: registry.example.com/dbhub/backup, tag: YOUR_RELEASE}
+  existingSecret: dbhub-backup-libpq
