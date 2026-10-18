@@ -107,7 +107,7 @@
                 <p v-if="a.error_message" class="text-[11px] text-rose-300/70 mt-1 max-w-[200px] truncate" :title="a.error_message">
                   {{ a.error_message }}
                 </p>
-                <details class="text-xs text-white/45 mt-1"><summary class="cursor-pointer">请求详情</summary><p>{{ a.context?.route }}</p><p v-if="a.context?.http_status">HTTP {{ a.context.http_status }}</p><p v-if="a.context?.auth_failure">{{ denialLabels[a.context.auth_failure] || a.context.auth_failure }}</p><p v-if="a.context?.transaction_id" class="break-all">事务 {{ a.context.transaction_id }}</p><p v-if="a.context?.job_id" class="break-all">任务 {{ a.context.job_id }}</p><p v-if="a.context?.export_id">导出 #{{ a.context.export_id }}</p><p v-if="a.context?.report_id">报表 #{{ a.context.report_id }} · 版本 {{ a.context.report_version }}</p><p class="break-all">事件 {{ a.event_id || '历史记录' }}</p></details>
+                <details class="text-xs text-white/45 mt-1"><summary class="cursor-pointer">请求详情</summary><p>{{ a.context?.route }}</p><p v-if="a.context?.http_status">HTTP {{ a.context.http_status }}</p><p v-if="a.context?.auth_failure">{{ denialLabels[a.context.auth_failure] || a.context.auth_failure }}</p><p v-if="a.context?.transaction_id" class="break-all">事务 {{ a.context.transaction_id }}</p><p v-if="a.context?.job_id" class="break-all">任务 {{ a.context.job_id }}</p><p v-if="a.context?.export_id">导出 #{{ a.context.export_id }}</p><p v-if="a.context?.report_id">报表 #{{ a.context.report_id }} · 版本 {{ a.context.report_version }}</p><p v-if="a.context?.report_publication_no">发布序号 {{ a.context.report_publication_no }} · 审批 #{{ a.context.report_review_id }} · 执行账号 #{{ a.context.report_account_id }}</p><p v-if="a.context?.report_author">作者 {{ a.context.report_author }} · 审批 {{ a.context.report_approver }} · 发布 {{ a.context.report_publisher }}</p><p v-if="a.context?.report_decision">审批决定 {{ a.context.report_decision }}</p><p v-if="a.context?.report_release_kind">发布操作 {{ a.context.report_release_kind }}</p><p v-if="a.context?.report_manifest_hash" class="break-all">批准摘要 {{ a.context.report_manifest_hash }}</p><p class="break-all">事件 {{ a.event_id || '历史记录' }}</p></details>
               </td>
               <td class="px-5 py-3.5 text-right text-white/45 text-xs whitespace-nowrap">{{ a.duration_ms ?? '—' }} ms</td>
             </tr>
@@ -156,7 +156,7 @@ const outcomes: Record<string, string> = {begun: '事务已开启', committed: '
 const actionLabels: Record<string, string> = {
   REFRESH: '刷新会话', LOGOUT: '退出登录', AUTH_DENIED: '访问拒绝',
   TRANSACTION_BEGIN: '开启事务', TRANSACTION_COMMIT: '提交事务', TRANSACTION_ROLLBACK: '回滚事务',
-  REPORT_PREVIEW: '预览报表', REPORT_EXECUTE: '执行报表',
+  REPORT_PREVIEW: '预览报表', REPORT_EXECUTE: '执行报表', REPORT_DRAFT_SAVE:'保存正式报表草稿',REPORT_SUBMIT:'提交报表审批',REPORT_REVIEW_VALIDATE:'验证审批账号',REPORT_REVIEW_DECISION:'审批报表',REPORT_RELEASE:'发布或下线报表',REPORT_TRANSFER:'移交报表',REPORT_ACCOUNT_MANAGE:'维护报表账号',REPORT_PUBLISHED_EXECUTE:'执行已发布报表',REPORT_VERSION_VIEW:'查看报表版本',
   QUERY_CANCEL: '取消查询', EXPORT_CREATE: '申请导出', EXPORT_REVIEW: '审批导出', EXPORT_DOWNLOAD: '下载导出',
   LOGIN: '登录',
   CHANGE_PASSWORD: '修改密码',
@@ -168,7 +168,7 @@ const actionLabels: Record<string, string> = {
 }
 const resourceLabels: Record<string, string> = {
   TRANSACTION: '事务', QUERY_JOB: '查询任务', EXPORT: '数据导出',
-  REPORT: '报表', AUTH: '认证',
+  REPORT: '报表', REPORT_ACCOUNT:'报表执行账号', AUTH: '认证',
   CONNECTION: '数据源',
   SSH_TUNNEL: 'SSH 隧道',
   USER: '用户',

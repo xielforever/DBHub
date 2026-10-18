@@ -3,9 +3,22 @@ import { test } from 'node:test'
 import { effectScope } from 'vue'
 import { useReportRun } from '../src/views/report/useReportRun.ts'
 import { reportChart } from '../src/views/report/reportChart.ts'
+import { reportCommandKeys, reportDefinitionDiff } from '../src/views/report/reportCommands.ts'
 import type { ExecResult } from '../src/api/workbench.ts'
 function deferred<T>() { let resolve!: (value:T)=>void;let reject!: (error:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return {promise,resolve,reject} }
 const result:ExecResult={kind:'query',columns:['day','amount'],rows:[['2026-01-02','20.50'],['2026-01-01',null],['2026-01-01','10.25']],duration_ms:5}
+test('uncertain publication retries keep a UUID and an explicit new action gets a new UUID',()=>{
+ const keys=reportCommandKeys(),payload={review_id:1,kind:'publish',expected_publication_no:0},first=keys.get('release',payload)
+ assert.equal(first,keys.get('release',{...payload}))
+ assert.notEqual(first,keys.get('release',{...payload,expected_publication_no:1}))
+ assert.notEqual(first,keys.get('decision',payload))
+ keys.clear();assert.notEqual(first,keys.get('release',payload))
+})
+test('version comparison includes datasource, SQL, and chart mapping changes',()=>{
+ const before={name:'库存',description:'',definition_revision_id:1,database_name:'inventory',sql_text:'SELECT 1',chart_type:'table' as const,chart_config:{}}
+ assert.deepEqual(reportDefinitionDiff(before,{...before,definition_revision_id:2,sql_text:'SELECT 2',chart_config:{metrics:['total']}}),['数据源修订','SQL','图表配置'])
+ assert.deepEqual(reportDefinitionDiff(before,{...before}),[])
+})
 test('report charts preserve SQL order, duplicate dimensions and null gaps without client aggregation',()=>{
  const data=reportChart('line',{dimension:'day',metrics:['amount']},result)
  assert.equal(data.error,undefined)

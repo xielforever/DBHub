@@ -48,7 +48,12 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	var in executeRequest
 	var reportID, reportVersion int64
 	var decodeErr error
-	if reportMode {
+	managed := managedRunOf(r)
+	if managed != nil {
+		x := managed.execution
+		in = executeRequest{RequestID: managed.requestID, ConnectionID: x.Connection.ID, SQL: x.Definition.SQL, Database: x.Definition.Database}
+		reportID, reportVersion = x.ReportID, x.Version
+	} else if reportMode {
 		in, reportID, reportVersion, decodeErr = h.reportRequest(w, r, reports)
 	} else {
 		decodeErr = httpx.DecodeJSON(w, r, &in)
@@ -60,7 +65,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	if reportID > 0 {
 		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ReportID, d.ReportVersion = reportID, reportVersion })
 	}
-	if in.ConnectionID < 1 || strings.TrimSpace(in.SQL) == "" {
+	if managed == nil && in.ConnectionID < 1 || strings.TrimSpace(in.SQL) == "" {
 		httpx.Fail(w, httpx.BadRequest("connection_id 和 sql 必填"))
 		return
 	}
@@ -70,7 +75,17 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		return
 	}
 	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ExecutionRequestID = in.RequestID })
-	conn, password, tunnel, e := h.loadOwnedConnection(r, in.ConnectionID)
+	var conn *db.Connection
+	var password string
+	var tunnel *db.SSHTunnel
+	var e error
+	if managed != nil {
+		conn, password = managed.execution.Connection, managed.execution.Password
+		auditConnection(r.Context(), conn, false)
+		e = auditctx.Checkpoint(r.Context())
+	} else {
+		conn, password, tunnel, e = h.loadOwnedConnection(r, in.ConnectionID)
+	}
 	if e != nil {
 		httpx.Fail(w, e)
 		return
@@ -122,6 +137,14 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			ReportVersion int64
 		}{signature, "report", reportID, reportVersion}
 	}
+	if managed != nil {
+		signature = struct {
+			Execution       any
+			Scope, Manifest string
+			PublicationNo   int64
+			Validation      bool
+		}{signature, "managed-report", managed.execution.Hash, managed.execution.PublicationNo, managed.execution.Validation}
+	}
 	raw, e := json.Marshal(signature)
 	if e != nil {
 		httpx.Fail(w, httpx.BadRequest("请求参数无法编码"))
@@ -129,7 +152,11 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	}
 	hash := sha256.Sum256(raw)
 	requestHash := hex.EncodeToString(hash[:])
-	claimed, e := h.controls.ClaimExecution(r.Context(), c.Subject, in.RequestID, requestHash, conn.ID, conn.Database, in.TransactionID != "")
+	receiptDatabase := conn.Database
+	if managed != nil {
+		receiptDatabase = ""
+	}
+	claimed, e := h.controls.ClaimExecution(r.Context(), c.Subject, in.RequestID, requestHash, conn.ID, receiptDatabase, in.TransactionID != "")
 	if e != nil {
 		h.log.Error("登记执行请求失败，未发送用户 SQL", "error", e)
 		reason = e
@@ -150,7 +177,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		}
 		return
 	}
-	receipt := &db.QueryExecution{RequestID: in.RequestID, ConnectionID: conn.ID, Database: conn.Database, Transactional: in.TransactionID != ""}
+	receipt := &db.QueryExecution{RequestID: in.RequestID, ConnectionID: conn.ID, Database: receiptDatabase, Transactional: in.TransactionID != ""}
 	respond := func(status int, message string, data any) {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
 		defer cancel()
@@ -164,13 +191,31 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			return
 		}
 		outcome = receipt.Status
+		// Receipt persistence may take time. Recheck immediately before exposing
+		// rows, so a revocation during that write cannot deliver stale authority.
+		if managed != nil && status == 200 {
+			if err := managed.repo.CheckExecution(r.Context(), managed.execution); err != nil {
+				receipt.Status, receipt.Message = "rejected", "报表授权、发布版本或执行账号已变化，结果未交付。"
+				outcome = "rejected"
+				if err = h.controls.FinishExecution(cleanup, c.Subject, receipt); err != nil {
+					httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "结果未交付，执行回执更新失败，请核对执行状态。"})
+					return
+				}
+				httpx.JSON(w, 409, httpx.Envelope{Code: 40900, Message: receipt.Message, Data: receipt})
+				return
+			}
+		}
 		if status == 200 {
 			httpx.OK(w, data)
 		} else {
 			httpx.JSON(w, status, httpx.Envelope{Code: status * 100, Message: message, Data: receipt})
 		}
 	}
-	ctx, finish, e := h.jobs.admit(r.Context(), c.Subject, conn.ID, in.SQL)
+	jobSQL := in.SQL
+	if managed != nil {
+		jobSQL = fmt.Sprintf("正式报表 #%d v%d", reportID, reportVersion)
+	}
+	ctx, finish, e := h.jobs.admit(r.Context(), c.Subject, conn.ID, jobSQL)
 	if e != nil {
 		reason = e
 		receipt.Status = "rejected"
@@ -179,8 +224,17 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		return
 	}
 	var execErr error
-	defer func() { finish(execErr) }()
+	defer func() {
+		if managed != nil && execErr != nil {
+			finish(fmt.Errorf("正式报表执行未完成"))
+		} else {
+			finish(execErr)
+		}
+	}()
 	validate := func() error {
+		if managed != nil {
+			return managed.repo.CheckExecution(ctx, managed.execution)
+		}
 		if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
 			return err
 		}
@@ -247,9 +301,13 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			h.metrics.finishExecution(executionOutcome, time.Since(executionStarted))
 		}()
 		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.TargetOpened = true })
-		rewritten, values, e := h.applyPolicies(ctx, handle, c.Subject, c.Role, query, args)
-		if e != nil {
-			return nil, e
+		rewritten, values := query, args
+		if managed == nil {
+			var e error
+			rewritten, values, e = h.applyPolicies(ctx, handle, c.Subject, c.Role, query, args)
+			if e != nil {
+				return nil, e
+			}
 		}
 		opt.Args = values
 		return target.ExecuteWithOptions(ctx, handle, rewritten, readOnly, opt)
@@ -297,6 +355,9 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			receipt.Status, receipt.Message = "failed", "数据库已返回执行错误。"
 		}
 		message := "执行失败: " + safeErr(execErr)
+		if managed != nil && !managed.execution.Validation {
+			message = "报表执行失败，请联系管理员并提供执行编号"
+		}
 		if receipt.Status == "unknown" {
 			message = receipt.Message
 		}
@@ -304,9 +365,27 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		h.recordHistory(context.WithoutCancel(r.Context()), c, in, conn, 0, nil, execErr)
 		return
 	}
+	if managed != nil {
+		if execErr = validate(); execErr != nil {
+			receipt.Status, receipt.Message = "rejected", "报表授权、发布版本或执行账号已变化，结果未交付。"
+			respond(409, receipt.Message, nil)
+			return
+		}
+		if managed.execution.Validation {
+			if execErr = managed.repo.RegisterValidation(ctx, in.RequestID, managed.execution); execErr != nil {
+				receipt.Status, receipt.Message = "failed", "验证记录未能保存，请刷新审批状态后重新验证。"
+				respond(409, receipt.Message, nil)
+				return
+			}
+		}
+	}
 	receipt.Status, receipt.Kind = "succeeded", result.Kind
 	receipt.AffectedRows, receipt.DurationMS = result.AffectedRows, result.DurationMS
-	respond(200, "", result)
+	var response any = result
+	if managed != nil && managed.execution.Validation {
+		response = map[string]any{"result": result, "validation_id": in.RequestID, "manifest_hash": managed.execution.Hash}
+	}
+	respond(200, "", response)
 	var affected *int64
 	if result.Kind == "write" {
 		n := result.AffectedRows

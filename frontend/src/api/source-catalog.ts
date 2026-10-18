@@ -29,6 +29,7 @@ export interface SourceDefinition {
 export interface DefinitionChange { field: string; label: string; before: string; after: string }
 export interface DefinitionRevision extends SourceDefinition {
   binding_count?: number
+  report_count?: number
   previous_revision?: number
   changes: DefinitionChange[]
 }
@@ -46,7 +47,7 @@ export const sourceCatalogApi = {
   publish: (connectionId: number, visibility: Visibility) => request.post<unknown, SourceDefinition>(`/connections/${connectionId}/publish`, { visibility }),
   revise: (id: number, payload: DefinitionPayload) => request.post<unknown, SourceDefinition>(`/datasource-definitions/${id}/revisions`, payload),
   revisions: (id: number, page = 1) => request.get<unknown, {items: DefinitionRevision[]; total: number; page: number; page_size: number}>(`/datasource-definitions/${id}/revisions`, {params: {page, page_size: 10}}),
-  status: (id: number, enabled: boolean, expectedBindings?: number) => request.patch(`/datasource-definitions/${id}/status`, { enabled, ...(!enabled ? {confirmed: true, expected_binding_count: expectedBindings} : {}) }),
+  status: (id: number, enabled: boolean, expectedBindings?: number, expectedReports?: number) => request.patch(`/datasource-definitions/${id}/status`, { enabled, ...(!enabled ? {confirmed: true, expected_binding_count: expectedBindings, expected_report_count: expectedReports} : {}) }),
   add: (id: number, payload: PersonalIdentity) => request.post<unknown, ConnectionItem>(`/datasource-definitions/${id}/connections`, payload),
   test: (id: number, payload: PersonalIdentity) => request.post<unknown, TestResult>(`/datasource-definitions/${id}/connections?test=true`, payload, { timeout: 25_000 }),
   upgrade: (connectionId: number, definitionId: number, payload: PersonalIdentity) => request.post<unknown, ConnectionItem>(`/connections/${connectionId}/revision`, { ...payload, definition_revision_id: definitionId }),

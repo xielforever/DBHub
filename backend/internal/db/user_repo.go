@@ -256,7 +256,7 @@ func (r *UserRepository) UpdatePassword(ctx context.Context, id int64, passwordH
 	return nil
 }
 
-var ErrUserResourcesInUse = errors.New("用户仍有驱动配置或被引用的数据源，请先停用该用户并处理配置归属")
+var ErrUserResourcesInUse = errors.New("用户仍有正式报表、驱动配置或被引用的数据源，请先停用该用户并移交资源归属")
 
 // DeleteUser removes private records atomically; referenced catalog ownership
 // requires explicit handling rather than silently breaking other users' bindings.

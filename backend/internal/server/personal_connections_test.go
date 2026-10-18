@@ -297,7 +297,7 @@ func TestPersonalConnectionIsolation(t *testing.T) {
 		if e := a.deps.Conns.Catalog().SetEnabled(ctx, "driver", driverID, false); e == nil {
 			t.Fatal("demoted publisher could disable a global driver")
 		}
-		if e := a.deps.Conns.SetDefinitionEnabled(ctx, defID, false, nil); e == nil {
+		if e := a.deps.Conns.SetDefinitionEnabled(ctx, defID, false, nil, nil); e == nil {
 			t.Fatal("demoted publisher could disable a global definition")
 		}
 	})

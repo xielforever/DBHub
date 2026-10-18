@@ -9,8 +9,8 @@ import (
 )
 
 var (
-	ErrDefinitionImpactChanged = errors.New("绑定人数已变化，请刷新修订记录后重新确认")
-	ErrDefinitionConfirmation  = errors.New("停用修订需要确认影响范围和当前绑定人数")
+	ErrDefinitionImpactChanged = errors.New("绑定人数已变化，或正式报表影响范围已变化，请刷新修订记录后重新确认")
+	ErrDefinitionConfirmation  = errors.New("停用修订需要确认影响范围和当前绑定人数、正式报表数量")
 )
 
 type DefinitionChange struct {
@@ -22,6 +22,7 @@ type DefinitionChange struct {
 
 type DefinitionRevision struct {
 	SourceDefinition
+	ReportCount      *int64             `json:"report_count,omitempty"`
 	BindingCount     *int64             `json:"binding_count,omitempty"`
 	PreviousRevision *int               `json:"previous_revision,omitempty"`
 	Changes          []DefinitionChange `json:"changes"`
@@ -50,7 +51,8 @@ func (r *ConnectionRepository) DefinitionRevisions(ctx context.Context, id int64
  FROM sys_source_definitions d WHERE family_id=$1::uuid AND dbhub_source_visible(id,$2))
  SELECT to_jsonb(h)-'previous',h.previous,
  CASE WHEN (h.visibility='private' AND h.owner_id=$2) OR (h.visibility='global' AND $3)
- THEN (SELECT count(*) FROM sys_connections c WHERE c.definition_revision_id=h.id) END
+ THEN (SELECT count(*) FROM sys_connections c WHERE c.definition_revision_id=h.id) END,
+ CASE WHEN (h.visibility='private' AND h.owner_id=$2) OR (h.visibility='global' AND $3) THEN (SELECT count(*) FROM sys_managed_reports m JOIN sys_report_releases re ON re.id=m.active_release_id JOIN sys_report_reviews rv ON rv.id=re.review_id JOIN sys_report_accounts a ON a.id=rv.account_id WHERE a.definition_revision_id=h.id) END
  FROM history h ORDER BY revision DESC LIMIT $4 OFFSET $5`, d.FamilyID, ActorID(ctx), ActorAdmin(ctx), limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -60,7 +62,7 @@ func (r *ConnectionRepository) DefinitionRevisions(ctx context.Context, id int64
 	for rows.Next() {
 		var raw, previous []byte
 		v := DefinitionRevision{Changes: []DefinitionChange{}}
-		if err = rows.Scan(&raw, &previous, &v.BindingCount); err != nil {
+		if err = rows.Scan(&raw, &previous, &v.BindingCount, &v.ReportCount); err != nil {
 			return nil, 0, err
 		}
 		if err = json.Unmarshal(raw, &v.SourceDefinition); err != nil {

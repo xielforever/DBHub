@@ -174,7 +174,7 @@ func (r *ConnectionRepository) SaveDefinition(ctx context.Context, d *SourceDefi
 	}
 	return e
 }
-func (r *ConnectionRepository) SetDefinitionEnabled(ctx context.Context, id int64, enabled bool, expectedBindings *int64) error {
+func (r *ConnectionRepository) SetDefinitionEnabled(ctx context.Context, id int64, enabled bool, expectedBindings, expectedReports *int64) error {
 	tx, e := r.pool.Begin(ctx)
 	if e != nil {
 		return e
@@ -197,7 +197,14 @@ func (r *ConnectionRepository) SetDefinitionEnabled(ctx context.Context, id int6
 		if e = tx.QueryRow(ctx, `SELECT count(*) FROM sys_connections WHERE definition_revision_id=$1`, id).Scan(&count); e != nil {
 			return e
 		}
-		if count != *expectedBindings {
+		var reports int64
+		if e = tx.QueryRow(ctx, `SELECT count(*) FROM sys_managed_reports m JOIN sys_report_releases re ON re.id=m.active_release_id JOIN sys_report_reviews rv ON rv.id=re.review_id JOIN sys_report_accounts a ON a.id=rv.account_id WHERE a.definition_revision_id=$1`, id).Scan(&reports); e != nil {
+			return e
+		}
+		if reports > 0 && expectedReports == nil {
+			return ErrDefinitionConfirmation
+		}
+		if count != *expectedBindings || expectedReports != nil && reports != *expectedReports {
 			return ErrDefinitionImpactChanged
 		}
 	}

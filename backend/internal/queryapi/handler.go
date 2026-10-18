@@ -120,6 +120,11 @@ func (h *Handler) openRelational(r *http.Request, connID int64, database string)
 }
 
 func (h *Handler) recordHistory(ctx context.Context, c *auth.Claims, in executeRequest, conn *db.Connection, durationMS int64, affected *int64, execErr error) {
+	// Managed accounts use an isolated negative target key for queue/receipts.
+	// Their SQL is visible only in controlled versions, never viewer history.
+	if conn.ID < 0 {
+		return
+	}
 	dbName := in.Database
 	if dbName == "" {
 		dbName = conn.Database

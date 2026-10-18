@@ -1,9 +1,16 @@
 <template>
   <div class="space-y-5">
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-      <div><h1 class="text-xl font-semibold">报表</h1><p class="text-sm text-white/50 mt-1">保存只读查询与图表，使用自己的数据库账号查看最新数据</p></div>
-      <button v-if="canWrite" class="liquid-button text-sm" @click="create">新建报表</button>
+      <div><h1 class="text-xl font-semibold">报表</h1><p class="text-sm text-white/50 mt-1">{{ view === 'personal' ? '保存只读查询与图表，使用自己的数据库账号查看最新数据' : '开发、审批与发布正式报表，按报表授权查看数据' }}</p></div>
+      <button v-if="canWrite && view==='personal'" class="liquid-button text-sm" @click="create">新建报表</button>
     </header>
+    <div role="tablist" aria-label="报表功能" class="flex flex-wrap gap-2 border-b border-white/10 pb-3">
+      <button role="tab" class="ghost-button text-sm aria-selected:bg-white/10 aria-selected:text-indigo-200" :aria-selected="view==='personal'" @click="view='personal'">个人报表</button>
+      <button role="tab" class="ghost-button text-sm aria-selected:bg-white/10 aria-selected:text-indigo-200" :aria-selected="view==='published'" @click="view='published'">已发布</button>
+      <button v-if="canWrite" role="tab" class="ghost-button text-sm aria-selected:bg-white/10 aria-selected:text-indigo-200" :aria-selected="view==='managed'" @click="view='managed'">{{ user.role==='admin'?'开发与审批':'我的开发' }}</button>
+      <button v-if="user.role==='admin'" role="tab" class="ghost-button text-sm aria-selected:bg-white/10 aria-selected:text-indigo-200" :aria-selected="view==='accounts'" @click="view='accounts'">执行账号</button>
+    </div>
+    <template v-if="view==='personal'">
     <form class="flex flex-wrap items-center gap-2" @submit.prevent="reload(1)">
       <el-select v-model="scope" aria-label="报表范围" class="!w-32" @change="reload(1)"><el-option label="全部" value="all" /><el-option label="我的" value="mine" /><el-option label="登录后共享" value="shared" /><el-option label="收藏" value="starred" /></el-select>
       <input v-model.trim="keyword" aria-label="搜索报表" class="glass-input text-sm flex-1 min-w-0 sm:max-w-sm" placeholder="搜索名称、描述或 SQL" />
@@ -21,13 +28,13 @@
         <div class="flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
           <button class="ghost-button text-xs flex-1" @click="openReport(rep)">查看</button>
           <button class="ghost-button text-xs" :disabled="pending.has(rep.id)" :aria-pressed="rep.starred" @click="toggleStar(rep)">{{ rep.starred ? '取消收藏' : '收藏' }}</button>
-          <template v-if="canManage(rep)"><button class="ghost-button text-xs" @click="edit(rep)">编辑</button><button class="ghost-button text-xs text-rose-300" :disabled="pending.has(rep.id)" @click="remove(rep)">删除</button></template>
+          <template v-if="canManage(rep)"><button class="ghost-button text-xs" @click="edit(rep)">编辑</button><button class="ghost-button text-xs" @click="edit(rep,true)">创建正式草稿</button><button class="ghost-button text-xs text-rose-300" :disabled="pending.has(rep.id)" @click="remove(rep)">删除</button></template>
         </div>
       </article>
       <div v-if="!loading && !listError && !items.length" class="col-span-full glass-card p-10 text-center space-y-2"><p class="text-sm text-white/60">暂无报表</p><p class="text-xs text-white/40">{{ canWrite ? '点击“新建报表”，选择个人连接并保存只读 SQL。' : '共享报表将在获得对应数据源权限后显示。' }}</p></div>
     </div>
     <div class="flex items-center justify-between text-xs text-white/50"><span>共 {{ total }} 个报表</span><div class="flex items-center gap-2"><button class="ghost-button px-2 py-1" :disabled="page <= 1 || loading" @click="reload(page-1)">上一页</button><span>{{ page }} / {{ totalPages }}</span><button class="ghost-button px-2 py-1" :disabled="page >= totalPages || loading" @click="reload(page+1)">下一页</button></div></div>
-    <ReportEditor v-if="editorOpen" :report="editing" @close="editorOpen=false" @saved="saved" />
+    <ReportEditor v-if="editorOpen" :report="editing" :formal="formalEditor" @close="editorOpen=false" @saved="saved" @managed-saved="managedSaved" />
     <el-dialog v-model="detailOpen" :title="current?.name || '报表详情'" width="min(960px, calc(100vw - 24px))" class="glass-dialog">
       <div v-if="current" class="space-y-4 min-w-0">
         <p class="text-xs text-white/55">{{ current.source_name }} · 修订 {{ current.source_revision }} · {{ current.database_name || '连接默认数据库' }} · 使用本人数据库账号执行</p>
@@ -39,6 +46,10 @@
         <p v-else class="text-sm text-white/50">查询已停止，可刷新数据重新执行只读查询。</p>
       </div>
     </el-dialog>
+    </template>
+    <PublishedReportsPanel v-else-if="view==='published'" />
+    <ManagedReportsPanel v-else-if="view==='managed' && canWrite" />
+    <ReportAccountsPanel v-else-if="view==='accounts' && user.role==='admin'" />
   </div>
 </template>
 <script setup lang="ts">
@@ -48,8 +59,12 @@ import { reportApi, type ReportItem } from '../../api/report'
 import type { ExecResult } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
 import ReportEditor from './ReportEditor.vue'
+import PublishedReportsPanel from './PublishedReportsPanel.vue'
+import ManagedReportsPanel from './ManagedReportsPanel.vue'
+import ReportAccountsPanel from './ReportAccountsPanel.vue'
 import ReportResult from './ReportResult.vue'
 import { useReportRun } from './useReportRun'
+const view = ref<'personal'|'published'|'managed'|'accounts'>('personal')
 const user = useUserStore(), canWrite = computed(() => ['admin','developer'].includes(user.role))
 const chartLabels = { table:'表格',bar:'柱状图',line:'折线图',pie:'饼图',metric:'指标卡' }
 const items = ref<ReportItem[]>([]), total = ref(0), page = ref(1), loading = ref(false), listError = ref(''), keyword = ref(''), scope = ref<'all'|'mine'|'shared'|'starred'>('all')
@@ -68,10 +83,12 @@ async function reload(p = page.value) {
 }
 const canManage = (rep: ReportItem) => canWrite.value && rep.owner_user_id===user.user?.id
 const formatTime = (value: string) => new Date(value).toLocaleString()
-const editorOpen = ref(false), editing = ref<ReportItem>()
-function create() { editing.value=undefined;editorOpen.value=true }
-async function edit(rep: ReportItem) { try { editing.value=await reportApi.get(rep.id);editorOpen.value=true } catch { /* API shows the failure. */ } }
+const editorOpen = ref(false), formalEditor=ref(false), editing = ref<ReportItem>()
+function create() { formalEditor.value=false;editing.value=undefined;editorOpen.value=true }
+let editGeneration = 0
+async function edit(rep: ReportItem, formal=false) { const generation=++editGeneration;try { const data=await reportApi.get(rep.id);if(generation===editGeneration && view.value==='personal'){formalEditor.value=formal;editing.value=data;editorOpen.value=true} } catch { /* API shows the failure. */ } }
 function saved() { editorOpen.value=false;void reload() }
+function managedSaved(){editorOpen.value=false;view.value='managed'}
 async function toggleStar(rep: ReportItem) {
   if (pending.has(rep.id)) return
   pending.add(rep.id)
@@ -93,6 +110,7 @@ async function runDetail() {
   if (success&&detail.state.value.status==='success') current.value=detail.state.value.data.report
 }
 watch(detailOpen,open=>{if(!open)detail.reset()},{flush:'sync'})
+watch(view,value=>{editGeneration++;detailOpen.value=false;editorOpen.value=false;if(value==='personal')void reload();else{listGeneration++;listAbort?.abort();loading.value=false}})
 onMounted(()=>void reload(1))
-onScopeDispose(()=>{listGeneration++;listAbort?.abort()})
+onScopeDispose(()=>{editGeneration++;listGeneration++;listAbort?.abort()})
 </script>

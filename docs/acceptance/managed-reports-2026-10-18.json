@@ -1,0 +1,157 @@
+{
+  "verified_at": "2026-10-18T02:52:30.978863+00:00",
+  "scope": "Versioned formal reports with single administrator approval, dedicated database accounts and explicit publication; existing personal reports retain per-viewer credentials.",
+  "base_commit": "0ca7d7d2629f335556e73330a6090fd342487ed5",
+  "go": {
+    "passed_test_items": 250,
+    "tested_packages": 16,
+    "failed": 0,
+    "race_detector": true,
+    "go_vet": "passed",
+    "skipped": [
+      "TestJournalCrashHelper",
+      "TestVersionMatrixTarget",
+      "TestOpenGaussDemoHTTP"
+    ]
+  },
+  "frontend": {
+    "report_tests": 14,
+    "workbench_tests": 14,
+    "failed": 0,
+    "typecheck": "passed",
+    "production_build": "passed",
+    "existing_warning": "large output chunks"
+  },
+  "browser": {
+    "target": "Final production backend and nginx images with real PostgreSQL and three real application roles.",
+    "execution": "Canonical formal and personal scripts rerun in a retained isolated acceptance runtime after fixing popup selection helpers; fresh fixtures used suffix _acceptance. Final frontend container used the image directly without bind mounts.",
+    "exit_code": 0,
+    "passed": 20,
+    "formal_checks": [
+      "administrator creates and validates an encrypted independent report account",
+      "developer converts a personal report, previews with a personal account and submits an immutable chart version",
+      "administrator validates the selected account and audience before approval and explicit publication",
+      "unbound business viewer runs a published chart without seeing SQL or credentials, including mobile",
+      "saving a new working draft leaves the approved production version unchanged",
+      "administrator rejects a changed version with an explicit reason and preserves the live release",
+      "explicit unpublication blocks execution and rollback restores a previously approved version",
+      "account disable blocks live execution and removing the author connection does not remove the report",
+      "no browser script errors across the real multi-account workflow",
+      "durable audit identifies the business viewer and the actual report database account"
+    ],
+    "personal_regression_checks": [
+      "independent creation previews a real read-only query and saves a shared chart",
+      "view executes the saved definition through the dedicated report route and exposes chart source rows",
+      "concurrent edits produce a visible conflict without overwriting the saved definition",
+      "line, pie and metric charts render complete real query results without client aggregation",
+      "large integers, high precision decimals and JSON cell numbers retain their exact values",
+      "truncation is explicit, row 1000 remains reachable, and the mobile page fits the viewport",
+      "a real SQL error is visible and does not masquerade as an empty or old result",
+      "readonly viewer uses a personal binding and keeps access after the publisher deletes their connection",
+      "unbound owner cannot borrow viewer credentials and anonymous sharing remains disabled",
+      "all real browser paths finish without page script errors"
+    ],
+    "mocks": 0,
+    "page_errors": [],
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "screenshots": [
+      "images/managed-report-viewer-mobile.png"
+    ],
+    "screenshot_sha256": "fa26aca628e6a58b00ee7d168c0b0d11bb1be21cdf906eb67b0c145e6cb4ec82"
+  },
+  "production_runtime": {
+    "backend_image": "sha256:a7ecc05282a42ee373665db100e08058ff6e7a27702540626b82c566342b33b1",
+    "frontend_image": "sha256:8667d53ab4d082fa63aef8a8908bf6b748264a5bff0b19a8bcdf02f9f59a2435",
+    "backend_uid": "65532:65532",
+    "backend_readonly_root": true,
+    "backend_cap_drop": [
+      "ALL"
+    ],
+    "backend_security_opt": [
+      "no-new-privileges"
+    ],
+    "frontend_mounts": [],
+    "target_allowlist": [
+      "postgres:5432"
+    ],
+    "frontend_packaging": "Final dist built with pinned Node 24.12.0 in the existing Docker development service, then packaged using the unchanged nginx runtime stage from the repository Dockerfile; used to limit VFS build cache disk consumption."
+  },
+  "operational": {
+    "production_audit": {
+      "ready": true,
+      "pending": 0
+    },
+    "main_cloud": {
+      "backend": 200,
+      "frontend": 200,
+      "accounts_count": 0,
+      "managed_count": 0,
+      "published_count": 0,
+      "audit_ready": true,
+      "audit_pending": 0
+    }
+  },
+  "cleanup": {
+    "cleanup_errors": [],
+    "temporary_env_removed": true,
+    "browser_work_removed": true,
+    "container_resources_removed": true,
+    "network_resources_removed": true,
+    "volume_resources_removed": true,
+    "schema_removed": true,
+    "database_role_removed": true
+  },
+  "boundaries": [
+    "Single-level approval, fixed readonly SQL, at most 1000 rows and 30 seconds subject to stricter limits.",
+    "Report viewers require the approved audience ACL but no personal database binding; shared database credentials do not provide per-viewer database row policies.",
+    "Administrator must use a constrained database account and review its actual result scope before approval.",
+    "Native PostgreSQL/MySQL and PostgreSQL JDBC were tested; this change did not recreate openGauss or claim real GaussDB validation.",
+    "Local synthetic fixtures only; no business load, enterprise tenant isolation or external deployment acceptance.",
+    "Multi-level workflows, dynamic parameters, schedules, anonymous access and result caching remain outside this phase."
+  ],
+  "raw_report_sha256": {
+    "go_race": "7c6605b7d9a1ce17c950edaa0510e956c1407f9b296188e8023e95314f2909a4",
+    "go_vet": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "frontend_report": "23b747d4394bf2741d64063adc9ca9976be58e57c8a41ef176473494d169f16b",
+    "frontend_workbench": "126a17e3b4c6713624046024cbff48abbf105798f523ed3a20835bc288cab929",
+    "frontend_build": "2653d3cf535e1a4b6df5adca65cbaa5a233a41ffa0dfb55fdefdf5b05f6cc6ca",
+    "production_browser_final": "5d09b52f762860b49e1c8e45851fd2b5a60f6254f40957a2125e00b09a2986dd",
+    "formal_browser_checks": "6309b4e67f34e8e01f56d844ae41f0de72f95d113ffd24a0903ef539851b2d8d",
+    "personal_browser_checks": "03cb6616a09090442516378dc58b2f94fdfae32194fe254065082f5029be3924",
+    "runtime_verification": "f658be31075f5ae63abd19d3cac23b3366adfdbbbf004c7cb450e69e1dafdfde",
+    "audit_delivery": "8466fbc7ed1ea508d2925e716c1adaadbccf235bb1774c4ddfa55096b8651a1d",
+    "cleanup_verification": "30993014685e9c2225eb11a1ab7afc5c8044b39cbcc5a7a202bef508035c1e62"
+  },
+  "source_sha256": {
+    "backend/internal/db/migrations/0027_managed_reports.sql": "bf44222b979924c7ebf98088d36a1f64a5d361fd1fc34c9cdec0cbb5392378f2",
+    "backend/internal/db/managed_report_types.go": "298f7504596d935848b0200a7424444fefa7f555759dc7726c65b9ac438d94c7",
+    "backend/internal/db/managed_report_repo.go": "2f6ec2f9b5107b6b0404876912a682b74e857acf0e37e14edf26f0c5dd41cd36",
+    "backend/internal/db/report_account_repo.go": "44da13592202f904dadef23ec97331e0d5e05c98902c24852400388e0f8c5e73",
+    "backend/internal/db/report_publication_repo.go": "fe3dcf9da9a1372d6a88570468bc5eb533ab826999a303beb4d7e26c23b0823e",
+    "backend/internal/reportapi/managed_handler.go": "8857967d6c401db6839480c3d0d1392e9e0737d17034532e5771c3386366d806",
+    "backend/internal/queryapi/managed_report.go": "3b9f121089a5d0b817dcd0317357dd5bb66000e893361976928d6f2c36d2b3b9",
+    "backend/internal/queryapi/execute_handler.go": "2d1ab044e2cbf8d3c6bb9674a00aaf229cd366c6dde537900d7b75aa10741bbd",
+    "backend/internal/auditctx/context.go": "870154f0a7725c75822580b2272c60f682ae276066d9b027efbc2565f16bd272",
+    "backend/internal/server/router.go": "6e993b8db37976c8a68a819b4654cb45fa93631e5b49f12b7c7ed879498c22cf",
+    "backend/internal/server/managed_reports_test.go": "30c79434e33b142d3e90c1cbd354c857e619e95c20a1eda2f00652da8e3eadac",
+    "backend/internal/server/managed_connector_test.go": "3341d89e9ca7af3eab73f132b44d4551d2ac923ed58d5b7ed611ad152942546f",
+    "backend/pkg/crypto/aesgcm.go": "168bd7360293222a94c6bfd4850f94c44fb7a110f6d8fec9e4e9603b5e2c33e0",
+    "frontend/src/api/managed-report.ts": "2b674159f6ba67ddaee1f2c3b6c1cc2a314ebcfa218a466beda0587b1402aa3e",
+    "frontend/src/views/report/ManagedReportsPanel.vue": "e7ab2b062a43940a6807476715698341ab44fddcdfc9ffe0652de5f99804919d",
+    "frontend/src/views/report/PublishedReportsPanel.vue": "5d2eec34774693980542c7e224979710b654aca68b429dda0d9e131b533b2a5e",
+    "frontend/src/views/report/ReportAccountsPanel.vue": "aa660894e60889eade1b967c72139ef264d2147a3e534091d75e3ac6bf873be0",
+    "frontend/src/views/report/ReportReviewDialog.vue": "8fc27564874051c6b7151ef96f278394b246887618d6277858809c42a57a1c6c",
+    "frontend/src/views/report/ReportEditor.vue": "8833c4ae50b73c14d5878bb63b87301f37a68a862c634bdc7416e056b10d2bb6",
+    "frontend/src/views/report/ReportsView.vue": "d322105ffc6157f7f6cd85e8c18acf6c782b290019920b47a1b31501386a3ebb",
+    "frontend/src/views/report/reportCommands.ts": "9f18ede77f5cf502bcbd1526349a6b39ff345deea033ad3371562c53063edb03",
+    "scripts/cloud/managed_report_acceptance.py": "bc4b86846ac9ce19718ad68a77dca9e3502b84d9accfee5f2a92ceeb21c6eb72",
+    "scripts/cloud/managed_report_browser_test.py": "d2e54637523124ad865cf2bdff5890258cf5c75cf2e179e6cdffde09449b3504"
+  }
+}

@@ -200,6 +200,28 @@ func classify(method, path string) (action, resource, name string) {
 	resource, name = strings.ToUpper(firstOr(parts, 0)), firstOr(parts, 1)
 	last := firstOr(parts, len(parts)-1)
 	switch {
+	case parts[0] == "managed-reports" && method == http.MethodGet:
+		return "REPORT_VERSION_VIEW", "REPORT", name
+	case parts[0] == "published-reports" && last == "execute" && method == http.MethodPost:
+		return "REPORT_PUBLISHED_EXECUTE", "REPORT", name
+	case parts[0] == "report-reviews" && method == http.MethodPost:
+		if last == "validate" {
+			return "REPORT_REVIEW_VALIDATE", "REPORT", name
+		}
+		return "REPORT_REVIEW_DECISION", "REPORT", name
+	case parts[0] == "managed-reports" && method != http.MethodGet && method != http.MethodHead:
+		if last == "submit" {
+			return "REPORT_SUBMIT", "REPORT", name
+		}
+		if last == "releases" {
+			return "REPORT_RELEASE", "REPORT", name
+		}
+		if last == "transfer" {
+			return "REPORT_TRANSFER", "REPORT", name
+		}
+		return "REPORT_DRAFT_SAVE", "REPORT", name
+	case parts[0] == "report-accounts" && method != http.MethodGet && method != http.MethodHead:
+		return "REPORT_ACCOUNT_MANAGE", "REPORT_ACCOUNT", name
 	case body == "reports/preview" && method == http.MethodPost:
 		return "REPORT_PREVIEW", "REPORT", ""
 	case len(parts) == 3 && parts[0] == "reports" && last == "execute" && method == http.MethodPost:

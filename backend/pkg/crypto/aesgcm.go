@@ -11,9 +11,11 @@ package crypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -23,7 +25,8 @@ const versionPrefix = "v1:"
 
 // Cipher 线程安全的 AES-GCM 加解密器（gcm 本身可并发使用）。
 type Cipher struct {
-	gcm cipher.AEAD
+	gcm            cipher.AEAD
+	fingerprintKey [32]byte
 }
 
 // NewCipher 以任意长度主密钥（建议 >= 32 字节）构造加解密器。
@@ -40,7 +43,16 @@ func NewCipher(masterSecret []byte) (*Cipher, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 GCM 模式失败: %w", err)
 	}
-	return &Cipher{gcm: gcm}, nil
+	fingerprintKey := sha256.Sum256(append([]byte("dbhub-report-command-v1:"), masterSecret...))
+	return &Cipher{gcm: gcm, fingerprintKey: fingerprintKey}, nil
+}
+
+// Fingerprint compares credential-bearing command retries without storing an
+// unkeyed password digest that could enable offline guessing from a DB backup.
+func (c *Cipher) Fingerprint(value []byte) string {
+	mac := hmac.New(sha256.New, c.fingerprintKey[:])
+	_, _ = mac.Write(value)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // Encrypt 加密明文，返回 v1 前缀的 base64 字符串。

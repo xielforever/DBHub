@@ -173,6 +173,7 @@ func (h *Handler) DefinitionStatus(w http.ResponseWriter, r *http.Request) {
 		Enabled          *bool  `json:"enabled"`
 		Confirmed        bool   `json:"confirmed"`
 		ExpectedBindings *int64 `json:"expected_binding_count"`
+		ExpectedReports  *int64 `json:"expected_report_count"`
 	}
 	if e = httpx.DecodeJSON(w, r, &in); e != nil {
 		httpx.Fail(w, e)
@@ -186,7 +187,7 @@ func (h *Handler) DefinitionStatus(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest(db.ErrDefinitionConfirmation.Error()))
 		return
 	}
-	if e = h.conns.SetDefinitionEnabled(r.Context(), id, *in.Enabled, in.ExpectedBindings); e != nil {
+	if e = h.conns.SetDefinitionEnabled(r.Context(), id, *in.Enabled, in.ExpectedBindings, in.ExpectedReports); e != nil {
 		catalogFailure(w, e)
 		return
 	}

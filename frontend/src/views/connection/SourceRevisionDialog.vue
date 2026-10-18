@@ -15,7 +15,7 @@
         <p class="text-xs text-white/55 break-all">{{ row.config.host }}{{ row.config.port ? ':' + row.config.port : '' }} / {{ row.config.database || '默认范围' }} · TLS {{ row.config.ssl_mode }}</p>
         <p class="text-xs text-white/45">{{ new Date(row.created_at).toLocaleString('zh-CN', {hour12: false}) }}</p>
         <div v-if="row.binding_count !== undefined" class="flex flex-wrap items-center justify-between gap-3">
-          <p class="text-sm" data-testid="binding-count">绑定 {{ row.binding_count }} 个个人连接</p>
+          <p class="text-sm" data-testid="binding-count">绑定 {{ row.binding_count }} 个个人连接 · 服务 {{ row.report_count ?? 0 }} 份正式报表</p>
           <button class="ghost-button text-xs" :disabled="busy || loading" @click="toggle(row)">{{ row.enabled ? '停用此修订' : '启用此修订' }}</button>
         </div>
         <details v-if="row.previous_revision" class="text-xs" :open="row.id === items[0]?.id">
@@ -73,10 +73,10 @@ async function toggle(row: DefinitionRevision) {
   busy.value = true
   try {
     if (row.enabled) {
-      await ElMessageBox.confirm(`停用修订 ${row.revision} 将影响 ${row.binding_count} 个个人连接。它们将无法发起新操作，已发送的操作可能继续完成。其他修订不受影响。`, '确认停用影响', {type: 'warning', confirmButtonText: '确认停用', cancelButtonText: '取消'})
+      await ElMessageBox.confirm(`停用修订 ${row.revision} 将影响 ${row.binding_count} 个个人连接和 ${row.report_count ?? 0} 份正式报表。它们将无法发起新操作，已发送的操作可能继续完成。其他修订不受影响。`, '确认停用影响', {type: 'warning', confirmButtonText: '确认停用', cancelButtonText: '取消'})
     }
     if (!props.modelValue || props.source?.family_id !== family) return
-    await sourceCatalogApi.status(row.id, !row.enabled, row.binding_count)
+    await sourceCatalogApi.status(row.id, !row.enabled, row.binding_count, row.report_count)
     ElMessage.success(row.enabled ? '该修订已停用' : '该修订已启用')
     emit('changed')
   } catch { /* Cancellation or API error; refresh includes changed impact counts. */ }
