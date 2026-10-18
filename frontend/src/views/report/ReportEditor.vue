@@ -27,7 +27,8 @@
         <label v-if="form.chart_type !== 'table'" class="text-xs text-white/60 space-y-1">指标<el-select v-model="metrics" aria-label="报表指标" multiple :multiple-limit="['pie','metric'].includes(form.chart_type) ? 1 : 6" class="w-full" :disabled="saving || !columns.length"><el-option v-for="column in uniqueColumns" :key="column" :label="column" :value="column" /></el-select></label>
       </div>
       <p class="text-xs text-white/50">图表按 SQL 返回顺序展示，汇总和排序请在 SQL 中完成。新建图表前先运行预览，再选择维度和指标。</p>
-      <ReportResult v-if="preview.state.value.status === 'success'" :type="form.chart_type" :config="chartConfig" :result="preview.state.value.data" :title="form.name || '预览'" />
+      <ReportDisplayEditor v-model="display" :columns="displayColumns" :disabled="saving" :numeric="form.chart_type !== 'table'" />
+      <ReportResult v-if="preview.state.value.status === 'success'" :type="form.chart_type" :config="chartConfig" :result="preview.state.value.data" :title="form.name || '预览'" :unit="dataContract?.unit" :currency="dataContract?.currency" />
       <ReportContractEditor v-if="formal" v-model="dataContract" :columns="columns" :disabled="saving" />
       <p v-if="saveError" class="text-sm text-rose-300" role="alert">{{ saveError }}</p>
       <div class="flex justify-end gap-2 pt-3 border-t border-white/10">
@@ -47,6 +48,7 @@ import type { ExecResult } from '../../api/workbench'
 import { newRequestId } from '../../utils/request-id'
 import ReportResult from './ReportResult.vue'
 import ReportContractEditor from './ReportContractEditor.vue'
+import ReportDisplayEditor from './ReportDisplayEditor.vue'
 import type {DataContract} from '../../api/managed-report'
 import { useReportRun } from './useReportRun'
 import { reportChart } from './reportChart'
@@ -58,12 +60,14 @@ const report = managed ? { ...managed.draft, connection_id: managed.connection_i
 const form = reactive({ name: report?.name ?? '', description: report?.description ?? '', connection_id: report?.connection_id || undefined as number | undefined, database: report?.database_name ?? '', sql: report?.sql_text ?? '', chart_type: report?.chart_type ?? 'table' as ChartKind, visibility: report?.visibility ?? 'private' as 'private' | 'shared' })
 const dimension = ref(report?.chart_config.dimension ?? ''), metrics = ref<string[]>(report?.chart_config.metrics ? [...report.chart_config.metrics] : [])
 const chartOptions: {value: ChartKind; label: string}[] = [{value:'table',label:'表格'},{value:'bar',label:'柱状图'},{value:'line',label:'折线图'},{value:'pie',label:'饼图'},{value:'metric',label:'指标卡'}]
-const chartConfig = computed<ChartConfig>(() => form.chart_type === 'table' ? {} : { ...(form.chart_type === 'metric' ? {} : { dimension: dimension.value }), metrics: metrics.value })
+const display = ref<ChartConfig['display']>(report?.chart_config.display ? JSON.parse(JSON.stringify(report.chart_config.display)) : undefined)
+const chartConfig = computed<ChartConfig>(() => ({ ...(form.chart_type === 'table' ? {} : { ...(form.chart_type === 'metric' ? {} : { dimension: dimension.value }), metrics: metrics.value }), ...(display.value ? { display: display.value } : {}) }))
 const sources = ref<ConnectionItem[]>([]), loadingSources = ref(true), sourceError = ref(''), saving = ref(false), saveError = ref('')
 const preview = useReportRun<ExecResult>()
 const columns = computed(() => preview.state.value.status === 'success' ? preview.state.value.data.columns ?? [] : [])
 const uniqueColumns = computed(() => columns.value.filter((name, index, all) => all.indexOf(name) === index && all.lastIndexOf(name) === index))
 const dataContract=ref<DataContract|undefined>(managed?.draft.data_contract?JSON.parse(JSON.stringify(managed.draft.data_contract)):undefined)
+const displayColumns = computed(() => uniqueColumns.value.length ? uniqueColumns.value : [...new Set([...(dataContract.value?.result_schema.map(c => c.name) || []), dimension.value, ...metrics.value])].filter(Boolean))
 const creationKey = newRequestId()
 let alive = true
 onMounted(async () => { try { const response = await connectionApi.list(); if (alive) { sources.value = response.items.filter(source => source.capabilities?.sql && source.capabilities.enforced_read_only && (!formal || source.definition?.visibility === 'global')); if(formal && !sources.value.some(source=>source.id===form.connection_id))form.connection_id=undefined } } catch (error) { if (alive) sourceError.value = error instanceof Error ? error.message : '连接列表加载失败' } finally { if (alive) loadingSources.value = false } })

@@ -107,6 +107,9 @@ func ValidateDataContract(c *DataContract, chart string) error {
 }
 
 func ValidateContractMapping(c *DataContract, config json.RawMessage) error {
+	if err := validateContractDisplay(c, config); err != nil {
+		return err
+	}
 	if c == nil || c.ChartType == "table" {
 		return nil
 	}

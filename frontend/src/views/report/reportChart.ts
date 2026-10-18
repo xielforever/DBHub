@@ -22,7 +22,7 @@ export function reportChart(kind: ChartKind, config: ChartConfig, result: ExecRe
   if (kind === 'table') return empty
   try {
     if (result.truncated) throw new Error('结果已截断，暂停图表展示；请先在 SQL 中聚合或缩小范围。下方仅展示已返回的部分数据。')
-    if (Object.keys(config).some(key => !['dimension', 'metrics'].includes(key))) throw new Error('旧图表包含浏览器聚合配置，请编辑报表，在 SQL 中完成聚合和排序后重新保存')
+    if (Object.keys(config).some(key => !['dimension', 'metrics', 'display'].includes(key))) throw new Error('旧图表包含浏览器聚合配置，请编辑报表，在 SQL 中完成聚合和排序后重新保存')
     const columns = result.columns ?? []
     const rows = result.rows ?? []
     if (!rows.length) return empty

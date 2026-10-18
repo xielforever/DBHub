@@ -72,13 +72,17 @@ func validateFields(rep *db.Report) error {
 		rep.ChartConfig = json.RawMessage(`{}`)
 	}
 	var cfg struct {
-		Dimension string   `json:"dimension,omitempty"`
-		Metrics   []string `json:"metrics,omitempty"`
+		Dimension string            `json:"dimension,omitempty"`
+		Metrics   []string          `json:"metrics,omitempty"`
+		Display   *db.ReportDisplay `json:"display,omitempty"`
 	}
 	dec := json.NewDecoder(bytes.NewReader(rep.ChartConfig))
 	dec.DisallowUnknownFields()
-	if len(rep.ChartConfig) > 4096 || dec.Decode(&cfg) != nil || string(rep.ChartConfig) == "null" {
-		return httpx.BadRequest("图表配置只接受维度和指标；请在 SQL 中完成聚合、排序与筛选")
+	if len(rep.ChartConfig) > 16384 || dec.Decode(&cfg) != nil || string(rep.ChartConfig) == "null" {
+		return httpx.BadRequest("图表配置只接受维度、指标和展示设置；请在 SQL 中完成聚合、排序与筛选")
+	}
+	if e := db.ValidateReportDisplay(cfg.Display); e != nil {
+		return httpx.BadRequest(e.Error())
 	}
 	if len(cfg.Metrics) > 6 || utf8.RuneCountInString(cfg.Dimension) > 128 {
 		return httpx.BadRequest("最多选择6个指标，字段名不能超过128字")

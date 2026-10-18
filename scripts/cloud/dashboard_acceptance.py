@@ -134,6 +134,10 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
     admin_token = api('POST', '/auth/login', {'username': admin_name, 'password': password}, token='')['access_token']
     author = api('POST', '/users', {'username': author_name, 'password': password, 'role': 'developer'}, want=201)
     viewer = api('POST', '/users', {'username': viewer_name, 'password': password, 'role': 'readonly'}, want=201)
+    ungranted_name = 'dashboard_reviewer_' + suffix
+    api('POST', '/users', {'username': ungranted_name, 'password': password, 'role': 'admin'}, want=201)
+    ungranted_token = api('POST', '/auth/login', {'username': ungranted_name, 'password': password}, token='')['access_token']
+    group = api('POST', '/user-groups', {'name': '库存运营待授权组', 'description': '', 'member_ids': [viewer['id']]})
     author_token = api('POST', '/auth/login', {'username': author_name, 'password': password}, token='')['access_token']
     viewer_token = api('POST', '/auth/login', {'username': viewer_name, 'password': password}, token='')['access_token']
     source = api('POST', '/connections', {'name': '库存数据源', 'type': 'postgres', 'host': 'postgres', 'port': 5432, 'database': values['POSTGRES_DB'], 'username': values['POSTGRES_USER'], 'password': values['POSTGRES_PASSWORD'], 'ssl_mode': 'disable', 'environment': 'dev'}, want=201)
@@ -153,6 +157,10 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
     reports = []
     recipients = [1, author['id'], viewer['id']]
     for index, (name, chart, mapping, sql, columns, unit, currency, comparison, window) in enumerate(specifications):
+        labels = {'amount': '库存金额', 'count': '低库存SKU数', 'day': '日期', 'warehouse': '仓库', 'sku': '商品编码', 'name': '商品名称', 'stock': '当前库存（件）', 'safety_stock': '安全库存（件）', '__data_as_of': '数据截止时间'}
+        mapping['display'] = {'labels': {col: labels[col] for col, _ in columns}, 'grouping': True}
+        if chart in ['metric', 'line', 'bar'] and unit == 'CNY_10000':
+            mapping['display']['fraction_digits'] = 2
         contract = {'semantic_key': 'demo_' + str(index), 'meaning': name + '，三个指定仓库可售库存，不含在途', 'result_schema': [{'name': col, 'logical_type': logical, 'nullable': False} for col, logical in columns] + [{'name': '__data_as_of', 'logical_type': 'timestamp_with_timezone', 'nullable': False}], 'dimensions': [mapping['dimension']] if mapping.get('dimension') else [], 'metrics': mapping.get('metrics', []), 'chart_type': chart, 'unit': unit, 'currency': currency, 'timezone': 'Asia/Shanghai', 'scope_key': 'three_warehouses', 'scope_description': '杭州、苏州、成都；可售库存；不含在途；金额按含税采购成本计价', 'time_window': window, 'comparison_key': comparison, 'freshness': {'mode': 'watermark_column', 'column': '__data_as_of', 'max_data_age_seconds': 900, 'max_future_skew_seconds': 60}}
         payload = {'request_id': key(), 'name': name, 'connection_id': personal['id'], 'sql': sql, 'chart_type': chart, 'chart_config': mapping, 'data_contract': contract}
         created = api('POST', '/managed-reports', payload, token=author_token)
@@ -167,11 +175,29 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox', '--disable-dev-shm-usage'])
         author_context, page = login(browser, author_name)
+        page.goto(origin + '/reports')
+        page.get_by_role('tab', name='我的开发', exact=True).click()
+        page.get_by_label('开发报表：库存总额', exact=True).get_by_role('button', name='编辑草稿', exact=True).click()
+        editor = page.get_by_role('dialog', name='编辑正式报表草稿', exact=True)
+        editor.get_by_role('button', name='运行预览', exact=True).click()
+        expect(editor.get_by_test_id('report-metric')).to_have_text('1,280.00', timeout=15000)
+        editor.get_by_text('业务展示：字段名称与数字格式', exact=True).click()
+        editor.get_by_label('字段 amount 展示名称', exact=True).fill('库存金额（展示）')
+        choose(page, '展示小数位', '4 位小数')
+        expect(editor.get_by_test_id('report-metric')).to_have_text('1,280.0000')
+        editor.get_by_role('button', name='保存草稿', exact=True).click()
+        expect(editor).not_to_be_visible(timeout=15000)
+        saved_display = api('GET', f'/managed-reports/{reports[0]["id"]}', token=author_token)['draft']['chart_config']['display']
+        assert saved_display['labels']['amount'] == '库存金额（展示）' and saved_display['fraction_digits'] == 4
+        published_display = api('GET', f'/published-reports/{reports[0]["id"]}', token=viewer_token)['chart_config']['display']
+        assert published_display['labels']['amount'] == '库存金额' and published_display['fraction_digits'] == 2
+        passed('浏览器配置业务名称与4位小数，预览实时更新；保存草稿不改变正式展示')
         page.goto(origin + '/dashboards')
         page.get_by_role('button', name='新建仪表盘', exact=True).click()
         page.get_by_label('仪表盘名称', exact=True).fill('库存运营看板')
         page.get_by_label('仪表盘说明', exact=True).fill('三个仓库的可售库存 · 业务水位与查询时间分别展示')
         choose(page, '仪表盘个人受众', viewer_name)
+        choose(page, '仪表盘用户组受众', '库存运营待授权组')
         for i, spec in enumerate(specifications, 1):
             choose(page, '添加报表卡片', spec[0])
             page.get_by_role('button', name='添加卡片', exact=True).click()
@@ -181,33 +207,78 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
         page.get_by_label('卡片4比较组', exact=True).fill('库存余额')
         page.get_by_role('button', name='保存草稿', exact=True).click()
         expect(page.get_by_role('heading', name='库存运营看板', exact=True)).to_be_visible(timeout=15000)
-        page.get_by_role('button', name='提交审阅', exact=True).click()
+        page.get_by_role('button', name='送审检查', exact=True).click()
+        expect(page.get_by_text('合格审阅人 1 位', exact=False)).to_be_visible(timeout=15000)
+        expect(page.get_by_role('dialog', name='仪表盘送审检查').get_by_role('button', name='提交审阅', exact=True)).to_be_disabled()
+        assert page.get_by_role('button', name='申请补权', exact=True).count() == 5
+        page.screenshot(path=str(artifacts / 'dashboard-preflight-blocked.png'), full_page=True)
+        page.get_by_role('button', name='申请补权', exact=True).first.click()
+        page.get_by_label('拟受众报表补权理由', exact=True).fill('库存运营组查看此看板所需的必需报表')
+        page.get_by_role('button', name='提交站内补权申请', exact=True).click()
+        expect(page.get_by_role('dialog', name='为拟受众申请子报表权限')).not_to_be_visible(timeout=15000)
+        requests = api('GET', '/access-requests', token=author_token)['items']
+        assert len(requests) == 1 and requests[0]['status'] == 'pending' and requests[0]['target_group_id'] == group['id']
+        # Requesters receive a redacted report_id; resolve the linked report as
+        # the administrator processing the request, preserving that boundary.
+        requests_for_review = api('GET', '/access-requests')['items']
+        assert {r['id'] for r in requests_for_review} == {r['id'] for r in requests}
+        for item in reports:
+            request_ids = [r['id'] for r in requests_for_review if r.get('report_id') == item['id']]
+            proposal = api('POST', f'/managed-reports/{item["id"]}/audience-changes', {'request_id': key(), 'base_publication_no': 1, 'user_ids': recipients, 'group_ids': [group['id']], 'request_ids': request_ids})
+            validation = key()
+            api('POST', f'/report-reviews/{proposal["id"]}/validate', {'request_id': validation, 'account_id': account['id'], 'user_ids': recipients, 'group_ids': [group['id']]}, token=ungranted_token)
+            api('POST', f'/report-reviews/{proposal["id"]}/decision', {'request_id': key(), 'decision': 'approved', 'validation_id': validation, 'contract_confirmed': True}, token=ungranted_token)
+            api('POST', f'/managed-reports/{item["id"]}/releases', {'request_id': key(), 'expected_publication_no': 1, 'review_id': proposal['id'], 'kind': 'publish'})
+        assert api('GET', '/access-requests', token=author_token)['items'][0]['status'] == 'fulfilled'
+        page.get_by_role('button', name='重新检查', exact=True).click()
+        expect(page.get_by_text('送审条件已满足', exact=True)).to_be_visible(timeout=15000)
         choose(page, '仪表盘提交审阅人', admin_name)
-        page.get_by_role('button', name='提交冻结版本', exact=True).click()
-        expect(page.get_by_role('dialog', name='选择独立审阅人')).not_to_be_visible(timeout=15000)
+        combo = page.get_by_role('combobox', name='仪表盘提交审阅人', exact=True)
+        assert ungranted_name not in (combo.get_attribute('value') or '')
+        page.get_by_role('dialog', name='仪表盘送审检查').get_by_role('button', name='提交审阅', exact=True).click()
+        expect(page.get_by_role('dialog', name='仪表盘送审检查')).not_to_be_visible(timeout=15000)
+        passed('送审统一列出5项用户组缺权，从检查发起补权，独立报表发布生效后重查通过；审阅人无隐式数据权')
         passed('浏览器开发：添加五张卡片、调整宽度、比较组和受众，冻结版本送审')
 
         admin_context, review_page = login(browser, admin_name)
         review_page.goto(origin + '/dashboards')
         review_page.get_by_role('button', name='开发与审阅', exact=True).click()
-        review_page.get_by_role('button', name='版本、审阅与发布', exact=True).click()
+        review_page.get_by_role('button', name='审阅', exact=True).click()
+        expect(review_page.get_by_label('仪表盘审批变更摘要')).to_be_visible(timeout=15000)
+        expect(review_page.get_by_text('首次送审，展示本次发布内容', exact=False)).to_be_visible(timeout=15000)
         review_page.get_by_role('button', name='运行冻结版本真实预览', exact=True).click()
         expect(review_page.get_by_text('完整 5/5 张必需卡片', exact=True)).to_be_visible(timeout=30000)
         review_page.get_by_role('button', name='登记本轮全部卡片验证', exact=True).click()
         expect(review_page.get_by_text('验证时间', exact=False)).to_be_visible(timeout=15000)
         review_page.get_by_role('checkbox', name='已核对卡片样本、口径、比较组、时效策略和全部受众覆盖').check()
         review_page.get_by_role('button', name='批准此版本', exact=True).click()
-        expect(review_page.get_by_role('button', name='显式发布此版本', exact=True)).to_be_visible(timeout=15000)
-        review_page.get_by_role('button', name='显式发布此版本', exact=True).click()
+        expect(review_page.get_by_role('button', name='发布此版本', exact=True)).to_be_visible(timeout=15000)
+        review_page.get_by_role('button', name='发布此版本', exact=True).click()
         review_page.get_by_role('button', name='确定', exact=True).click()
         expect(review_page.get_by_text('发布 #1', exact=False)).to_be_visible(timeout=15000)
         passed('浏览器审阅：冻结版本全部真实预览、验证、批准与显式发布')
+
+        # Compare a second frozen version with the still-active v1 publication.
+        dashboard = api('GET', '/managed-dashboards', token=author_token)['items'][0]
+        changed = copy.deepcopy(dashboard['draft'])
+        changed['tiles'][0]['width'] = 'full'
+        changed['user_ids'].append(author['id'])
+        api('PUT', f'/managed-dashboards/{dashboard["id"]}/draft', {'request_id': key(), 'version': dashboard['draft_version'], 'definition': changed}, token=author_token)
+        api('POST', f'/managed-dashboards/{dashboard["id"]}/submit', {'request_id': key(), 'version': dashboard['draft_version'] + 1, 'reviewer_id': 1}, token=author_token)
+        review_page.goto(origin + '/dashboards')
+        review_page.get_by_role('button', name='开发与审阅', exact=True).click()
+        review_page.get_by_role('button', name='审阅', exact=True).click()
+        expect(review_page.get_by_text('与当前正式 v1（发布 #1）比较', exact=False)).to_be_visible(timeout=15000)
+        expect(review_page.get_by_text('新增个人受众', exact=True)).to_be_visible()
+        expect(review_page.get_by_text('库存总额 · 宽度', exact=True)).to_be_visible()
+        review_page.screenshot(path=str(artifacts / 'dashboard-review-diff.png'), full_page=True)
+        passed('审批以当前正式版为基准，显示布局与人员变化及业务口径，技术JSON默认折叠')
 
         viewer_context, view_page = login(browser, viewer_name)
         view_page.goto(origin + '/dashboards')
         view_page.get_by_role('button', name='库存运营看板', exact=False).click()
         expect(view_page.get_by_text('完整 5/5 张必需卡片', exact=True)).to_be_visible(timeout=30000)
-        expect(view_page.get_by_test_id('report-metric').first).to_have_text('1280.00')
+        expect(view_page.get_by_test_id('report-metric').first).to_have_text('1,280.00')
         expect(view_page.get_by_test_id('report-metric').nth(1)).to_have_text('12')
         assert view_page.locator('.dashboard-grid').get_by_text('数据截止', exact=False).count() == 5
         assert view_page.get_by_role('button', name='导出', exact=True).count() == 0
@@ -219,6 +290,10 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
         peak = max(sum(start <= point < end for start, end in timings) for point, _ in timings)
         assert 1 <= peak <= 2, {'peak': peak, 'timings': timings}
         assert view_page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+        expect(view_page.get_by_text('查询完成：', exact=False).first).not_to_be_visible()
+        view_page.get_by_label('库存总额查看详情', exact=True).click()
+        expect(view_page.get_by_role('cell', name='1280.00', exact=True)).to_be_visible()
+        view_page.get_by_label('库存总额查看详情', exact=True).click()
         view_page.screenshot(path=str(artifacts / 'dashboard-desktop.png'), full_page=True)
         passed('正式查看：真实1280.00与12，业务水位独立展示，无个人凭据或额外按钮')
         view_page.set_viewport_size({'width': 390, 'height': 844})
@@ -226,27 +301,30 @@ GRANT SELECT ON {schema}.warehouse_report,{schema}.low_stock_report,{schema}.tre
         assert view_page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'), 'mobile horizontal overflow'
         widths = view_page.locator('.dashboard-grid>article').evaluate_all('(nodes)=>nodes.map(n=>Math.round(n.getBoundingClientRect().width))')
         assert max(widths) - min(widths) <= 1
+        assert view_page.locator('.dashboard-grid>article').nth(1).bounding_box()['y'] + view_page.locator('.dashboard-grid>article').nth(1).bounding_box()['height'] < 844, 'two metrics should fit in mobile first screen'
+        assert all(n['height'] >= 44 for n in view_page.get_by_label('仪表盘查看').get_by_role('button').evaluate_all('(nodes)=>nodes.filter(n=>n.getBoundingClientRect().width).map(n=>({height:n.getBoundingClientRect().height}))'))
         view_page.screenshot(path=str(artifacts / 'dashboard-mobile.png'), full_page=True)
         passed('手机390px单列布局、无横向溢出，图表保留可读结果表')
 
         full_query = view_page.get_by_text('最近完整查询：', exact=False).inner_text()
-        view_page.get_by_role('button', name='重新查询', exact=True).first.click()
+        view_page.get_by_role('button', name='库存总额更多操作', exact=True).click()
+        view_page.get_by_role('menuitem', name='重新查询此卡片', exact=True).click()
         expect(view_page.get_by_text('部分刷新 5/5 张必需卡片', exact=True)).to_be_visible(timeout=15000)
-        expect(view_page.get_by_role('button', name='刷新全部', exact=True)).to_be_enabled(timeout=15000)
+        expect(view_page.get_by_role('button', name='刷新数据', exact=True)).to_be_enabled(timeout=15000)
         assert view_page.get_by_text('最近完整查询：', exact=False).inner_text() == full_query
         passed('页面同时查询最多两张；单卡重查保持部分刷新，不改写最近完整查询时间')
 
         # Transport failure is intentionally mocked; data and authorization remain real.
         view_page.route('**/dashboard-refreshes/*/tiles/*/execute', lambda route: route.fulfill(status=503, content_type='application/json', body='{"code":50300,"message":"验收模拟网络故障"}'))
-        view_page.get_by_role('button', name='刷新全部', exact=True).click()
+        view_page.get_by_role('button', name='刷新数据', exact=True).click()
         expect(view_page.get_by_text('上次成功结果', exact=False).first).to_be_visible(timeout=15000)
-        assert view_page.get_by_test_id('report-metric').first.inner_text() == '1280.00'
+        assert view_page.get_by_test_id('report-metric').first.inner_text() == '1,280.00'
         assert '已过期' in view_page.get_by_label('仪表盘查看').inner_text()
         expect(view_page.get_by_text('部分可用 0/5 张必需卡片', exact=True)).to_be_visible(timeout=15000)
         view_page.unroute('**/dashboard-refreshes/*/tiles/*/execute')
         passed('模拟503仅保留带旧时间标记的内存结果，不显示为新鲜数据')
         viewer_context.set_offline(True)
-        view_page.get_by_role('button', name='刷新全部', exact=True).click()
+        view_page.get_by_role('button', name='刷新数据', exact=True).click()
         expect(view_page.get_by_text('页面已暂停查询；返回页面或恢复网络后，请手动刷新。', exact=True)).to_be_visible()
         viewer_context.set_offline(False)
         passed('离线时不发起查询，恢复网络后要求手动刷新')

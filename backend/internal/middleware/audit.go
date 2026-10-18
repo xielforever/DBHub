@@ -202,6 +202,8 @@ func classify(method, path string) (action, resource, name string) {
 	switch {
 	case parts[0] == "dashboard-refreshes" && method == http.MethodPost:
 		return "DASHBOARD_EXECUTE", "DASHBOARD", name
+	case parts[0] == "dashboard-reviews" && method == http.MethodGet:
+		return "DASHBOARD_REVIEW_VIEW", "DASHBOARD_REVIEW", name
 	case parts[0] == "dashboard-reviews" && method == http.MethodPost:
 		return "DASHBOARD_REVIEW_" + strings.ToUpper(last), "DASHBOARD_REVIEW", name
 	case parts[0] == "managed-dashboards":

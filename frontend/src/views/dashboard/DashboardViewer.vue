@@ -1,7 +1,7 @@
 <template>
   <section class="space-y-4" aria-label="仪表盘查看">
     <header class="flex flex-wrap items-start justify-between gap-3">
-      <div>
+      <div class="min-w-0">
         <p class="text-xs text-violet-200">
           {{ user.workspace?.name }} ·
           {{
@@ -16,17 +16,19 @@
         <h2 class="text-2xl font-semibold mt-1">
           {{ view?.name || '仪表盘' }}
         </h2>
-        <p class="text-sm text-white/60 mt-1">{{ view?.description }}</p>
+        <p v-if="view?.description" class="text-sm text-white/60 mt-1">
+          {{ view.description }}
+        </p>
       </div>
-      <div class="flex flex-wrap gap-2">
+      <div class="flex gap-2">
         <button class="ghost-button" @click="emit('close')">返回列表</button
         ><button class="liquid-button" :disabled="busy" @click="refresh()">
-          {{ busy ? '查询中…' : '刷新全部' }}
+          {{ busy ? '查询中…' : '刷新数据' }}
         </button>
       </div>
     </header>
     <div
-      class="glass-panel p-4 flex flex-wrap gap-x-6 gap-y-2 text-sm"
+      class="glass-panel px-4 py-3 flex flex-wrap gap-x-5 gap-y-1 text-sm"
       role="status"
       aria-live="polite"
     >
@@ -43,55 +45,53 @@
       ><span>时效：{{ freshnessLabels[quality.freshness] }}</span
       ><span v-if="quality.misaligned" class="text-amber-200"
         >比较组水位未对齐，暂不宜比较</span
-      >
-      <span class="text-white/65"
+      ><span class="text-white/65"
         >最近完整查询：{{
           fullCycleAt ? formatTime(fullCycleAt) : '尚未完成'
         }}</span
       >
     </div>
-    <p class="text-xs text-white/60">
-      刷新可获取最新查询结果。请同时核对业务数据截止时间；本页需手动刷新。
-    </p>
     <p v-if="error" role="alert" class="text-rose-200">{{ error }}</p>
     <div class="dashboard-grid">
       <article
         v-for="state in states"
         :key="state.tile.key"
-        class="glass-panel p-4 min-w-0 space-y-3"
-        :class="`tile-${state.tile.width}`"
+        class="glass-panel p-4 min-w-0 space-y-2"
+        :class="[
+          `tile-${state.tile.width}`,
+          { 'metric-tile': state.tile.report?.chart_type === 'metric' },
+        ]"
         :aria-label="state.tile.report?.name || '受限卡片'"
       >
-        <header class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <h3 class="font-semibold">
-              {{ state.tile.report?.name || '受限卡片' }}
-            </h3>
-            <p class="text-xs text-white/55 mt-1">
-              {{ state.tile.required ? '必需' : '可选'
-              }}<span v-if="state.tile.report">
-                ·
-                {{ unitLabel(state.tile.report.data_contract.declaration.unit)
-                }}<span
-                  v-if="state.tile.report.data_contract.declaration.currency"
-                >
-                  ·
-                  {{
-                    state.tile.report.data_contract.declaration.currency
-                  }}</span
-                >
-                · 报表发布 #{{ state.tile.report.publication_no }}</span
-              >
-            </p>
-          </div>
-          <button
+        <header class="flex items-start justify-between gap-2">
+          <h3 class="font-semibold pt-2">
+            {{ state.tile.report?.name || '受限卡片' }}
+          </h3>
+          <el-dropdown
             v-if="state.tile.status === 'ready'"
-            class="ghost-button text-xs shrink-0"
-            :disabled="busy"
-            @click="refresh(state.tile.key)"
+            trigger="click"
+            @command="tileCommand($event, state)"
+            ><button
+              class="w-11 h-11 flex items-center justify-center rounded-lg text-white/65 hover:bg-white/10 focus-visible:outline focus-visible:outline-violet-300"
+              :aria-label="`${state.tile.report?.name || '卡片'}更多操作`"
+              :disabled="busy"
+            >
+              <MoreHorizontal class="w-5 h-5" /></button
+            ><template #dropdown
+              ><el-dropdown-menu
+                ><el-dropdown-item command="retry" style="min-height: 44px"
+                  >重新查询此卡片</el-dropdown-item
+                ><el-dropdown-item
+                  command="receipt"
+                  style="min-height: 44px"
+                  :disabled="
+                    !state.tile.execution_id || state.status === 'idle'
+                  "
+                  >查看本次执行回执</el-dropdown-item
+                ></el-dropdown-menu
+              ></template
+            ></el-dropdown
           >
-            重新查询
-          </button>
         </header>
         <p
           v-if="state.status === 'loading'"
@@ -102,7 +102,7 @@
         </p>
         <div
           v-if="state.tile.status === 'restricted'"
-          class="py-10 text-center space-y-3"
+          class="py-6 text-center space-y-3"
         >
           <p class="text-sm text-white/65">无权访问或报表暂不可用</p>
           <button
@@ -116,7 +116,7 @@
         <p
           v-if="state.tile.status === 'contract_changed'"
           role="alert"
-          class="text-amber-200 text-sm py-8"
+          class="text-amber-200 text-sm py-6"
         >
           报表口径已变化，需要看板负责人明确采纳新契约并重新审批。
         </p>
@@ -135,11 +135,13 @@
             "
           >
             {{ state.retained ? '上次成功结果 · ' : ''
-            }}{{ freshnessLabels[tileFreshness(state, now)] }} · 查询
-            {{ formatTime(state.result.quality.query_completed_at) }} · 数据截止
+            }}{{ freshnessLabels[tileFreshness(state, now)] }} · 数据截止
             {{
               state.result.quality.data_as_of
-                ? formatTime(state.result.quality.data_as_of)
+                ? formatTime(
+                    state.result.quality.data_as_of,
+                    state.tile.report.data_contract.declaration.timezone,
+                  )
                 : '未知'
             }}
           </p>
@@ -148,14 +150,73 @@
             :config="state.tile.report.chart_config"
             :result="state.result.result"
             :title="state.tile.report.name"
+            :unit="state.tile.report.data_contract.declaration.unit"
+            :currency="state.tile.report.data_contract.declaration.currency"
+            compact
+            hide-details
           />
+          <details class="group text-xs text-white/65 border-t border-white/10">
+            <summary
+              class="cursor-pointer min-h-11 flex items-center focus-visible:outline focus-visible:outline-violet-300"
+              :aria-label="`${state.tile.report.name}查看详情`"
+            >
+              查看详情
+              <ChevronDown class="w-4 h-4 ml-1 group-open:rotate-180" />
+            </summary>
+            <div class="space-y-2 pb-2">
+              <p>
+                {{ state.tile.required ? '必需卡片' : '可选卡片' }} · 单位
+                {{
+                  displayUnit(state.tile.report.data_contract.declaration.unit)
+                }}<span
+                  v-if="state.tile.report.data_contract.declaration.currency"
+                >
+                  · 币种
+                  {{
+                    state.tile.report.data_contract.declaration.currency
+                  }}</span
+                >
+              </p>
+              <p>
+                指标含义：{{
+                  state.tile.report.data_contract.declaration.meaning
+                }}
+              </p>
+              <p>
+                统计范围：{{
+                  state.tile.report.data_contract.declaration.scope_description
+                }}
+              </p>
+              <p>
+                业务时区：{{
+                  state.tile.report.data_contract.declaration.timezone
+                }}
+                · 报表发布 #{{ state.tile.report.publication_no }}
+              </p>
+              <p>
+                查询完成：{{
+                  formatTime(state.result.quality.query_completed_at)
+                }}
+                · 返回 {{ state.result.result.rows?.length || 0 }} 行 ·
+                {{ state.result.result.duration_ms }} 毫秒
+              </p>
+              <p>原始查询结果</p>
+              <div class="h-[240px] flex min-w-0">
+                <ResultGrid
+                  :columns="state.result.result.columns || []"
+                  :rows="state.result.result.rows || []"
+                />
+              </div>
+            </div>
+          </details>
         </template>
         <button
-          v-if="state.status === 'error' && state.tile.execution_id"
+          v-if="state.status === 'error' && state.tile.status === 'ready'"
           class="ghost-button text-xs"
-          @click="checkReceipt(state)"
+          :disabled="busy"
+          @click="refresh(state.tile.key)"
         >
-          查看本次执行回执
+          重试此卡片
         </button>
       </article>
     </div>
@@ -178,6 +239,9 @@ import {
   type DashboardRefresh,
 } from '../../api/managed-dashboard'
 import ReportResult from '../report/ReportResult.vue'
+import ResultGrid from '../query/components/ResultGrid.vue'
+import { MoreHorizontal, ChevronDown } from 'lucide-vue-next'
+import { displayUnit } from '../report/reportDisplay'
 import {
   dashboardQuality,
   tileFreshness,
@@ -230,15 +294,12 @@ const freshnessLabels: Record<string, string> = {
   unknown: '未知',
   missing: '尚无结果',
 }
-const unitNames: Record<string, string> = {
-  CNY_10000: '万元',
-  CNY: '元',
-  item_count: '项',
-  item_quantity: '件',
-  percent: '%',
+const formatTime = (value: string, timeZone?: string) =>
+  new Date(value).toLocaleString('zh-CN', timeZone ? { timeZone } : undefined)
+function tileCommand(command: string, state: TileState) {
+  if (command === 'retry') void refresh(state.tile.key)
+  else if (command === 'receipt') void checkReceipt(state)
 }
-const unitLabel = (value: string) => unitNames[value] || value
-const formatTime = (value: string) => new Date(value).toLocaleString()
 const timer = setInterval(() => {
   now.value = baseline + performance.now() - started
   for (const state of states.value) {
@@ -463,6 +524,9 @@ async function checkReceipt(state: TileState) {
 }
 </script>
 <style scoped>
+button {
+  min-height: 44px;
+}
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));

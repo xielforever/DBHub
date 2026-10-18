@@ -121,58 +121,89 @@
         >
           <div class="flex flex-wrap justify-between gap-3">
             <h3 class="font-semibold">{{ d.draft.name }}</h3>
-            <span class="text-xs text-white/60"
-              >{{ d.lifecycle === 'archived' ? '已归档' : '开发中' }} · 责任人
-              {{ d.owner_name }} · 草稿 {{ d.draft_version }} · 内容 v{{
-                d.latest_version
-              }}
-              · 发布 #{{ d.publication_no }}</span
-            >
+            <span class="text-xs text-violet-200">{{ stateLabel(d) }}</span>
           </div>
-          <p class="text-sm text-white/60">{{ d.draft.description }}</p>
+          <p v-if="d.draft.description" class="text-sm text-white/60">
+            {{ d.draft.description }}
+          </p>
+          <p class="text-xs text-white/60">
+            责任人 {{ d.owner_name }} · 草稿 {{ d.draft_version
+            }}<span v-if="d.latest_version">
+              · 内容 v{{ d.latest_version }}</span
+            ><span v-if="d.active_release_id">
+              · 正式发布 #{{ d.publication_no }}</span
+            >
+          </p>
           <div class="flex flex-wrap gap-2">
-            <template v-if="d.lifecycle === 'active'"
+            <button class="liquid-button text-sm" @click="primaryAction(d)">
+              {{ primaryLabel(d) }}
+            </button>
+            <button
+              v-if="
+                d.lifecycle === 'active' &&
+                d.owner_id === user.user?.id &&
+                d.review_status !== 'pending'
+              "
+              class="ghost-button text-sm"
+              @click="submit(d)"
+            >
+              送审检查
+            </button>
+            <el-dropdown
+              trigger="click"
+                @command="moreAction($event, d)"
               ><button
-                v-if="d.owner_id === user.user?.id"
-                class="ghost-button text-xs"
-                @click="editing = d"
+                class="ghost-button text-sm"
+                :aria-label="`${d.draft.name}更多操作`"
               >
-                编辑草稿</button
-              ><button
-                v-if="d.owner_id === user.user?.id"
-                class="ghost-button text-xs"
-                @click="viewing = { id: d.id, mode: 'draft' }"
-              >
-                预览已保存草稿</button
-              ><button
-                v-if="d.owner_id === user.user?.id"
-                class="liquid-button text-xs"
-                @click="submit(d)"
-              >
-                提交审阅</button
-              ><button class="ghost-button text-xs" @click="reviewing = d">
-                版本、审阅与发布</button
-              ><button
-                v-if="user.role === 'admin'"
-                class="ghost-button text-xs"
-                @click="transfer(d)"
-              >
-                移交责任人</button
-              ><button
-                class="ghost-button text-xs"
-                @click="lifecycle(d, d.latest_version ? 'archive' : 'delete')"
-              >
-                {{ d.latest_version ? '归档' : '删除草稿' }}
-              </button></template
-            ><template v-else
-              ><button class="ghost-button text-xs" @click="reviewing = d">
-                查看历史版本</button
-              ><button
-                class="ghost-button text-xs"
-                @click="lifecycle(d, 'restore')"
-              >
-                恢复为草稿
-              </button></template
+                更多</button
+              ><template #dropdown
+                ><el-dropdown-menu>
+                  <el-dropdown-item command="history" style="min-height: 44px"
+                    >版本、审阅与发布</el-dropdown-item
+                  >
+                  <el-dropdown-item
+                    v-if="
+                      d.lifecycle === 'active' && d.owner_id === user.user?.id
+                    "
+                    command="preview"
+                    style="min-height: 44px"
+                    >预览已保存草稿</el-dropdown-item
+                  >
+                  <el-dropdown-item
+                    v-if="
+                      d.lifecycle === 'active' &&
+                      d.owner_id === user.user?.id &&
+                      primaryLabel(d) !== '编辑草稿'
+                    "
+                    command="edit"
+                    style="min-height: 44px"
+                    >编辑草稿</el-dropdown-item
+                  >
+                  <el-dropdown-item
+                    v-if="d.lifecycle === 'active' && user.role === 'admin'"
+                    command="transfer"
+                    style="min-height: 44px"
+                    >移交责任人</el-dropdown-item
+                  >
+                  <el-dropdown-item
+                    v-if="d.lifecycle === 'active'"
+                    command="archive"
+                    divided
+                    style="min-height: 44px"
+                    >{{
+                      d.latest_version ? '归档' : '删除草稿'
+                    }}</el-dropdown-item
+                  >
+                  <el-dropdown-item
+                    v-else
+                    command="restore"
+                    divided
+                    style="min-height: 44px"
+                    >恢复为草稿</el-dropdown-item
+                  >
+                </el-dropdown-menu></template
+              ></el-dropdown
             >
           </div>
         </article>
@@ -241,43 +272,18 @@
       @close="reviewing = undefined"
       @changed="load"
     />
-    <el-dialog
-      v-model="submitting"
-      title="选择独立审阅人"
-      width="min(480px,calc(100vw - 24px))"
-      ><div class="space-y-4">
-        <p class="text-xs text-white/65">
-          需为另一位有效管理员，且具有所有引用报表的普通查看权。没有合格人选时，请先完成报表访问申请。
-        </p>
-        <el-select
-          v-model="reviewer"
-          aria-label="仪表盘提交审阅人"
-          placeholder="选择管理员"
-          class="w-full"
-          ><el-option
-            v-for="u in admins"
-            :key="u.id"
-            :value="u.id"
-            :label="u.username"
-        /></el-select>
-        <p v-if="error" role="alert" class="text-rose-200 text-sm">
-          {{ error }}
-        </p>
-        <button
-          class="liquid-button"
-          :disabled="!reviewer || loading"
-          @click="confirmSubmit"
-        >
-          提交冻结版本
-        </button>
-      </div></el-dialog
-    >
+    <DashboardSubmitDialog
+      v-if="pending"
+      :dashboard="pending"
+      @close="pending = undefined"
+      @submitted="submitted"
+      @edit="editFromCheck"
+    />
   </div>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import request from '../../utils/request'
 import { useUserStore } from '../../stores/user'
 import {
   managedDashboardApi as api,
@@ -289,6 +295,7 @@ import DashboardViewer from './DashboardViewer.vue'
 import DashboardEditor from './DashboardEditor.vue'
 import DashboardReviewDialog from './DashboardReviewDialog.vue'
 import AccessRequestsPanel from './AccessRequestsPanel.vue'
+import DashboardSubmitDialog from './DashboardSubmitDialog.vue'
 const user = useUserStore(),
   canWrite = computed(() => ['admin', 'developer'].includes(user.role)),
   keys = reportCommandKeys()
@@ -307,10 +314,7 @@ const tab = ref('published'),
   viewing = ref<{ id: number; mode: 'published' | 'draft' }>(),
   loading = ref(false),
   error = ref(''),
-  submitting = ref(false),
-  pending = ref<ManagedDashboard>(),
-  reviewer = ref<number>(),
-  admins = ref<{ id: number; username: string }[]>([])
+  pending = ref<ManagedDashboard>()
 let alive = true,
   loadGeneration = 0
 onMounted(load)
@@ -357,48 +361,56 @@ async function load() {
     if (alive && generation === loadGeneration) loading.value = false
   }
 }
-async function submit(d: ManagedDashboard) {
+function submit(d: ManagedDashboard) {
   pending.value = d
-  reviewer.value = undefined
-  submitting.value = true
-  error.value = ''
-  try {
-    const u = await request.get<
-      unknown,
-      { items: { id: number; username: string; role: string }[] }
-    >('/users/brief')
-    if (alive)
-      admins.value = u.items.filter(
-        (x) => x.role === 'admin' && x.id !== user.user?.id,
-      )
-  } catch (e) {
-    if (alive) error.value = message(e)
-  }
 }
-async function confirmSubmit() {
-  if (!pending.value || !reviewer.value) return
-  loading.value = true
-  try {
-    const payload = {
-      version: pending.value.draft_version,
-      reviewer_id: reviewer.value,
-    }
-    await api.command(
-      pending.value.id,
-      'submit',
-      payload,
-      keys.get(`submit:${pending.value.id}`, payload),
-    )
-    if (alive) {
-      submitting.value = false
-      await load()
-      tab.value = 'managed'
-    }
-  } catch (e) {
-    if (alive) error.value = message(e)
-  } finally {
-    if (alive) loading.value = false
-  }
+function submitted() {
+  pending.value = undefined
+  tab.value = 'managed'
+  void load()
+}
+function editFromCheck(d: ManagedDashboard) {
+  pending.value = undefined
+  editing.value = d
+}
+function stateLabel(d: ManagedDashboard) {
+  if (d.lifecycle === 'archived') return '已归档'
+  if (d.review_status === 'pending') return '待审阅'
+  if (d.review_status === 'approved' && !d.review_was_published)
+    return '已批准 · 待发布'
+  if (d.active_release_id) return '已发布'
+  return (
+    (
+      {
+        rejected: '已退回',
+        withdrawn: '已撤回',
+        expired: '审阅已过期',
+      } as Record<string, string>
+    )[d.review_status] || '草稿'
+  )
+}
+function primaryLabel(d: ManagedDashboard) {
+  if (d.lifecycle === 'archived') return '查看历史版本'
+  if (d.review_status === 'pending')
+    return user.role === 'admin' && d.reviewer_id === user.user?.id
+      ? '审阅'
+      : '查看审阅'
+  if (d.review_status === 'approved' && !d.review_was_published)
+    return user.role === 'admin' ? '审阅与发布' : '查看发布进度'
+  return d.owner_id === user.user?.id ? '编辑草稿' : '查看版本'
+}
+function primaryAction(d: ManagedDashboard) {
+  if (primaryLabel(d) === '编辑草稿') editing.value = d
+  else reviewing.value = d
+}
+function moreAction(action: string, d: ManagedDashboard) {
+  if (action === 'history') reviewing.value = d
+  else if (action === 'preview') viewing.value = { id: d.id, mode: 'draft' }
+  else if (action === 'edit') editing.value = d
+  else if (action === 'transfer') void transfer(d)
+  else if (action === 'archive')
+    void lifecycle(d, d.latest_version ? 'archive' : 'delete')
+  else if (action === 'restore') void lifecycle(d, 'restore')
 }
 async function lifecycle(d: ManagedDashboard, action: string) {
   try {
@@ -442,3 +454,9 @@ async function transfer(d: ManagedDashboard) {
   }
 }
 </script>
+
+<style scoped>
+button {
+  min-height: 44px;
+}
+</style>

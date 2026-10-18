@@ -349,6 +349,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 
 		dashRepo := deps.Conns.ManagedDashboards()
 		dashH := reportapi.NewManagedDashboardHandler(dashRepo)
+		mux.Handle("POST /api/v1/managed-dashboards/{id}/preflight", middleware.Chain(http.HandlerFunc(dashH.Preflight), requireAuth, canWrite))
+		mux.Handle("GET /api/v1/dashboard-reviews/{id}/summary", middleware.Chain(http.HandlerFunc(dashH.ReviewSummary), requireAuth, canWrite))
 		mux.Handle("GET /api/v1/managed-dashboards/{id}/current-audience", middleware.Chain(http.HandlerFunc(dashH.CurrentAudience), requireAuth, canWrite))
 		mux.Handle("POST /api/v1/managed-dashboards/{id}/audience-changes", middleware.Chain(http.HandlerFunc(dashH.AudienceChange), requireAuth, canWrite))
 		mux.Handle("POST /api/v1/managed-dashboards/{id}/access-requests", middleware.Chain(http.HandlerFunc(dashH.RequestAudienceAccess), requireAuth, canWrite))

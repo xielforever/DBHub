@@ -3,10 +3,40 @@ import { test } from 'node:test'
 import { effectScope } from 'vue'
 import { useReportRun } from '../src/views/report/useReportRun.ts'
 import { reportChart } from '../src/views/report/reportChart.ts'
+import { formatReportNumber, displayLabel, displayUnit, reportNumberRounded } from '../src/views/report/reportDisplay.ts'
 import { reportCommandKeys, reportDefinitionDiff } from '../src/views/report/reportCommands.ts'
 import type { ExecResult } from '../src/api/workbench.ts'
 function deferred<T>() { let resolve!: (value:T)=>void;let reject!: (error:Error)=>void;const promise=new Promise<T>((yes,no)=>{resolve=yes;reject=no});return {promise,resolve,reject} }
 const result:ExecResult={kind:'query',columns:['day','amount'],rows:[['2026-01-02','20.50'],['2026-01-01',null],['2026-01-01','10.25']],duration_ms:5}
+test('rounding disclosure distinguishes lost fractions from padding or separators',()=>{
+ assert.equal(reportNumberRounded('1.234',{fraction_digits:2}),true)
+ assert.equal(reportNumberRounded('1.2300',{fraction_digits:2}),false)
+ assert.equal(reportNumberRounded('1000',{fraction_digits:0}),false)
+ assert.equal(reportNumberRounded('1e6',{fraction_digits:2}),false)
+})
+test('business number formatting keeps decimal and large integer precision',()=>{
+ assert.equal(formatReportNumber('9007199254740993.00001'),'9,007,199,254,740,993.00001')
+ assert.equal(formatReportNumber('1280.00'),'1,280.00')
+ assert.equal(formatReportNumber('1.2300e+2'),'123.00')
+ assert.equal(formatReportNumber('1e-8'),'0.00000001')
+ assert.equal(formatReportNumber(null),'—')
+ assert.equal(formatReportNumber('not-numeric'),'not-numeric')
+})
+test('explicit display rounding uses decimal half-up',()=>{
+ const raw='9999999999999999.995'
+ assert.equal(formatReportNumber(raw,{fraction_digits:2}),'10,000,000,000,000,000.00')
+ assert.equal(formatReportNumber('-1.005',{fraction_digits:2}),'-1.01')
+ assert.equal(formatReportNumber('-0.001',{fraction_digits:2}),'0.00')
+ assert.equal(formatReportNumber('1234.5',{fraction_digits:4,grouping:false}),'1234.5000')
+})
+test('display names are independent of SQL field mapping and inherited object keys',()=>{
+ const config={dimension:'day',metrics:['amount'],display:{labels:{amount:'库存金额',day:'日期'},grouping:true}}
+ assert.equal(reportChart('line',config,result).error,undefined)
+ assert.equal(displayLabel('amount',config.display),'库存金额')
+ assert.equal(displayLabel('constructor',{}),'constructor')
+ assert.equal(displayUnit('CNY_10000'),'万元')
+ assert.deepEqual(reportChart('line',config,result).series[0]?.values,[20.5,null,10.25])
+})
 test('uncertain publication retries keep a UUID and an explicit new action gets a new UUID',()=>{
  const keys=reportCommandKeys(),payload={review_id:1,kind:'publish',expected_publication_no:0},first=keys.get('release',payload)
  assert.equal(first,keys.get('release',{...payload}))

@@ -1,0 +1,131 @@
+{
+  "checked_at": "2026-10-18T05:52:14.230992+00:00",
+  "scope": "Dashboard usability: approved business labels/number formatting, compact viewer and state actions, submission preflight, business review differences",
+  "base_commit": "77fb0b6d2258bff062246454300b279ae89ad148",
+  "source_sha256": {
+    "method": "SHA-256 over sorted repository-relative path, NUL, content, NUL for each file",
+    "backend_go_and_migrations": "7eb045d2afedf7fac7d4c2fd9d5d64de746a54a0ac1b4e3c27607500d223fbfd",
+    "frontend_src_and_tests": "53afe677bf0595b4850d3dc778ace7c7ae371bbd3f1704108238fb29b7ef0c8f",
+    "acceptance_script": "3df44a1f3ef7387eaedc91e1c62d624690757073bfcec3677090c39327d77ecf"
+  },
+  "checks": {
+    "backend_full_suite": {
+      "result": "passed",
+      "command": "go test ./... -count=1",
+      "server_package_seconds": 138.302
+    },
+    "backend_full_race": {
+      "result": "passed",
+      "command": "go test -race ./... -count=1",
+      "server_package_seconds": 312.007
+    },
+    "go_vet": "passed",
+    "frontend_query_tests": 14,
+    "frontend_report_tests": 18,
+    "frontend_dashboard_tests": 10,
+    "typescript_and_production_build": "passed",
+    "new_backend_integration_tests": [
+      "TestDashboardPreflightCoverageAndReviewerChanges",
+      "TestDashboardBusinessReviewSummaryAndIsolation",
+      "TestDashboardFollowsApprovedPresentationChange"
+    ],
+    "git_diff_check": "passed",
+    "dashboard_document_links": {
+      "result": "passed",
+      "documents": 3,
+      "local_links": 23
+    }
+  },
+  "browser": {
+    "result": "passed",
+    "checks": [
+      "真实 PostgreSQL 五张报表与独立只读账号发布；查看者没有个人连接",
+      "浏览器配置业务名称与4位小数，预览实时更新；保存草稿不改变正式展示",
+      "送审统一列出5项用户组缺权，从检查发起补权，独立报表发布生效后重查通过；审阅人无隐式数据权",
+      "浏览器开发：添加五张卡片、调整宽度、比较组和受众，冻结版本送审",
+      "浏览器审阅：冻结版本全部真实预览、验证、批准与显式发布",
+      "审批以当前正式版为基准，显示布局与人员变化及业务口径，技术JSON默认折叠",
+      "正式查看：真实1280.00与12，业务水位独立展示，无个人凭据或额外按钮",
+      "手机390px单列布局、无横向溢出，图表保留可读结果表",
+      "页面同时查询最多两张；单卡重查保持部分刷新，不改写最近完整查询时间",
+      "模拟503仅保留带旧时间标记的内存结果，不显示为新鲜数据",
+      "离线时不发起查询，恢复网络后要求手动刷新",
+      "计时推进31分钟：清空过期结果，期间没有自动执行查询",
+      "工作空间切换销毁旧结果，跨空间已知报表ID与数据源读取被拒绝"
+    ],
+    "page_errors": 0,
+    "runtime_readonly": true,
+    "temporary_resources_removed": true,
+    "desktop_viewport": [
+      1440,
+      1080
+    ],
+    "mobile_viewport": [
+      390,
+      844
+    ],
+    "mobile_two_metrics_in_first_view": true,
+    "viewer_button_min_height_px": 44,
+    "max_page_query_concurrency": 2,
+    "data": "Real PostgreSQL, separately approved read-only account, viewer without personal datasource connection",
+    "fault_simulation": "Explicit HTTP 503 transport mock, offline network emulation and browser clock advanced 31 minutes",
+    "private_report": "/workspace/dbhub-cloud/dashboard-artifacts/79f4644d7a/checks.json",
+    "server_sha256": "73a3a0532321cbe8d0332046bd10e7cadc8f4fb0b58df00fffba25869406cf14"
+  },
+  "cloud": {
+    "result": "passed",
+    "readiness_http_status": 200,
+    "login": "passed",
+    "workspace_scoped_dashboard_api_checks": 6,
+    "frontend_dashboard_route_http_status": 200,
+    "migrations": 35,
+    "latest_migration": "0035_dashboard_review_assignment_epoch.sql",
+    "backend_sha256_matches_browser": true,
+    "normal_services": 6,
+    "remaining_acceptance_containers": 0
+  },
+  "design": {
+    "authorization": "开始改进; first four improvements from the preceding assessment",
+    "concept": "docs/design/images/dashboard-usability-concept.png",
+    "concept_kind": "Generated illustrative desktop and mobile concept shown before implementation",
+    "explicit_concept_signoff_recorded": false,
+    "implementation_decisions": [
+      "Keep existing application navigation",
+      "Separate submission/review dialogs from the data viewer",
+      "Collapse ordinary metadata and keep data freshness and failure states visible"
+    ],
+    "visual_review": "Reviewed actual desktop, mobile, preflight and review screenshots",
+    "locked_semantics": [
+      "SQL and unformatted result values",
+      "Approved unit, currency, scope, time window and comparison contract",
+      "Independent report permissions and approved execution identity"
+    ],
+    "renderer_checks": [
+      "Decimal text formatting retains original values in details",
+      "ECharts retains SQL row order and existing safe numeric fallback",
+      "Table headers use aliases while raw detail headers remain available"
+    ]
+  },
+  "compatibility": {
+    "new_migrations": 0,
+    "new_services": 0,
+    "display_in_approved_report_content": true,
+    "display_changes_leave_contract_hash_unchanged": true,
+    "preflight_executes_target_sql": false,
+    "preflight_replaces_submit_authorization": false,
+    "cache_result_rows": false
+  },
+  "artifacts_sha256": {
+    "docs/design/images/dashboard-usability-actual-desktop.png": "ca03d6528e8b158ec01ae497f6c62e28043050fd931b13b92682dc28d7ab3072",
+    "docs/design/images/dashboard-usability-actual-review.png": "c934d1ebc06d09db7d10f25d84b8cd407d94474693ab51550f17e7ec211899d2",
+    "docs/design/images/dashboard-usability-concept.png": "bd832277213597ae623de9b3ff08256650ba894946457286ee333d182f89f12e",
+    "docs/design/images/dashboard-usability-actual-mobile.png": "a763003d46083bebfcbd01936591f2387aa50f073506eca6ff23dabe038b634f",
+    "docs/design/images/dashboard-usability-actual-preflight.png": "b44ebfda0f5caa9b57bd624906d92d8a445a686ec90654f74361dd532c7a1a08"
+  },
+  "not_claimed": [
+    "Global filters, parameters, subscriptions, exports or result caching",
+    "Full multi-instance production deployment or production load qualification",
+    "New complete datasource version matrix or commercial GaussDB validation",
+    "Full assistive-technology and cross-browser accessibility evaluation"
+  ]
+}

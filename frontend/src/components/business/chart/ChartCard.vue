@@ -43,6 +43,7 @@ export type ChartKind = 'table' | 'bar' | 'line' | 'pie' | 'metric'
 export interface ChartConfig {
   dimension?: string // 维度列名
   metrics?: string[] // 指标列名
+  display?: { labels?: Record<string, string>; grouping?: boolean; fraction_digits?: number }
   aggregation?: 'sum' | 'count' | 'avg' | 'min' | 'max'
   sort?: 'asc' | 'desc'
   topN?: number

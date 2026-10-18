@@ -48,18 +48,24 @@
             {{ selected.definition.name }} · v{{ selected.number }}
           </h3>
           <p class="text-xs text-white/60 mt-2">
-            提交人 {{ selected.submitter_name }} · 指定审阅人 #{{
-              selected.reviewer_id
-            }}
-            · {{ labels[selected.status] }} · 审批到期
+            提交人 {{ selected.submitter_name }} · 指定审阅人
+            {{ reviewerName || '读取中…' }} · {{ labels[selected.status] }} ·
+            审批到期
             {{ new Date(selected.expires_at).toLocaleString() }}
           </p>
           <p v-if="selected.comment" class="text-sm mt-2">
             审阅意见：{{ selected.comment }}
           </p>
         </div>
+        <DashboardReviewSummary
+          :key="`${selected.id}:${summaryGeneration}`"
+          :review-id="selected.id"
+          @loaded="summaryLoaded"
+        />
         <details class="text-xs text-white/70">
-          <summary class="cursor-pointer">冻结的布局、口径与受众</summary>
+          <summary class="cursor-pointer min-h-11 flex items-center">
+            技术详情（冻结定义）
+          </summary>
           <pre class="whitespace-pre-wrap overflow-auto max-h-72 p-3">{{
             JSON.stringify(selected.definition, null, 2)
           }}</pre>
@@ -123,7 +129,7 @@
               ><input
                 v-model="confirmed"
                 type="checkbox"
-                :disabled="busy"
+                :disabled="busy || !summaryReady"
               />已核对卡片样本、口径、比较组、时效策略和全部受众覆盖</label
             >
             <label class="block text-xs"
@@ -136,7 +142,9 @@
             <div class="flex gap-2">
               <button
                 class="liquid-button"
-                :disabled="busy || !confirmed || !selected.validated_at"
+                :disabled="
+                  busy || !summaryReady || !confirmed || !selected.validated_at
+                "
                 @click="action('decision', { decision: 'approved', comment })"
               >
                 批准此版本</button
@@ -172,16 +180,20 @@
           <button
             class="liquid-button"
             :disabled="
-              busy || selected.lifecycle_epoch !== dashboard.lifecycle_epoch
+              busy ||
+              !summaryReady ||
+              selected.lifecycle_epoch !== dashboard.lifecycle_epoch
             "
             @click="release('publish', selected.id)"
           >
-            显式发布此版本</button
+            发布此版本</button
           ><button
             v-if="selected.was_published"
             class="ghost-button"
             :disabled="
-              busy || selected.lifecycle_epoch !== dashboard.lifecycle_epoch
+              busy ||
+              !summaryReady ||
+              selected.lifecycle_epoch !== dashboard.lifecycle_epoch
             "
             @click="release('rollback', selected.id)"
           >
@@ -219,11 +231,19 @@ import {
 import { reportCommandKeys } from '../report/reportCommands'
 import DashboardViewer from './DashboardViewer.vue'
 import DashboardAudienceDialog from './DashboardAudienceDialog.vue'
+import DashboardReviewSummary from './DashboardReviewSummary.vue'
 const props = defineProps<{ dashboard: ManagedDashboard }>(),
   emit = defineEmits<{ close: []; changed: [] }>(),
   user = useUserStore(),
   keys = reportCommandKeys()
 const audienceOpen = ref(false)
+const summaryReady = ref(false),
+  reviewerName = ref(''),
+  summaryGeneration = ref(0)
+function summaryLoaded(state: { ready: boolean; reviewerName: string }) {
+  summaryReady.value = state.ready
+  reviewerName.value = state.reviewerName
+}
 const dashboard = ref(props.dashboard),
   reviews = ref<DashboardReview[]>([]),
   selectedId = ref<number>(),
@@ -238,7 +258,8 @@ const dashboard = ref(props.dashboard),
   comment = ref(''),
   busy = ref(false),
   error = ref('')
-let alive = true
+let alive = true,
+  loadGeneration = 0
 const labels: Record<string, string> = {
   pending: '待审阅',
   approved: '已批准',
@@ -247,6 +268,7 @@ const labels: Record<string, string> = {
   expired: '已过期',
 }
 watch(selectedId, () => {
+  summaryReady.value = false
   preview.value = false
   refreshId.value = ''
   confirmed.value = false
@@ -266,23 +288,27 @@ onMounted(async () => {
 })
 onScopeDispose(() => {
   alive = false
+  loadGeneration++
 })
 const message = (e: unknown) =>
   e instanceof Error ? e.message : '操作失败，请核对当前状态'
 async function load() {
+  const generation = ++loadGeneration
+  summaryReady.value = false
   try {
     const [d, v] = await Promise.all([
       api.get(props.dashboard.id),
       api.reviews(props.dashboard.id),
     ])
-    if (alive) {
+    if (alive && generation === loadGeneration) {
       dashboard.value = d
       reviews.value = v.items
+      summaryGeneration.value++
       if (!v.items.some((x) => x.id === selectedId.value))
         selectedId.value = v.items[0]?.id
     }
   } catch (e) {
-    if (alive) error.value = message(e)
+    if (alive && generation === loadGeneration) error.value = message(e)
   }
 }
 async function action(action: string, payload: Record<string, unknown>) {

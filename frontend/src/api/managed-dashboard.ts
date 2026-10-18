@@ -29,6 +29,10 @@ export interface DashboardDefinition {
   quality: DashboardQuality
 }
 export interface ManagedDashboard {
+  review_status: string
+  review_id: number
+  reviewer_id: number
+  review_was_published: boolean
   id: number
   active_release_id: number | null
   owner_id: number
@@ -120,8 +124,61 @@ export interface AccessRequest {
   actual_publication_no: number | null
   expires_at: string
 }
+export interface DashboardSubject {
+  id: number
+  name: string
+}
+export interface DashboardIssue {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+  tile_key?: string
+  report_name?: string
+  action?: string
+  users?: DashboardSubject[]
+  groups?: DashboardSubject[]
+}
+export interface DashboardPreflight {
+  dashboard_id: number
+  draft_version: number
+  checked_at: string
+  can_submit: boolean
+  issues: DashboardIssue[]
+  eligible_reviewers: DashboardSubject[]
+}
+export interface DashboardReviewSummary {
+  review_id: number
+  version: number
+  reviewer_name: string
+  baseline_kind: 'initial' | 'current_release' | 'previous_version'
+  baseline_version: number
+  baseline_publication_no: number
+  changes: { area: string; subject: string; before: string; after: string }[]
+  cards: {
+    key: string
+    name: string
+    required: boolean
+    width: DashboardTile['width']
+    comparison_group: string
+    contract_status: 'compatible' | 'changed' | 'restricted'
+    contract?: DataContract
+  }[]
+  users: DashboardSubject[]
+  groups: DashboardSubject[]
+}
 const options = { silentError: true }
 export const managedDashboardApi = {
+  preflight: (id: number, version: number, signal?: AbortSignal) =>
+    request.post<unknown, DashboardPreflight>(
+      `/managed-dashboards/${id}/preflight`,
+      { version },
+      { ...options, signal },
+    ),
+  reviewSummary: (id: number, signal?: AbortSignal) =>
+    request.get<unknown, DashboardReviewSummary>(
+      `/dashboard-reviews/${id}/summary`,
+      { ...options, signal },
+    ),
   list: (params: Record<string, unknown> = {}) =>
     request.get<unknown, { items: ManagedDashboard[]; total: number }>(
       '/managed-dashboards',

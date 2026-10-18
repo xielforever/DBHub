@@ -15,6 +15,43 @@ type ManagedDashboardHandler struct {
 func NewManagedDashboardHandler(repo *db.ManagedDashboardRepository) *ManagedDashboardHandler {
 	return &ManagedDashboardHandler{repo}
 }
+func (h *ManagedDashboardHandler) Preflight(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version int64 `json:"version"`
+	}
+	if e := httpx.DecodeJSON(w, r, &in); e != nil {
+		httpx.Fail(w, e)
+		return
+	}
+	if in.Version < 1 {
+		httpx.Fail(w, httpx.BadRequest("草稿版本无效"))
+		return
+	}
+	out, e := h.repo.Preflight(r.Context(), id, in.Version)
+	if e != nil {
+		ManagedError(w, e)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.OK(w, out)
+}
+func (h *ManagedDashboardHandler) ReviewSummary(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	out, e := h.repo.ReviewSummary(r.Context(), id)
+	if e != nil {
+		ManagedError(w, e)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.OK(w, out)
+}
 func (h *ManagedDashboardHandler) List(w http.ResponseWriter, r *http.Request) {
 	page, size, ok := managedPage(w, r)
 	if !ok {

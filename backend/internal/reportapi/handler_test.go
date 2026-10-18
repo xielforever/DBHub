@@ -26,6 +26,18 @@ func TestReportFieldsRejectAmbiguousOrUnboundedConfiguration(t *testing.T) {
 			r.ChartConfig = json.RawMessage(`{"dimension":"category","metrics":["amount","amount"]}`)
 		},
 		"no-dimension": func(r *db.Report) { r.ChartConfig = json.RawMessage(`{"metrics":["amount"]}`) },
+		"display-unknown-field": func(r *db.Report) {
+			r.ChartConfig = json.RawMessage(`{"dimension":"category","metrics":["amount"],"display":{"sql":"SELECT 2"}}`)
+		},
+		"display-bad-places": func(r *db.Report) {
+			r.ChartConfig = json.RawMessage(`{"dimension":"category","metrics":["amount"],"display":{"fraction_digits":99}}`)
+		},
+		"display-empty-label": func(r *db.Report) {
+			r.ChartConfig = json.RawMessage(`{"dimension":"category","metrics":["amount"],"display":{"labels":{"amount":" "}}}`)
+		},
+		"display-duplicate-label": func(r *db.Report) {
+			r.ChartConfig = json.RawMessage(`{"dimension":"category","metrics":["amount"],"display":{"labels":{"amount":"库存","category":"库存"}}}`)
+		},
 		"metric-multiple-columns": func(r *db.Report) {
 			r.ChartType = "metric"
 			r.ChartConfig = json.RawMessage(`{"metrics":["amount","total"]}`)
@@ -41,6 +53,11 @@ func TestReportFieldsRejectAmbiguousOrUnboundedConfiguration(t *testing.T) {
 		})
 	}
 	if err := validateFields(base()); err != nil {
+		t.Fatal(err)
+	}
+	valid := base()
+	valid.ChartConfig = json.RawMessage(`{"dimension":"category","metrics":["amount"],"display":{"labels":{"amount":"库存金额"},"grouping":true,"fraction_digits":2}}`)
+	if err := validateFields(valid); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -64,11 +64,11 @@ import {
   type ManagedDashboard,
 } from '../../api/managed-dashboard'
 import { reportCommandKeys } from '../report/reportCommands'
-const props = defineProps<{ dashboard: ManagedDashboard; tile: string }>(),
+const props = defineProps<{ dashboard: ManagedDashboard; tile: string; userIds?: number[]; groupIds?: number[] }>(),
   emit = defineEmits<{ close: []; submitted: [] }>(),
   keys = reportCommandKeys()
-const users = ref([...props.dashboard.draft.user_ids]),
-  groups = ref([...props.dashboard.draft.group_ids]),
+const users = ref([...(props.userIds ?? props.dashboard.draft.user_ids)]),
+  groups = ref([...(props.groupIds ?? props.dashboard.draft.group_ids)]),
   reason = ref(''),
   busy = ref(false),
   error = ref('')

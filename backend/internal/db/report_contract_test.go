@@ -81,3 +81,20 @@ func TestContractChartMappingCannotDriftWithSameHash(t *testing.T) {
 		t.Fatal("chart changed displayed metric without changing contract")
 	}
 }
+
+func TestPresentationKeepsContractBoundary(t *testing.T) {
+	c := sampleContract()
+	before := approvedContract(c, 1, 10, 20, "inventory").Hash
+	if e := ValidateContractMapping(c, json.RawMessage(`{"metrics":["amount"],"display":{"labels":{"amount":"库存金额"},"fraction_digits":2}}`)); e != nil {
+		t.Fatal(e)
+	}
+	if approvedContract(c, 1, 10, 20, "inventory").Hash != before {
+		t.Fatal("presentation changed the approved data contract")
+	}
+	if e := ValidateContractMapping(c, json.RawMessage(`{"metrics":["amount"],"display":{"labels":{"other":"虚构字段"}}}`)); e == nil {
+		t.Fatal("presentation referenced a field outside the approved schema")
+	}
+	if e := ValidateContractMapping(c, json.RawMessage(`{"metrics":["amount"],"display":{"labels":{"amount":"watermark"}}}`)); e == nil {
+		t.Fatal("display name collided with an original field")
+	}
+}
