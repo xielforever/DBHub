@@ -1,13 +1,18 @@
 {
-  "checked_at": "2026-10-18T14:51:38.680015+08:00",
-  "status": "sustained_load_in_progress",
+  "checked_at": "2026-10-18T15:15:47.548989+08:00",
+  "status": "passed",
   "base_commit": "227ca737d17262fe571912077cd1f70b9b167506",
   "scope": "Production dependency security, readiness, identity-service outages, session preservation, login budgets, security headers, metadata/audit restore and release checks",
   "source_sha256": {
     "method": "SHA-256 of sorted relative path, NUL, content, NUL",
     "backend_go_and_migrations": "ab00636e67700f9c940766b794f3422cb320f2126bc1a11389ecbcd033e8405f",
     "frontend_src_and_tests": "ed7e7fd47c67b4b3cd7e1e3c5e8f6a5d6fc5f4c7b811bd9487b24e94957a1ea1",
-    "frontend_lockfile": "030259ecfe425013e68e3ab53cb62c75c5f9dbb86668a07f255ce7059edf0a12"
+    "frontend_lockfile": "030259ecfe425013e68e3ab53cb62c75c5f9dbb86668a07f255ce7059edf0a12",
+    "scope": {
+      "backend_go_and_migrations": "All backend/**/*.go and backend/**/*.sql files, excluding vendor",
+      "frontend_src_and_tests": "All files under frontend/src and frontend/tests",
+      "frontend_lockfile": "SHA-256 of frontend/package-lock.json content"
+    }
   },
   "checks": {
     "backend_full_suite": {
@@ -53,9 +58,27 @@
       "canonical_timezone": "UTC",
       "snapshot": "repeatable-read read-only"
     },
-    "workflow_syntax": "passed",
+    "workflow_syntax": {
+      "result": "passed",
+      "validator": "actionlint v1.7.7",
+      "workflows": [
+        "production-readiness.yml",
+        "datasource-compatibility.yml"
+      ]
+    },
     "shell_syntax": "passed",
-    "git_diff_check": "passed"
+    "git_diff_check": "passed",
+    "source_fingerprints_unchanged": "passed",
+    "targeted_document_links": {
+      "result": "passed",
+      "documents": [
+        "docs/开发指南/生产可靠性修复与验收.md",
+        "docs/部署运维/部署运维指南.md",
+        "scripts/cloud/README.md",
+        "docs/开发指南/第一阶段生产构建验收.md"
+      ],
+      "local_links": 30
+    }
   },
   "production_images": {
     "backend": "sha256:05709f92a445c477edc6e579de4ecb4427a6f1efd96ec5585dfb8e9f9d58e4ab",
@@ -91,7 +114,8 @@
       "refresh_503": "explicit browser transport mock"
     },
     "temporary_resources_removed": true,
-    "private_report": "/workspace/dbhub-cloud/production-acceptance/fdf80d5e61/checks.json"
+    "private_report": "/workspace/dbhub-cloud/production-acceptance/e1db62ab97/checks.json",
+    "additional_short_run": "passed; separate full fault/restore/browser run without sustained load"
   },
   "dashboard_browser": {
     "result": "passed",
@@ -117,16 +141,376 @@
     "private_report": "/workspace/dbhub-cloud/dashboard-artifacts/bdb4bc1c4b/checks.json"
   },
   "load": {
-    "result": "running",
+    "result": "passed",
     "command": "python3 scripts/cloud/production_acceptance.py --duration 1800 --clients 4",
-    "kind": "synthetic owned three-warehouse data, no actual production capacity certification"
+    "executed": true,
+    "requested_seconds": 1800,
+    "elapsed_seconds": 1800.04,
+    "clients": 4,
+    "cycles": {
+      "report": 3620,
+      "dashboard": 3634,
+      "workbench": 3625
+    },
+    "expected_sql_executions": 18147,
+    "actual_execution_receipts": 18147,
+    "errors": [],
+    "cycle_p95_ms": 476.35,
+    "cycle_mean_ms": 161.71,
+    "samples": [
+      {
+        "elapsed_seconds": 0.18,
+        "rss_bytes": 30806016,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 30.3,
+        "rss_bytes": 37662720,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 60.45,
+        "rss_bytes": 37244928,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 90.6,
+        "rss_bytes": 37855232,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 120.77,
+        "rss_bytes": 39227392,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 150.92,
+        "rss_bytes": 39022592,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 181.04,
+        "rss_bytes": 39129088,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 211.16,
+        "rss_bytes": 38309888,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 241.34,
+        "rss_bytes": 39239680,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 271.46,
+        "rss_bytes": 38973440,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 301.64,
+        "rss_bytes": 40554496,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 331.78,
+        "rss_bytes": 39964672,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 361.96,
+        "rss_bytes": 39854080,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 392.11,
+        "rss_bytes": 39645184,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 422.22,
+        "rss_bytes": 39305216,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 452.36,
+        "rss_bytes": 39084032,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 482.48,
+        "rss_bytes": 39460864,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 512.61,
+        "rss_bytes": 38952960,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 542.77,
+        "rss_bytes": 39030784,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 572.94,
+        "rss_bytes": 39178240,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 603.07,
+        "rss_bytes": 40198144,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 633.21,
+        "rss_bytes": 39796736,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 663.36,
+        "rss_bytes": 40837120,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 693.49,
+        "rss_bytes": 39305216,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 723.64,
+        "rss_bytes": 39333888,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 753.85,
+        "rss_bytes": 39247872,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 783.99,
+        "rss_bytes": 39366656,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 814.12,
+        "rss_bytes": 39268352,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 844.26,
+        "rss_bytes": 39153664,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 874.38,
+        "rss_bytes": 39260160,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 904.51,
+        "rss_bytes": 39718912,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 934.64,
+        "rss_bytes": 39387136,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 964.78,
+        "rss_bytes": 40165376,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 994.94,
+        "rss_bytes": 39137280,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1025.1,
+        "rss_bytes": 39514112,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1055.24,
+        "rss_bytes": 39321600,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1085.37,
+        "rss_bytes": 39878656,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1115.56,
+        "rss_bytes": 39862272,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1145.75,
+        "rss_bytes": 39546880,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 1175.95,
+        "rss_bytes": 39567360,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 1206.14,
+        "rss_bytes": 39759872,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1236.3,
+        "rss_bytes": 40222720,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 1266.44,
+        "rss_bytes": 40194048,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1296.59,
+        "rss_bytes": 39477248,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1326.74,
+        "rss_bytes": 40132608,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1356.87,
+        "rss_bytes": 40415232,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1387.02,
+        "rss_bytes": 39559168,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1417.25,
+        "rss_bytes": 39432192,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1447.41,
+        "rss_bytes": 39387136,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 1477.58,
+        "rss_bytes": 39419904,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1507.76,
+        "rss_bytes": 39804928,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1537.88,
+        "rss_bytes": 39522304,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1568.05,
+        "rss_bytes": 40370176,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1598.17,
+        "rss_bytes": 39821312,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1628.31,
+        "rss_bytes": 39690240,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1658.47,
+        "rss_bytes": 39612416,
+        "active_metadata_connections": 3
+      },
+      {
+        "elapsed_seconds": 1688.61,
+        "rss_bytes": 39723008,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1718.74,
+        "rss_bytes": 40194048,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1748.87,
+        "rss_bytes": 39477248,
+        "active_metadata_connections": 1
+      },
+      {
+        "elapsed_seconds": 1779.01,
+        "rss_bytes": 39833600,
+        "active_metadata_connections": 2
+      },
+      {
+        "elapsed_seconds": 1800.16,
+        "rss_bytes": 39706624,
+        "active_metadata_connections": 1
+      }
+    ],
+    "backend_limit": "2 CPU, 512 MiB",
+    "data_kind": "Synthetic three-warehouse view; no production SQL or capacity certification",
+    "total_cycles": 10879,
+    "query_leases_empty": true,
+    "test_identities": 2,
+    "dashboard_tile_execution": "Three sequential tile executions per dashboard cycle; independent browser checks cover two concurrent tiles",
+    "worker_pause_seconds": 0.5,
+    "successful_access_token_refreshes": {
+      "successful_refreshes": 4,
+      "requests": [
+        {
+          "time": "2026-10-18T06:59:06.759024982Z",
+          "status": 200
+        },
+        {
+          "time": "2026-10-18T06:59:06.917791954Z",
+          "status": 200
+        },
+        {
+          "time": "2026-10-18T07:13:36.7834597Z",
+          "status": 200
+        },
+        {
+          "time": "2026-10-18T07:13:38.110072423Z",
+          "status": 200
+        }
+      ]
+    },
+    "resource_summary": {
+      "rss_first_bytes": 30806016,
+      "rss_last_bytes": 39706624,
+      "rss_peak_bytes": 40837120,
+      "samples": 61,
+      "active_metadata_connections_peak": 3,
+      "active_connection_sample_includes_observer": true
+    },
+    "temporary_resources_removed": true,
+    "private_report": "/workspace/dbhub-cloud/production-acceptance/e1db62ab97/checks.json"
   },
   "cloud": {
     "result": "passed",
     "readiness": 200,
     "login": 200,
     "workspace_dashboard_endpoints": 4,
-    "frontend": 200
+    "frontend": 200,
+    "running_development_services": 6,
+    "temporary_acceptance_containers_networks_volumes_remaining": 0
   },
   "new_migrations": 0,
   "latest_migration": "0035_dashboard_review_assignment_epoch.sql",
@@ -135,11 +519,24 @@
     "Actual production domain, HTTPS termination, metadata/Redis protection and trusted proxy CIDRs",
     "Production-scale migration and workload capacity with real business SQL",
     "Production backup retention/RPO/RTO and selected secure rollback image",
-    "Branch protection and actual remote CI execution; workflow is added and local commands validated"
+    "Branch protection and passing checks for the selected deployment commit; tested code passed the linked GitHub Actions run"
   ],
   "not_claimed": [
     "Deployment to actual production",
     "A new full Go/JDBC/OS-image vulnerability scan",
     "Full multi-instance deployment/failover qualification"
-  ]
+  ],
+  "tested_code_commit": "fbdc210277befa9d249e9496a7c370b447e7836d",
+  "remote_ci": {
+    "checked_at": "2026-10-18T15:08:59.262192+08:00",
+    "url": "https://github.com/xielforever/DBHub/actions/runs/39105786358",
+    "pull_request_head": "fbdc210277befa9d249e9496a7c370b447e7836d",
+    "merge_commit": "bbe51a7fa23dda5c813662486b4f37743ea40668",
+    "status": "Success",
+    "duration": "12m 49s",
+    "job_duration": "11m 42s",
+    "artifact": "production-readiness-bbe51a7fa23dda5c813662486b4f37743ea40668",
+    "artifact_sha256": "05c6fe77479b93e9d751c71aafa2f12ce1da54c09f175a30faaa1f43fd0bc918",
+    "source": "Public GitHub Actions run page"
+  }
 }
