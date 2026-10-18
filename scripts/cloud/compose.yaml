@@ -1,4 +1,25 @@
 services:
+  metadata-backup:
+    profiles: ["operations"]
+    image: ${DBHUB_CLOUD_BACKUP_IMAGE:-dbhub-backup:cloud}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    cpus: 0.25
+    environment:
+      PGSERVICE: dbhub
+      PGSERVICEFILE: /run/dbhub-backup/pg_service.conf
+      PGPASSFILE: /run/dbhub-backup/pgpass
+      DBHUB_BACKUP_INTERVAL_SECONDS: "86400"
+      DBHUB_BACKUP_RETENTION_DAYS: "14"
+    volumes:
+      - metadata-backups:/var/lib/dbhub/backups
+      - backup-config:/run/dbhub-backup:ro
+    depends_on:
+      postgres: {condition: service_healthy}
   jdbc:
     image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
     command: ["sh", "/app/scripts/cloud/jdbc-runtime.sh"]
@@ -64,6 +85,10 @@ services:
       PORT: "8080"
       DBHUB_AUDIT_DIR: /runtime/audit
       DBHUB_AUDIT_MAX_PENDING: ${DBHUB_AUDIT_MAX_PENDING:-10000}
+      DBHUB_BACKUP_EXPECTED_HOURS: ${DBHUB_BACKUP_EXPECTED_HOURS:-0}
+      DBHUB_AUDIT_RETENTION_DAYS: ${DBHUB_AUDIT_RETENTION_DAYS:-0}
+      DBHUB_HISTORY_RETENTION_DAYS: ${DBHUB_HISTORY_RETENTION_DAYS:-0}
+      DBHUB_READ_NOTIFICATION_RETENTION_DAYS: ${DBHUB_READ_NOTIFICATION_RETENTION_DAYS:-90}
       CGO_ENABLED: "1"
       GOTOOLCHAIN: local
       GOFLAGS: -mod=vendor
@@ -122,6 +147,8 @@ services:
       - ${DBHUB_STATE_DIR}:/runtime
       - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
 volumes:
+  metadata-backups:
+  backup-config:
   postgres-data:
   mysql-data:
   redis-data:

@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/pkg/crypto"
+	"io/fs"
 	"os"
 	"testing"
 	"time"
@@ -146,7 +147,11 @@ func TestConcurrentMigrationWithSingleConnectionPools(t *testing.T) {
 		}
 	}
 	var records int
-	if e = pools[0].QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&records); e != nil || records != 35 {
+	migrations, e := fs.Glob(migrationFS, "migrations/*.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = pools[0].QueryRow(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&records); e != nil || records != len(migrations) {
 		t.Fatal("migrations were skipped or applied twice", records, e)
 	}
 }

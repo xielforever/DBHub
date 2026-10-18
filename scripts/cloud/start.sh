@@ -2,6 +2,7 @@
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 scripts/cloud/dev.sh up -d --wait --wait-timeout 240 jdbc
+export DBHUB_BACKUP_EXPECTED_HOURS=${DBHUB_BACKUP_EXPECTED_HOURS:-24}
 scripts/cloud/dev.sh up -d backend frontend
 python3 - <<'PY'
 import time,urllib.request
@@ -14,3 +15,4 @@ for _ in range(60):
  except Exception: time.sleep(1)
 else: raise SystemExit('DBHub startup timed out; inspect scripts/cloud/dev.sh logs backend frontend')
 PY
+scripts/cloud/backup.sh

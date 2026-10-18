@@ -11,6 +11,7 @@ import (
 	"github.com/user/dbhub/internal/assetapi"
 	"github.com/user/dbhub/internal/auditlog"
 	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/automation"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/datasource"
@@ -140,6 +141,22 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			middleware.Chain(http.HandlerFunc(auditH.AuditLogs), requireAuth, requireAdmin))
 
 		mux.Handle("GET /api/v1/audit-logs/delivery", middleware.Chain(http.HandlerFunc(auditH.Delivery), requireAuth, requireAdmin, platformOnly))
+
+		if deps.UserRepo != nil {
+			autoH := &automation.Handler{Repo: db.NewAutomationRepository(deps.UserRepo), Conns: deps.Conns, Drivers: drivers, Journal: deps.AuditJournal, Config: cfg.Operations}
+			mux.Handle("GET /api/v1/inbox", middleware.Chain(http.HandlerFunc(autoH.Inbox), requireAuth))
+			mux.Handle("GET /api/v1/inbox/todos", middleware.Chain(http.HandlerFunc(autoH.Todos), requireAuth))
+			mux.Handle("POST /api/v1/inbox/read", middleware.Chain(http.HandlerFunc(autoH.Read), requireAuth))
+			mux.Handle("GET /api/v1/source-tasks", middleware.Chain(http.HandlerFunc(autoH.Tasks), requireAuth))
+			mux.Handle("POST /api/v1/source-tasks", middleware.Chain(http.HandlerFunc(autoH.CreateTask), requireAuth))
+			mux.Handle("GET /api/v1/source-tasks/{id}", middleware.Chain(http.HandlerFunc(autoH.Task), requireAuth))
+			mux.Handle("POST /api/v1/source-tasks/{id}/cancel", middleware.Chain(http.HandlerFunc(autoH.CancelTask), requireAuth))
+			mux.Handle("POST /api/v1/source-tasks/{id}/retry", middleware.Chain(http.HandlerFunc(autoH.RetryTask), requireAuth))
+			mux.Handle("GET /api/v1/source-schedules", middleware.Chain(http.HandlerFunc(autoH.Schedules), requireAuth))
+			mux.Handle("PUT /api/v1/source-schedules", middleware.Chain(http.HandlerFunc(autoH.SaveSchedule), requireAuth))
+			mux.Handle("GET /api/v1/source-check-history", middleware.Chain(http.HandlerFunc(autoH.CheckHistory), requireAuth))
+			mux.Handle("GET /api/v1/platform/operations", middleware.Chain(http.HandlerFunc(autoH.Operations), identityAuth, platformOnly))
+		}
 
 		// ---------- 数据源 ----------
 		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log, deps.Proxies, drivers)

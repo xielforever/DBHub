@@ -110,7 +110,7 @@
         </button>
 
         <!-- 当前页面标题 -->
-        <h1 class="text-sm sm:text-base font-medium whitespace-nowrap">{{ currentTitle }}</h1>
+        <h1 class="hidden sm:block text-sm sm:text-base font-medium whitespace-nowrap">{{ currentTitle }}</h1>
 
         <!-- 全局搜索（中等屏幕以上；移动端通过搜索图标进入资产目录） -->
         <div class="flex-1 max-w-md mx-auto hidden md:block">
@@ -126,7 +126,7 @@
           <Search class="w-4.5 h-4.5" />
         </button>
 
-        <!-- 通知中心上线前隐藏铃铛，避免无响应假入口 -->
+        <InboxButton v-if="userStore.workspaceId" :key="userStore.workspaceId" />
         <el-select :model-value="userStore.workspaceId||undefined" aria-label="当前工作空间" placeholder="选择工作空间" class="max-w-[130px] sm:max-w-[190px] !min-w-0" @change="switchWorkspace"><el-option v-for="space in userStore.workspaces" :key="space.id" :value="space.id" :label="space.name" /></el-select>
         <el-dropdown trigger="click" @command="onUserCommand">
           <button class="flex items-center gap-2.5 pl-1 pr-2 sm:pr-3 py-1.5 rounded-xl hover:bg-white/10 transition-colors">
@@ -192,6 +192,7 @@ import {
 import { useUserStore } from '../stores/user'
 import type { HealthInfo } from '../types/api'
 import GlobalSearch from '../components/GlobalSearch.vue'
+import InboxButton from '../components/InboxButton.vue'
 
 const route = useRoute()
 const router = useRouter()

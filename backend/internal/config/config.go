@@ -48,6 +48,14 @@ type Config struct {
 	LoginIPMaxAttempts        int
 	LoginWindow               time.Duration
 	TrustedProxyCIDRs         []netip.Prefix
+	Operations                OperationsConfig
+}
+
+type OperationsConfig struct {
+	AuditRetentionDays            int `json:"audit_retention_days"`
+	HistoryRetentionDays          int `json:"history_retention_days"`
+	ReadNotificationRetentionDays int `json:"read_notification_retention_days"`
+	BackupExpectedHours           int `json:"backup_expected_hours"`
 }
 
 // AdminConfig 引导管理员账号配置。
@@ -83,6 +91,22 @@ func Load() (*Config, error) {
 	}
 	if cfg.AuditMaxPending < 1 || cfg.AuditMaxPending > 100000 {
 		return nil, errors.New("DBHUB_AUDIT_MAX_PENDING 必须在 1–100000 之间")
+	}
+	for _, field := range []struct {
+		name               string
+		fallback, min, max int
+		value              *int
+	}{
+		{"DBHUB_AUDIT_RETENTION_DAYS", 0, 30, 3650, &cfg.Operations.AuditRetentionDays},
+		{"DBHUB_HISTORY_RETENTION_DAYS", 0, 7, 3650, &cfg.Operations.HistoryRetentionDays},
+		{"DBHUB_READ_NOTIFICATION_RETENTION_DAYS", 90, 7, 3650, &cfg.Operations.ReadNotificationRetentionDays},
+		{"DBHUB_BACKUP_EXPECTED_HOURS", 0, 1, 168, &cfg.Operations.BackupExpectedHours},
+	} {
+		v, e := strconv.Atoi(getenv(field.name, strconv.Itoa(field.fallback)))
+		if e != nil || v < 0 || v > field.max || (v > 0 && v < field.min) {
+			return nil, fmt.Errorf("%s 必须为 0（关闭）或 %d–%d", field.name, field.min, field.max)
+		}
+		*field.value = v
 	}
 	if cfg.IsProduction() && !filepath.IsAbs(os.Getenv("DBHUB_AUDIT_DIR")) {
 		return nil, errors.New("生产环境必须配置绝对路径 DBHUB_AUDIT_DIR，并挂载持久化存储")

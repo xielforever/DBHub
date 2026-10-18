@@ -20,4 +20,8 @@ UNION ALL SELECT 'dashboard_reviews', count(*), md5(coalesce(string_agg(md5(to_j
 UNION ALL SELECT 'dashboard_releases', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_dashboard_releases t
 UNION ALL SELECT 'access_requests', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_access_requests t
 UNION ALL SELECT 'receipts', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_query_executions t
+UNION ALL SELECT 'notifications', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_notifications t
+UNION ALL SELECT 'source_tasks', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_source_tasks t
+UNION ALL SELECT 'source_schedules', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_source_schedules t
+UNION ALL SELECT 'source_check_history', count(*), md5(coalesce(string_agg(md5(to_jsonb(t)::text), E'\n' ORDER BY md5(to_jsonb(t)::text)), '')) FROM sys_source_check_history t
 ORDER BY 1;

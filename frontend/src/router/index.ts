@@ -32,6 +32,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('../layouts/MainLayout.vue'),
     redirect: '/dashboard',
     children: [
+      {path:'inbox',name:'inbox',component:()=>import('../views/inbox/InboxView.vue'),meta:{title:pageTitles.inbox}},
+      {path:'source-tasks',name:'source-tasks',component:()=>import('../views/connection/SourceTasksView.vue'),meta:{title:pageTitles.sourceTasks}},
       {
         path: 'dashboard',
         name: 'dashboard',

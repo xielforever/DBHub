@@ -28,16 +28,18 @@
   </section>
 </template>
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onScopeDispose, ref, watch } from 'vue'
 import { managedReportApi, type PublishedReport, type ReportPage } from '../../api/managed-report'
 import type { ExecResult } from '../../api/workbench'
 import { useReportRun } from './useReportRun'
 import ReportResult from './ReportResult.vue'
 const list=useReportRun<ReportPage<PublishedReport>>(),detail=useReportRun<{report:PublishedReport;result:ExecResult}>()
+const props=defineProps<{focusReportId?:number}>();let alive=true
 const keyword=ref(''),page=ref(1),detailOpen=ref(false),current=ref<PublishedReport>()
 async function load(next=1){page.value=next;await list.run(`${next}:${keyword.value}`,signal=>managedReportApi.published({q:keyword.value,page:next,page_size:12},signal))}
 function open(report:PublishedReport){current.value=report;detailOpen.value=true;void run()}
 async function run(){const id=current.value?.id;if(!id)return;const success=await detail.run(String(id),async signal=>{const report=await managedReportApi.publishedGet(id,signal);const result=await managedReportApi.execute(id,report.publication_no,signal);return {report,result}});if(success&&detail.state.value.status==='success')current.value=detail.state.value.data.report}
 watch(detailOpen,open=>{if(!open)detail.reset()},{flush:'sync'})
-onMounted(()=>void load())
+onMounted(async()=>{await load();if(props.focusReportId&&alive){detailOpen.value=true;await detail.run(String(props.focusReportId),async signal=>{const report=await managedReportApi.publishedGet(props.focusReportId!,signal);const result=await managedReportApi.execute(report.id,report.publication_no,signal);return {report,result}});if(alive&&detail.state.value.status==='success')current.value=detail.state.value.data.report}})
+onScopeDispose(()=>{alive=false})
 </script>

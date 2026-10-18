@@ -5,9 +5,9 @@
         <h1 class="text-xl font-semibold">数据源</h1>
         <p class="text-sm text-white/45 mt-1">从目录添加数据源，使用自己的数据库账号连接；也可以创建个人数据源。</p>
       </div>
-      <button class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
+      <div class="flex flex-wrap items-center gap-2"><RouterLink to="/source-tasks" class="ghost-button text-sm min-h-11 inline-flex items-center">巡检与采集任务</RouterLink><button class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
         <Plus class="w-4 h-4" />新建个人数据源
-      </button>
+      </button></div>
     </header>
 
     <div class="flex flex-wrap gap-2" role="tablist" aria-label="数据源范围">

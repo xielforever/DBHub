@@ -20,6 +20,7 @@ jobs:
     env:
       DBHUB_DASHBOARD_BACKEND_IMAGE: dbhub-backend:release-check
       DBHUB_DASHBOARD_FRONTEND_IMAGE: dbhub-frontend:release-check
+      DBHUB_BACKUP_IMAGE: dbhub-backup:release-check
       DBHUB_DASHBOARD_USE_IMAGE: "1"
       DBHUB_CHROMIUM_PATH: ""
     steps:
@@ -39,11 +40,12 @@ jobs:
       - name: 后端全量、竞态与静态检查
         run: ./scripts/cloud/dev.sh run --rm --no-deps backend sh -ec 'go test -race -p=4 ./... -count=1; go vet ./...'
       - name: 锁文件安装、依赖审计、前端回归与构建
-        run: ./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm ci --no-audit --no-fund; npm audit --audit-level=low; npm run test:query; npm run test:report; npm run test:dashboard; npm run build'
+        run: ./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm ci --no-audit --no-fund; npm audit --audit-level=low; npm run test:query; npm run test:report; npm run test:dashboard; npm run test:automation; npm run build'
       - name: 构建实际生产镜像
         run: |
           docker build -t "$DBHUB_DASHBOARD_BACKEND_IMAGE" -f backend/Dockerfile backend
           docker build -t "$DBHUB_DASHBOARD_FRONTEND_IMAGE" -f frontend/Dockerfile frontend
+          docker build -t "$DBHUB_BACKUP_IMAGE" -f scripts/ops/Dockerfile scripts/ops
       - name: 安装隔离浏览器
         run: |
           python -m pip install playwright==1.62.0
@@ -52,6 +54,8 @@ jobs:
         run: python scripts/cloud/dashboard_acceptance.py
       - name: 故障恢复、限流与完整备份恢复
         run: python scripts/cloud/production_acceptance.py --duration 0
+      - name: 通知、数据源后台任务与自动备份
+        run: python scripts/cloud/automation_acceptance.py
       - name: 保存无敏感内容的验收结论
         if: always()
         uses: actions/upload-artifact@v4

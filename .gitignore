@@ -43,3 +43,5 @@ logs/
 # ---------- Docker 数据卷（本地持久化）----------
 .docker-volumes/
 .dbhub/
+# Python acceptance-run caches
+__pycache__/

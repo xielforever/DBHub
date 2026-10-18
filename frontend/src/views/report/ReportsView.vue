@@ -47,14 +47,15 @@
       </div>
     </el-dialog>
     </template>
-    <PublishedReportsPanel v-else-if="view==='published'" />
-    <ManagedReportsPanel v-else-if="view==='managed' && canWrite" />
+    <PublishedReportsPanel v-else-if="view==='published'" :focus-report-id="Number(route.query.report)||undefined" />
+    <ManagedReportsPanel v-else-if="view==='managed' && canWrite" :focus-report-id="Number(route.query.report)||undefined" />
     <ReportAccountsPanel v-else-if="view==='accounts' && user.role==='admin'" />
   </div>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, reactive, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import {useRoute} from 'vue-router'
 import { reportApi, type ReportItem } from '../../api/report'
 import type { ExecResult } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
@@ -64,7 +65,8 @@ import ManagedReportsPanel from './ManagedReportsPanel.vue'
 import ReportAccountsPanel from './ReportAccountsPanel.vue'
 import ReportResult from './ReportResult.vue'
 import { useReportRun } from './useReportRun'
-const view = ref<'personal'|'published'|'managed'|'accounts'>('personal')
+const route=useRoute()
+const view = ref<'personal'|'published'|'managed'|'accounts'>(['published','managed','accounts'].includes(String(route.query.view))?route.query.view as 'published'|'managed'|'accounts':'personal')
 const user = useUserStore(), canWrite = computed(() => ['admin','developer'].includes(user.role))
 const chartLabels = { table:'表格',bar:'柱状图',line:'折线图',pie:'饼图',metric:'指标卡' }
 const items = ref<ReportItem[]>([]), total = ref(0), page = ref(1), loading = ref(false), listError = ref(''), keyword = ref(''), scope = ref<'all'|'mine'|'shared'|'starred'>('all')

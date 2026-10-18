@@ -6,6 +6,7 @@
     </header>
 
     <WorkspaceSettings v-if="userStore.role==='admin'" />
+    <OperationsSettings v-if="userStore.platformAdmin" />
     <ConnectorSettings />
 <GroupSettings v-if="userStore.role === 'admin'" />
 
@@ -80,6 +81,7 @@
 
 <script setup lang="ts">
 import WorkspaceSettings from './WorkspaceSettings.vue'
+import OperationsSettings from './OperationsSettings.vue'
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { KeyRound } from 'lucide-vue-next'

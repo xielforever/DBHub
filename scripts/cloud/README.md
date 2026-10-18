@@ -1,5 +1,7 @@
 # Cloud 开发环境
 
+当前启动步骤同时启用每日元数据备份，维护私有 libpq 配置卷和备份卷。通知、后台任务及部署参数见[实施与验收](../../docs/开发指南/运维通知与数据源任务验收.md)。审计与查询历史自动清理默认关闭。
+
 使用 `./scripts/cloud/setup.sh` 安装并测试，使用 `./scripts/cloud/start.sh` 启动真实后端和前端。需要宿主 Docker、Compose、Python 3；应用依赖安装、构建、测试均在容器中进行。PostgreSQL、MySQL、Redis、JDBC 的端口仅在容器网络开放，前后端开发端口只绑定宿主回环地址。
 
 脚本继承会话 HTTP/HTTPS 代理，将平台 CA 只读挂载进容器，并动态解析代理主机；不关闭证书或模块校验。Node、Go 基础镜像固定摘要，PG AST 解析需要带 GCC 的 Go 镜像及 CGO。Go 编译缓存和临时文件放在 `${DBHUB_BUILD_ROOT:-/tmp/dbhub-cloud-build}`，避免占满 Cloud 持久层。代码依赖使用已提交 vendor，可离线编译；依赖变更后在容器中运行 `backend/scripts/vendor.sh`，脚本会补回 Go vendor 默认遗漏的 libpg_query C 头文件。

@@ -9,4 +9,4 @@ scripts/cloud/dev.sh pull
 scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
 scripts/cloud/dev.sh run --rm --no-deps frontend npm ci --no-audit --no-fund
 scripts/cloud/dev.sh run --rm --no-deps backend sh -ec 'go test -p=4 ./...; go build -p=4 -o /runtime/dbhub-backend ./cmd/server'
-scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm run test:query; npm run build'
+scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm run test:query; npm run test:report; npm run test:dashboard; npm run test:automation; npm run build'

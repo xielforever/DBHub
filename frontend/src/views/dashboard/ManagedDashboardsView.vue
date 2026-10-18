@@ -284,6 +284,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import {useRoute} from 'vue-router'
 import { useUserStore } from '../../stores/user'
 import {
   managedDashboardApi as api,
@@ -305,7 +306,8 @@ const keyword = ref(''),
   managedPage = ref(1),
   publishedTotal = ref(0),
   managedTotal = ref(0)
-const tab = ref('published'),
+const route=useRoute()
+const tab = ref(['managed','access'].includes(String(route.query.tab))?String(route.query.tab):'published'),
   published = ref<DashboardView[]>([]),
   managed = ref<ManagedDashboard[]>([]),
   creating = ref(false),
@@ -317,7 +319,7 @@ const tab = ref('published'),
   pending = ref<ManagedDashboard>()
 let alive = true,
   loadGeneration = 0
-onMounted(load)
+onMounted(async()=>{await load();const id=Number(route.query.dashboard);if(alive&&Number.isSafeInteger(id)&&id>0){if(tab.value==='managed'&&canWrite.value){try{const d=await api.get(id);if(alive)reviewing.value=d}catch(e){if(alive)error.value=message(e)}}else if(tab.value==='published')viewing.value={id,mode:'published'}}})
 onScopeDispose(() => {
   alive = false
   loadGeneration++

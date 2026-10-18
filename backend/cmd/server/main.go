@@ -144,6 +144,7 @@ func main() {
 	// 优雅停机
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	automationService := server.StartAutomation(ctx, cfg, log, deps)
 
 	// 血缘定时解析：每 5 分钟增量扫描 sys_query_history（pg_query_go/vitess → sys_meta_lineage）
 	if deps != nil && deps.Lineage != nil {
@@ -167,6 +168,11 @@ func main() {
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	if automationService != nil {
+		if err := automationService.Close(shutdownCtx); err != nil {
+			log.Warn("后台任务尚未停止，将由租约恢复状态")
+		}
+	}
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("优雅停机失败", "error", err)
 		os.Exit(1)

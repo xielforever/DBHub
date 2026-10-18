@@ -1,0 +1,31 @@
+<template>
+  <div class="space-y-5">
+    <header class="flex flex-wrap items-start justify-between gap-3"><div><h1 class="text-xl font-semibold">通知与待办</h1><p class="text-sm text-white/50 mt-1">当前工作空间的消息与待处理事项；标记已读不会完成审批。</p></div><button class="ghost-button text-sm min-h-11" :disabled="loading||busy" @click="load">刷新</button></header>
+    <div role="tablist" aria-label="通知与待办分类" class="flex flex-wrap gap-2"><button role="tab" class="ghost-button min-h-11" :aria-selected="tab==='todos'" @click="selectTab('todos')">待我处理（{{todoTotal}}）</button><button role="tab" class="ghost-button min-h-11" :aria-selected="tab==='notifications'" @click="selectTab('notifications')">通知（{{unread}} 条未读）</button></div>
+    <p v-if="error" role="alert" class="text-sm text-rose-300">{{error}}</p>
+    <div v-if="tab==='notifications'" class="flex flex-wrap items-center gap-3"><label class="text-sm text-white/60"><input v-model="onlyUnread" type="checkbox" class="mr-2" @change="page=1;load()" />仅未读</label><button class="ghost-button text-sm min-h-11" :disabled="busy||loading||!unread||!throughID" @click="readAll">当前通知全部已读</button></div>
+    <div v-loading="loading" class="space-y-3 min-h-24">
+      <template v-if="tab==='todos'"><article v-for="item in todos" :key="item.kind+item.id" class="glass-card p-4 flex flex-wrap items-center justify-between gap-4"><div class="min-w-0"><h2 class="font-medium">{{item.title}} <span class="text-xs text-white/40">#{{item.resource_id}}</span></h2><p class="text-xs text-white/50 mt-2">{{formatTime(item.created_at)}}<span v-if="item.expires_at"> · 截止 {{formatTime(item.expires_at)}}</span></p></div><button class="liquid-button text-sm min-h-11" @click="goTodo(item)">去处理</button></article><p v-if="!loading&&!todos.length&&!error" class="glass-card p-8 text-sm text-white/50 text-center">暂无待处理事项</p></template>
+      <template v-else><article v-for="item in notifications" :key="item.id" class="glass-card p-4 space-y-3" :class="!item.read_at?'border-indigo-400/30':''"><div class="flex items-start justify-between gap-3"><h2 class="font-medium break-words"><span v-if="!item.read_at" class="inline-block w-2 h-2 bg-indigo-300 rounded-full mr-2" />{{item.title}}</h2><span class="shrink-0 text-xs text-white/40">{{item.read_at?'已读':'未读'}}</span></div><p class="text-sm text-white/60 break-words">{{item.message}}</p><div class="flex flex-wrap items-center justify-between gap-2"><time class="text-xs text-white/40">{{formatTime(item.created_at)}}</time><div class="flex gap-2"><button v-if="!item.read_at" class="ghost-button text-xs min-h-11" :disabled="busy" @click="markRead(item)">标记已读</button><button v-if="inboxTarget(item.resource_type,item.resource_id)" class="ghost-button text-xs min-h-11" :disabled="busy" @click="openNotice(item)">查看详情</button></div></div></article><p v-if="!loading&&!notifications.length&&!error" class="glass-card p-8 text-sm text-white/50 text-center">暂无{{onlyUnread?'未读':''}}通知</p></template>
+    </div>
+    <div class="flex items-center justify-between gap-2 text-xs text-white/50"><span>共 {{total}} 项</span><div class="flex gap-2 items-center"><button class="ghost-button min-h-11" :disabled="page<=1||loading||busy" @click="page--;load()">上一页</button><span>第 {{page}} 页</span><button class="ghost-button min-h-11" :disabled="page*20>=total||loading||busy" @click="page++;load()">下一页</button></div></div>
+  </div>
+</template>
+<script setup lang="ts">
+import {computed,onMounted,onScopeDispose,ref} from 'vue'
+import {useRoute,useRouter} from 'vue-router'
+import {automationApi,type NotificationItem,type TodoItem} from '../../api/automation'
+import {inboxTarget} from '../../utils/automation'
+const router=useRouter(),route=useRoute(),tab=ref(route.query.tab==='notifications'?'notifications':'todos'),page=ref(1),onlyUnread=ref(false),notifications=ref<NotificationItem[]>([]),todos=ref<TodoItem[]>([]),notificationTotal=ref(0),todoTotal=ref(0),unread=ref(0),throughID=ref(0),loading=ref(false),busy=ref(false),error=ref('')
+const total=computed(()=>tab.value==='todos'?todoTotal.value:notificationTotal.value),controller=new AbortController()
+let alive=true,generation=0,timer:ReturnType<typeof setInterval>|undefined
+const formatTime=(value:string)=>new Date(value).toLocaleString()
+async function load(){const run=++generation;loading.value=true;error.value='';try{const [inbox,pending]=await Promise.all([automationApi.inbox({state:onlyUnread.value?'unread':undefined,page:tab.value==='notifications'?page.value:1},controller.signal),automationApi.todos(tab.value==='todos'?page.value:1,controller.signal)]);if(!alive||run!==generation)return;notifications.value=inbox.items;notificationTotal.value=inbox.total;unread.value=inbox.unread;throughID.value=inbox.through_id;todos.value=pending.items;todoTotal.value=pending.total;window.dispatchEvent(new Event('dbhub-inbox-updated'))}catch(e){if(alive&&run===generation){notifications.value=[];todos.value=[];error.value=e instanceof Error?e.message:'读取通知失败'}}finally{if(alive&&run===generation)loading.value=false}}
+function selectTab(value:string){tab.value=value;page.value=1;void load()}
+async function markRead(item:NotificationItem){if(busy.value)return;busy.value=true;try{await automationApi.read({ids:[item.id]},controller.signal);if(alive)await load()}catch(e){if(alive)error.value=e instanceof Error?e.message:'标记失败'}finally{if(alive)busy.value=false}}
+async function readAll(){if(busy.value)return;busy.value=true;const cutoff=throughID.value;try{await automationApi.read({through_id:cutoff},controller.signal);if(alive)await load()}catch(e){if(alive)error.value=e instanceof Error?e.message:'标记失败'}finally{if(alive)busy.value=false}}
+async function openNotice(item:NotificationItem){const target=inboxTarget(item.resource_type,item.resource_id);if(!target)return;if(!item.read_at)await markRead(item);if(alive)await router.push(target)}
+function goTodo(item:TodoItem){const target=inboxTarget(item.kind,item.resource_id);if(target)void router.push(target)}
+onMounted(()=>{void load();timer=setInterval(()=>{if(!loading.value&&!busy.value&&!document.hidden&&navigator.onLine)void load()},30000)})
+onScopeDispose(()=>{alive=false;generation++;controller.abort();clearInterval(timer)})
+</script>

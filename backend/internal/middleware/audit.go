@@ -200,6 +200,12 @@ func classify(method, path string) (action, resource, name string) {
 	resource, name = strings.ToUpper(firstOr(parts, 0)), firstOr(parts, 1)
 	last := firstOr(parts, len(parts)-1)
 	switch {
+	case parts[0] == "source-tasks" && method != http.MethodGet && method != http.MethodHead:
+		return "SOURCE_TASK_" + strings.ToUpper(last), "SOURCE_TASK", name
+	case parts[0] == "source-schedules" && method != http.MethodGet && method != http.MethodHead:
+		return "SOURCE_SCHEDULE_SAVE", "SOURCE_SCHEDULE", name
+	case parts[0] == "inbox" && method == http.MethodPost:
+		return "NOTIFICATION_READ", "NOTIFICATION", name
 	case parts[0] == "dashboard-refreshes" && method == http.MethodPost:
 		return "DASHBOARD_EXECUTE", "DASHBOARD", name
 	case parts[0] == "dashboard-reviews" && method == http.MethodGet:

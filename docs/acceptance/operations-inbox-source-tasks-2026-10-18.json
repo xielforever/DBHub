@@ -1,0 +1,198 @@
+{
+  "checked_at": "2026-10-18T18:05:53.925900+08:00",
+  "status": "passed",
+  "base_commit": "e21cea81602b68ba31adf58aa3aaeb2ecb073113",
+  "source_snapshot": "Feature working tree, bound by hashes and tested image IDs; source_changed=true in raw reports",
+  "source_sha256": {
+    "method": "SHA-256 of sorted relative path, NUL, content, NUL",
+    "backend_go_and_sql": "d5f5ab78ba5fdcf6b26883c035a4c60e2c81a35fda70e1ffac539abbbf869d45",
+    "backend_application_go_and_sql_excluding_tests": "c180bda164394501827d342691e99e70712e3eafca08bdf71276e16fdc94a3c7",
+    "frontend_src_and_tests": "4dc0a88a03ec208e05c430225314199cc74961ff2fea325a8a355774da5bafa8",
+    "frontend_lockfile": "030259ecfe425013e68e3ab53cb62c75c5f9dbb86668a07f255ce7059edf0a12",
+    "backup_scripts_and_dockerfile": "d0ec2c821e2b94c019f6ab1786071583e8259fd934dd8a372ad33b7f31b11e59"
+  },
+  "migrations": {
+    "count": 36,
+    "new": "0036_operations_inbox_source_tasks.sql"
+  },
+  "tests": {
+    "backend_race": {
+      "result": "passed_after_targeted_test_update",
+      "full_suite_server_package_seconds": 392.161,
+      "unaffected_packages": "passed",
+      "initial_failure": "Two database tests hard-coded pre-feature migration counts",
+      "correction": "Assert the complete embedded migration list/count; retain all legacy-data and concurrent-migration checks",
+      "final_database_package_seconds": 5.971,
+      "final_database_command": "go test -race ./internal/db -count=1"
+    },
+    "go_vet": "passed",
+    "frontend": {
+      "query": 14,
+      "report": 18,
+      "dashboard": 10,
+      "automation": 2,
+      "total": 44,
+      "typescript_and_production_build": "passed",
+      "full_dependency_audit_vulnerabilities": 0
+    },
+    "actionlint_v1_7_7": "passed",
+    "shell_syntax": "passed",
+    "targeted_document_links": {
+      "result": "passed",
+      "documents": [
+        "docs/开发指南/运维通知与数据源任务验收.md",
+        "docs/项目管控/运维通知与数据源任务设计.md",
+        "docs/开发指南/数据源检查与采集可靠性.md",
+        "docs/部署运维/部署运维指南.md",
+        "scripts/cloud/README.md"
+      ],
+      "local_links": 30
+    },
+    "production_operations_compose": "passed: docker compose config --quiet with non-secret validation bindings"
+  },
+  "images": {
+    "kind": "Local Docker image IDs, not pushed registry digests",
+    "backend": "sha256:00444d64d6deb2a15f95d44559ba8a40f81d3fc60f442cb35e4f144827c04c35",
+    "frontend": "sha256:e1b9d57cf58161f9438af3483a887ca635da4d6ce2a4d8cb6ffbebf647596dfe",
+    "backup": "sha256:903b2cafa477a9210a30a0cf616cd5d2cc230684234a4eeff5c14a7cb70e9633",
+    "backend_binary_sha256": "ac2598d312ae5aa0d2d31465540a16ee2430817e56c231006cacb00bdd56ea40"
+  },
+  "actual_image_automation_acceptance": {
+    "checks": {
+      "candidate_images_and_current_migrations": {
+        "count": 36
+      },
+      "approved_reports_dashboard_group_and_encrypted_account_fixture": true,
+      "durable_jobs_idempotency_personal_identity_history_and_secret_exclusion": true,
+      "background_collection_publishes_real_target_view": true,
+      "schedule_creation_and_pause_without_replaying_old_intervals": true,
+      "browser_source_tasks_history_plans_and_390px_inbox": true,
+      "live_todo_opens_frozen_report_review": true,
+      "browser_workspace_switch_clears_inbox_and_pending_counts": true,
+      "browser_read_highwater_keeps_pending_work_and_platform_operations": true,
+      "nonroot_readonly_automatic_backup_checksum_and_status": true,
+      "failed_dump_keeps_previous_archives_and_notifies_platform_admin": true,
+      "backup_recovery_resolves_alert_without_clearing_history": true,
+      "retention_keeps_two_successful_archives_and_skips_foreign_files_and_symlinks": true,
+      "automatic_archive_restores_20_digests_jobs_inbox_encryption_and_live_reports": true
+    },
+    "browser": {
+      "page_errors": 0,
+      "csp_violations": 0,
+      "widths": [
+        1440,
+        390
+      ],
+      "mocked_business_responses": 0
+    },
+    "temporary_resources_removed": true,
+    "private_report": "/workspace/dbhub-cloud/production-acceptance/ae01476228/checks.json"
+  },
+  "fault_restore_regression": {
+    "checks": {
+      "candidate_images_and_current_migrations": {
+        "count": 36
+      },
+      "approved_reports_dashboard_group_and_encrypted_account_fixture": true,
+      "default_login_limit_and_retry_after": {
+        "allowed_attempts": 10,
+        "next_http": 429
+      },
+      "redis_outage_503_liveness_and_same_session_recovery": true,
+      "postgres_outage_503_bounded_probe_session_and_durable_audit_recovery": true,
+      "monaco_query_runs_under_strict_production_csp": true,
+      "expired_access_refresh_503_preserves_both_tokens_and_recovers": true,
+      "security_headers_for_html_assets_errors_and_private_api": true,
+      "metadata_backup_restore_current_object_counts_and_digests": {
+        "objects": 20,
+        "old_acl_excluded": true,
+        "overwrite_refused": true,
+        "nonempty_restore_refused": true
+      },
+      "restored_encryption_groups_publications_permissions_and_audit_deduplication": true
+    },
+    "browser": {
+      "page_errors": 0,
+      "csp_violations": 0,
+      "refresh_503": "explicit browser transport mock"
+    },
+    "load": {
+      "executed": false,
+      "reason": "Run --duration 1800 for real sustained acceptance"
+    },
+    "temporary_resources_removed": true,
+    "private_report": "/workspace/dbhub-cloud/production-acceptance/6f39a80fa2/checks.json"
+  },
+  "dashboard_browser_regression": {
+    "checks": [
+      "真实 PostgreSQL 五张报表与独立只读账号发布；查看者没有个人连接",
+      "浏览器配置业务名称与4位小数，预览实时更新；保存草稿不改变正式展示",
+      "送审统一列出5项用户组缺权，从检查发起补权，独立报表发布生效后重查通过；审阅人无隐式数据权",
+      "浏览器开发：添加五张卡片、调整宽度、比较组和受众，冻结版本送审",
+      "浏览器审阅：冻结版本全部真实预览、验证、批准与显式发布",
+      "审批以当前正式版为基准，显示布局与人员变化及业务口径，技术JSON默认折叠",
+      "正式查看：真实1280.00与12，业务水位独立展示，无个人凭据或额外按钮",
+      "手机390px单列布局、无横向溢出，图表保留可读结果表",
+      "页面同时查询最多两张；单卡重查保持部分刷新，不改写最近完整查询时间",
+      "模拟503仅保留带旧时间标记的内存结果，不显示为新鲜数据",
+      "离线时不发起查询，恢复网络后要求手动刷新",
+      "计时推进31分钟：清空过期结果，期间没有自动执行查询",
+      "工作空间切换销毁旧结果，跨空间已知报表ID与数据源读取被拒绝"
+    ],
+    "errors": [],
+    "runtime_readonly": true,
+    "temporary_resources_removed": true,
+    "private_report": "/workspace/dbhub-cloud/dashboard-artifacts/03e8a3867f/checks.json"
+  },
+  "cloud": {
+    "login": 200,
+    "readiness": 200,
+    "/inbox": 200,
+    "/inbox/todos": 200,
+    "/source-tasks": 200,
+    "/source-schedules": 200,
+    "/source-check-history": 200,
+    "backup_status": "succeeded",
+    "backup_success_recorded": true,
+    "backup_expected_hours": 24,
+    "audit_retention_days": 0,
+    "history_retention_days": 0,
+    "running_development_services": 7,
+    "backup_process_uid": 65532,
+    "daily_metadata_backup_enabled": true,
+    "temporary_acceptance_resources_remaining": 0,
+    "startup_repeatability": "passed: scripts/cloud/start.sh executed twice with existing volumes"
+  },
+  "ci": {
+    "workflow": ".github/workflows/production-readiness.yml",
+    "latest_checks": "https://github.com/xielforever/DBHub/pull/1/checks",
+    "includes": [
+      "Full Go race suite and vet",
+      "44 frontend tests, audit and build",
+      "Three production images",
+      "Dashboard browser, dependency outages, full restore, inbox/source jobs and automatic backup acceptance"
+    ]
+  },
+  "limits": {
+    "source_active_tasks": {
+      "user": 10,
+      "workspace": 100,
+      "global": 200
+    },
+    "shared_execution_slots": 2,
+    "task_seconds": 240,
+    "lease_seconds": 300,
+    "schedules_per_user": 200,
+    "maintenance_rows_per_table_per_hour": 500
+  },
+  "remaining_deployment_validation": [
+    "Actual production TLS, metadata/Redis protection and backup-principal permissions",
+    "Audit pending-volume backup, offsite retention, production RPO/RTO and secure rollback image",
+    "Real organization data, workload scale and multi-instance capacity"
+  ],
+  "not_claimed": [
+    "External production deployment",
+    "New 30-minute workload or full Go/JDBC/OS-image vulnerability scan",
+    "Business row-data replication or external email/IM delivery"
+  ]
+}

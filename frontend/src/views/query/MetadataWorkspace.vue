@@ -1,7 +1,7 @@
 <template>
   <section class="glass-card p-4 sm:p-6 space-y-4">
     <header class="flex flex-wrap justify-between gap-3"><div><h2 class="font-medium">结构浏览</h2><p class="text-xs text-white/45 mt-1">{{ source.capabilities?.reason || '当前数据源支持的表和字段信息' }}</p></div><button v-if="canCollect" class="ghost-button text-xs" :disabled="collecting" @click="collect">{{ collecting ? '采集中…' : '采集结构' }}</button></header>
-    <p v-if="error" class="text-sm text-rose-300 break-words" role="alert">{{ error }}</p><p v-if="collectionStatus" class="text-sm text-white/65" role="status">{{ collectionStatus }}</p>
+    <p v-if="error" class="text-sm text-rose-300 break-words" role="alert">{{ error }}</p><p v-if="collectionStatus" class="text-sm text-white/65" role="status">{{ collectionStatus }} <RouterLink to="/source-tasks" class="text-indigo-200 underline">查看任务</RouterLink></p>
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
       <label class="text-xs text-white/60">数据库<el-select v-model="database" class="w-full mt-1" aria-label="结构数据库" :loading="loading"><el-option v-for="d in databases" :key="d" :label="d" :value="d" /></el-select></label>
       <label class="text-xs text-white/60">Schema<el-select v-model="schema" class="w-full mt-1" aria-label="结构 Schema" :loading="loading"><el-option v-for="s in schemas" :key="s" :label="s || '默认'" :value="s" /></el-select></label>
@@ -16,12 +16,14 @@
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import type {ConnectionItem} from '../../api/datasource'
 import {workbenchApi,type TableInfo,type ColumnInfo} from '../../api/workbench'
-import {assetApi} from '../../api/asset'
+import {automationApi} from '../../api/automation'
+import {reportCommandKeys} from '../report/reportCommands'
 import {useUserStore} from '../../stores/user'
 const props=defineProps<{source:ConnectionItem}>(),user=useUserStore()
 const canCollect=computed(()=>!!props.source.capabilities?.collect && ['admin','developer'].includes(user.role))
 const databases=ref<string[]>([]),schemas=ref<string[]>([]),tables=ref<TableInfo[]>([]),columns=ref<ColumnInfo[]>([])
 const database=ref(''),schema=ref(''),table=ref(''),loading=ref(false),collecting=ref(false),error=ref(''),collectionStatus=ref('')
+const keys=reportCommandKeys()
 let live=true,revision=0
 async function load(kind:'databases'|'schemas'|'tables'|'columns'){const run=++revision;loading.value=true;error.value='';try{
  if(kind==='databases'){const r=await workbenchApi.databases(props.source.id);if(!live||run!==revision)return;databases.value=r.items.map(d=>d.name);database.value=databases.value.includes(props.source.database)?props.source.database:databases.value[0]||'';if(!database.value){tables.value=[];columns.value=[]}}
@@ -32,6 +34,6 @@ async function load(kind:'databases'|'schemas'|'tables'|'columns'){const run=++r
 watch(database,()=>{schema.value='';schemas.value=[];if(database.value)void load('schemas')})
 watch(schema,()=>{if(schema.value)void load('tables')})
 watch(table,()=>{if(table.value)void load('columns')})
-async function collect(){if(collecting.value)return;collecting.value=true;collectionStatus.value='';try{const r=await assetApi.sync(props.source.id);if(live)collectionStatus.value=r.connections.map(c=>c.status==='succeeded'?`已采集 ${c.tables} 张表、${c.views} 个视图`:c.errors?.join('；')||'采集未完成').join('；')}catch(e){if(live)collectionStatus.value=e instanceof Error?e.message:'采集失败'}finally{if(live)collecting.value=false}}
-onMounted(()=>void load('databases'));onBeforeUnmount(()=>{live=false;revision++})
+async function collect(){if(collecting.value)return;collecting.value=true;collectionStatus.value='';const body={connection_id:props.source.id,kind:'collect' as const};try{await automationApi.createTask({...body,request_id:keys.get('collect',body)});keys.clear();if(live)collectionStatus.value='采集任务已加入后台队列。'}catch(e){if(live)collectionStatus.value=e instanceof Error?e.message:'提交失败，请刷新后核对'}finally{if(live)collecting.value=false}}
+onMounted(()=>void load('databases'));onBeforeUnmount(()=>{live=false;revision++;keys.clear()})
 </script>

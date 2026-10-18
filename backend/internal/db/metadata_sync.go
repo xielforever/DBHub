@@ -71,6 +71,10 @@ func (s *MetadataSync) Publish(ctx context.Context, snapshots []*MetaSnapshot) e
 	if !current.Equal(s.configVersion) {
 		return ErrConnectionChanged
 	}
+	taskScope, err := guardSourceTaskPublish(ctx, s.tx)
+	if err != nil {
+		return err
+	}
 	type object struct {
 		Database string `json:"database"`
 		Schema   string `json:"schema"`
@@ -95,6 +99,20 @@ func (s *MetadataSync) Publish(ctx context.Context, snapshots []*MetaSnapshot) e
 		WHERE k.database=s.database_name AND k.schema=s.schema_name AND k."table"=s.table_name)`, s.connectionID, string(keep))
 	if err != nil {
 		return err
+	}
+	if taskScope != nil {
+		tables, views := 0, 0
+		for _, snapshot := range snapshots {
+			if snapshot.TableType == "view" {
+				views++
+			} else {
+				tables++
+			}
+		}
+		_, err = s.tx.Exec(ctx, `UPDATE sys_source_tasks SET status='succeeded',phase='结构快照已完整发布',progress=100,result=jsonb_build_object('tables',$3::int,'views',$4::int),finished_at=now() WHERE id=$1::uuid AND worker_token=$2::uuid AND status='running'`, taskScope.ID, taskScope.Token, tables, views)
+		if err != nil {
+			return err
+		}
 	}
 	if err = s.tx.Commit(ctx); err != nil {
 		if errors.Is(err, pgx.ErrTxCommitRollback) {

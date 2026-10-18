@@ -65,6 +65,30 @@ type syncSummary struct {
 	Views       int           `json:"views"`
 }
 
+type collectionProgressKey struct{}
+type CollectionOutcome struct {
+	Status string `json:"status"`
+	Tables int    `json:"tables"`
+	Views  int    `json:"views"`
+}
+
+// Collect reuses the atomic snapshot path for durable background tasks. Raw
+// driver errors, schema names and credentials never enter the task result.
+func (h *Handler) Collect(ctx context.Context, id int64, progress func(int, string)) (*CollectionOutcome, error) {
+	conn, e := h.conns.Get(ctx, id)
+	if e != nil {
+		return nil, e
+	}
+	ctx = context.WithValue(ctx, collectionProgressKey{}, progress)
+	res := h.syncConnection(ctx, conn)
+	return &CollectionOutcome{res.Status, res.Tables, res.Views}, nil
+}
+func reportCollectionProgress(ctx context.Context, progress int, phase string) {
+	if fn, ok := ctx.Value(collectionProgressKey{}).(func(int, string)); ok && fn != nil {
+		fn(progress, phase)
+	}
+}
+
 // Sync POST /api/v1/assets/sync （请求体可空：空=同步全部关系型数据源；
 // 传 {"connection_id":N} 仅同步指定数据源）。
 func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +152,7 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 
 // syncConnection 采集单个数据源（非关系型标记 skipped；连接失败记入 errors）。
 func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *syncResult {
+	reportCollectionProgress(ctx, 10, "连接目标数据库")
 	res := &syncResult{
 		ConnectionID:   conn.ID,
 		ConnectionName: conn.Name,
@@ -186,7 +211,8 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		return res
 	}
 
-	for _, item := range dbNames {
+	for index, item := range dbNames {
+		reportCollectionProgress(ctx, 15+65*index/len(dbNames), "读取结构与字段信息")
 		dbName := item.Name
 		if !target.IsUserDatabase(conn.SQLDialect(), dbName) {
 			res.SkippedDBs = append(res.SkippedDBs, dbName)
@@ -261,6 +287,7 @@ func (h *Handler) syncConnection(ctx context.Context, conn *db.Connection) *sync
 		res.ByDatabase = append(res.ByDatabase, stat)
 	}
 	if len(res.Errors) == 0 {
+		reportCollectionProgress(ctx, 90, "核对并发布完整快照")
 		if err := batch.Publish(ctx, snapshots); err != nil {
 			h.log.Warn("发布字典快照失败", "connection_id", conn.ID, "error", err)
 			if errors.Is(err, db.ErrMetadataPublishUnknown) {

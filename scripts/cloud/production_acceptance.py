@@ -172,8 +172,9 @@ class Runtime:
         self.result.update(backend_image=self.docker('image', 'inspect', self.backend_image, '--format', '{{.Id}}').stdout.decode().strip(),
                            frontend_image=self.docker('image', 'inspect', self.frontend_image, '--format', '{{.Id}}').stdout.decode().strip(),
                            backend_sha256=self.docker('exec', self.app, 'sha256sum', '/app/server').stdout.decode().split()[0])
-        assert self.sql('SELECT count(*) FROM schema_migrations') == '35'
-        self.passed('candidate_images_and_35_migrations')
+        migration_count = len(list((ROOT / 'backend/internal/db/migrations').glob('*.sql')))
+        assert self.sql('SELECT count(*) FROM schema_migrations') == str(migration_count)
+        self.passed('candidate_images_and_current_migrations', {'count': migration_count})
 
     def fixture(self):
         self.sql('CREATE DATABASE production_target;')
@@ -386,7 +387,9 @@ GRANT SELECT ON business.inventory_report TO {self.reader};""", 'production_targ
         assert self.sql(verify) == expected
         operation('restore-metadata.sh', 'restore')
         assert self.sql(verify, 'restored_meta') == expected
-        self.passed('metadata_backup_restore_16_object_counts_and_digests', {'objects': 16, 'old_acl_excluded': True, 'overwrite_refused': True, 'nonempty_restore_refused': True})
+        object_count = len([line for line in expected.splitlines() if '|' in line])
+        assert {'notifications', 'source_tasks', 'source_schedules', 'source_check_history'}.issubset({line.split('|')[0] for line in expected.splitlines()})
+        self.passed('metadata_backup_restore_current_object_counts_and_digests', {'objects': object_count, 'old_acl_excluded': True, 'overwrite_refused': True, 'nonempty_restore_refused': True})
         recovered_audit = self.prefix + '-recovered-audit'
         self.volume(recovered_audit)
         self.copy_audit(self.audit_snapshot, recovered_audit)

@@ -1,0 +1,24 @@
+# Opt-in: docker compose -f docker-compose.prod.yaml -f docker-compose.ops.yaml --profile operations up -d
+services:
+  metadata-backup:
+    profiles: ["operations"]
+    image: ${DBHUB_BACKUP_IMAGE:-dbhub-backup:local}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=16m,uid=65532,gid=65532,mode=0700"]
+    environment:
+      PGSERVICE: ${DBHUB_BACKUP_SERVICE:-dbhub}
+      PGSERVICEFILE: /run/dbhub-backup/pg_service.conf
+      PGPASSFILE: /run/dbhub-backup/pgpass
+      DBHUB_BACKUP_INTERVAL_SECONDS: ${DBHUB_BACKUP_INTERVAL_SECONDS:-86400}
+      DBHUB_BACKUP_RETRY_SECONDS: ${DBHUB_BACKUP_RETRY_SECONDS:-60}
+      DBHUB_BACKUP_TIMEOUT_SECONDS: ${DBHUB_BACKUP_TIMEOUT_SECONDS:-900}
+      DBHUB_BACKUP_RETENTION_DAYS: ${DBHUB_BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - metadata-backups:/var/lib/dbhub/backups
+      - ${DBHUB_BACKUP_CONFIG_DIR:?必须挂载 UID 65532 可读的私有 libpq 配置目录}:/run/dbhub-backup:ro
+volumes:
+  metadata-backups:

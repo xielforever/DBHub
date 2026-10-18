@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,8 +48,13 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 		t.Fatal(e)
 	}
 	entries, _ := fs.ReadDir(migrationFS, "migrations")
+	expectedPending := []string{}
 	for _, entry := range entries {
-		if entry.Name() >= "0022_" || !strings.HasSuffix(entry.Name(), ".sql") {
+		if !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		if entry.Name() >= "0022_" {
+			expectedPending = append(expectedPending, entry.Name())
 			continue
 		}
 		raw, _ := migrationFS.ReadFile("migrations/" + entry.Name())
@@ -82,7 +88,7 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 		t.Fatal(e)
 	}
 	applied, e := Migrate(ctx, pool)
-	if e != nil || len(applied) != 14 || applied[0] != "0022_personal_connections.sql" || applied[1] != "0023_definition_binding_index.sql" || applied[2] != "0024_source_audience_directory.sql" || applied[3] != "0025_reliable_audit.sql" || applied[4] != "0026_report_phase1.sql" || applied[5] != "0027_managed_reports.sql" {
+	if e != nil || !slices.Equal(applied, expectedPending) {
 		t.Fatal("legacy upgrade failed", applied, e)
 	}
 	var invalid int

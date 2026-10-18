@@ -30,7 +30,8 @@ import { useReportRun } from './useReportRun'
 import { reportCommandKeys } from './reportCommands'
 import ReportEditor from './ReportEditor.vue'
 import ReportReviewDialog from './ReportReviewDialog.vue'
-const user=useUserStore(),isAdmin=computed(()=>user.role==='admin'),scope=ref<'all'|'mine'|'pending'>(isAdmin.value?'all':'mine'),keyword=ref(''),page=ref(1),busy=ref(false),error=ref(''),editorOpen=ref(false),editing=ref<ManagedReport>(),focusedId=ref<number>()
+const props=defineProps<{focusReportId?:number}>()
+const user=useUserStore(),isAdmin=computed(()=>user.role==='admin'),scope=ref<'all'|'mine'|'pending'>(isAdmin.value?'all':'mine'),keyword=ref(''),page=ref(1),busy=ref(false),error=ref(''),editorOpen=ref(false),editing=ref<ManagedReport>(),focusedId=ref<number|undefined>(props.focusReportId)
 const list=useReportRun<ReportPage<ManagedReport>>(),keys=reportCommandKeys();let alive=true
 const errorText=(e:unknown)=>e instanceof Error?e.message:'操作失败，请刷新状态后核对'
 async function load(next=1){page.value=next;await list.run(`${scope.value}:${keyword.value}:${next}`,signal=>managedReportApi.list({scope:scope.value,q:keyword.value,page:next,page_size:12},signal))}

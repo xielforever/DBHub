@@ -3,7 +3,7 @@
     <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <h1 class="text-xl font-semibold">数据目录</h1>
-        <p class="text-sm text-white/45 mt-1">元数据字典、业务标注与查询热度；点击「采集结构」从数据源采集最新结构</p>
+        <p class="text-sm text-white/45 mt-1">元数据字典、业务标注与查询热度；结构采集在后台任务中运行</p>
       </div>
       <div class="flex items-center gap-2 shrink-0">
         <button class="ghost-button flex items-center gap-2 lg:hidden" @click="treeDrawer = true">
@@ -12,11 +12,10 @@
         <button
           v-if="canWrite"
           class="liquid-button flex items-center justify-center gap-2"
-          :disabled="syncing"
           @click="onSync"
         >
-          <RefreshCw class="w-4 h-4" :class="syncing ? 'animate-spin' : ''" />
-          {{ syncing ? '采集中…' : '采集结构' }}
+          <RefreshCw class="w-4 h-4" />
+          采集任务
         </button>
       </div>
     </header>
@@ -455,27 +454,7 @@
       </template>
     </el-dialog>
 
-    <!-- 同步结果 -->
-    <el-dialog v-model="syncResultOpen" title="结构采集结果" width="640px" class="glass-dialog">
-      <div class="space-y-3">
-        <p class="text-sm text-white/60">
-          本次共采集 <b class="text-white">{{ syncSummary?.tables ?? 0 }}</b> 张表、
-          <b class="text-white">{{ syncSummary?.views ?? 0 }}</b> 个视图
-        </p>
-        <div v-for="r in syncSummary?.connections ?? []" :key="r.connection_id" class="rounded-xl border border-white/8 bg-white/[0.03] p-3">
-          <div class="flex items-center gap-2 flex-wrap text-sm">
-            <span class="font-medium">{{ r.connection_name }}</span>
-            <span class="text-[11px] px-1.5 py-0.5 rounded bg-white/8 text-white/55">{{ r.type }}</span>
-            <span v-if="r.skipped" class="text-[11px] text-amber-300">类型不支持，已跳过</span>
-            <span v-else-if="r.status === 'failed'" class="text-[11px] text-rose-300">采集未发布，旧快照已保留</span>
-            <span v-else-if="r.status === 'unknown'" class="text-[11px] text-amber-300">发布结果待确认，请刷新目录核实</span>
-            <span v-else-if="r.status === 'busy'" class="text-[11px] text-amber-300">该数据源正在采集，本次已跳过</span>
-            <span v-else class="text-[11px] text-white/45">已更新 {{ r.tables }} 表 / {{ r.views }} 视图</span>
-          </div>
-          <div v-for="e in r.errors ?? []" :key="e" class="text-[11px] text-rose-300/90 mt-1">⚠ {{ e }}</div>
-        </div>
-      </div>
-    </el-dialog>
+
   </div>
 </template>
 
@@ -505,7 +484,6 @@ import {
   type MetaSnapshot,
   type OverviewCounts,
   type Sensitivity,
-  type SyncSummary,
   type TableAssetRow,
   type TableDetail,
   type TreeConnection,
@@ -867,21 +845,9 @@ function onLineageCreateTicket() {
   ElMessage.success('已跳转变更工单，可基于血缘影响创建变更单')
 }
 
-// ---------- 同步 ----------
-const syncing = ref(false)
-const syncResultOpen = ref(false)
-const syncSummary = ref<SyncSummary | null>(null)
-async function onSync() {
-  syncing.value = true
-  try {
-    syncSummary.value = await assetApi.sync(selection.connection_id || undefined)
-    syncResultOpen.value = true
-    await Promise.all([loadTree(), reload(), loadOverview()])
-  } catch {
-    /* 拦截器提示 */
-  } finally {
-    syncing.value = false
-  }
+// ---------- 后台采集入口 ----------
+function onSync() {
+  void router.push({path:'/source-tasks',query:{kind:'collect',...(selection.connection_id?{connection_id:String(selection.connection_id)}:{})}})
 }
 
 async function loadOverview() {
