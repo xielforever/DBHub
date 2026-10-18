@@ -1,0 +1,99 @@
+{
+  "checked_at": "2026-10-18T12:18:21.224765+00:00",
+  "readiness": "release_rehearsal_candidate; production environment gates remain pending",
+  "production_approved": false,
+  "application_baseline": "021ffead2864c59f76db9f380b1f1f456f4d1459",
+  "application_paths_verified_unchanged_from_baseline": [
+    "backend",
+    "frontend",
+    "services",
+    "scripts/ops"
+  ],
+  "baseline_production_ci": {
+    "status": "success",
+    "url": "https://github.com/xielforever/DBHub/actions/runs/39123457171",
+    "source_commit": "021ffead2864c59f76db9f380b1f1f456f4d1459",
+    "duration": "16m 8s"
+  },
+  "local_application_regression": {
+    "backend_race": {
+      "name": "backend",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 432.16,
+      "coverage": {
+        "passed_events_including_subtests": 353,
+        "skipped": [
+          "TestJournalCrashHelper",
+          "TestOpenGaussDemoHTTP",
+          "TestVersionMatrixTarget"
+        ],
+        "optional_skip_reasons": {
+          "TestJournalCrashHelper": "Child-process helper, exercised by its parent tests",
+          "TestOpenGaussDemoHTTP": "Run opengauss-demo-check.py separately; commercial GaussDB still needs real acceptance",
+          "TestVersionMatrixTarget": "Run compatibility.py separately for the full version matrix"
+        },
+        "missing_required_tests": [],
+        "unexpected_skips": [],
+        "failed_tests": []
+      }
+    },
+    "vet": {
+      "name": "vet",
+      "status": "passed",
+      "exit_code": 0,
+      "seconds": 11.84
+    },
+    "frontend_targeted_rerun": {
+      "scope": "frontend stage after correcting Node 24 evidence parsing",
+      "completed": true,
+      "exit_code": 0,
+      "tests_passed": 44,
+      "seconds": 33.45,
+      "source_sha256": "33bd7691b2cecf37faa2debf3e9f4eb97c0218f21280162178d3540c98c0018c",
+      "runner_sha256": "04a8a91050b329218074c7b2542f7b3eeec47f67d00563ada9a3e91f6c7119af"
+    },
+    "frontend_audit_vulnerabilities": 0,
+    "frontend_typecheck_and_production_build": "passed"
+  },
+  "runner_validation": {
+    "self_tests_passed": 9,
+    "workflow_actionlint": "passed",
+    "parallel_runner_lock": "verified rejection",
+    "initial_full_run_completed": false,
+    "initial_failure": "All child commands exited zero; Node 24 spec output was incorrectly treated as an empty frontend suite. Original failed report retained.",
+    "correction": "TAP and Node 24 spec/color summaries accepted; missing, empty, skipped, failed, cancelled or todo suites rejected. Corrected parser verified against original output and a new actual frontend run.",
+    "final_complete_pipeline": "Not rerun locally after the parser-only correction; new main CI will validate the complete pipeline."
+  },
+  "manual_uat": {
+    "template": "docs/acceptance/regression-uat-template.csv",
+    "cases": 36,
+    "executed": 0,
+    "status": "pending business acceptance"
+  },
+  "new_regression_files_sha256": {
+    "scripts/cloud/regression.py": "04a8a91050b329218074c7b2542f7b3eeec47f67d00563ada9a3e91f6c7119af",
+    "scripts/cloud/test_regression.py": "4310ec78fff3be7b1d0b0f0d7c6b96ae715a150c2a4ea8444aea643660869601",
+    "docs/acceptance/regression-uat-template.csv": "4f0f3fb33a4b8498e9689032913e9a335a1197d8d80d15c56e94deeb87aed3ac"
+  },
+  "cloud_health": {
+    "api_ready": 200,
+    "frontend": 200,
+    "backup_health": "healthy"
+  },
+  "outside_scope_this_run": [
+    "Production HTTPS, network boundaries, secrets and managed PostgreSQL role provisioning",
+    "Upgrade/rollback using a sanitized copy of the actual previous production metadata",
+    "Off-site backups, application key/driver/audit volume recovery and agreed RPO/RTO",
+    "Real business workload capacity, alert delivery and multi-instance failover",
+    "Full datasource version matrix and commercial GaussDB topology/TLS acceptance",
+    "Production-image browser/fault/backup acceptance",
+    "Latest candidate 30-minute sustained load",
+    "Target-organization manual UAT"
+  ],
+  "private_evidence": {
+    "initial_full_summary": "/workspace/dbhub-cloud/regression-artifacts/20261018T120742Z-021ffead2864-7dc67b/summary.json",
+    "frontend_rerun": "/workspace/dbhub-cloud/regression-artifacts/20261018T120742Z-021ffead2864-7dc67b/frontend-parser-rerun.json"
+  },
+  "new_database_migration_required": false
+}

@@ -33,14 +33,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: 校验回归入口的失败与跳过判定
+        run: python -m unittest discover -s scripts/cloud -p 'test_regression.py'
       - name: 启动真实依赖
         run: ./scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
       - name: 校验工作流语法和上下文
         run: ./scripts/cloud/dev.sh run --rm --no-deps -w /tmp -e GOFLAGS=-mod=mod backend go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 /app/.github/workflows/production-readiness.yml /app/.github/workflows/datasource-compatibility.yml
-      - name: 后端全量、竞态与静态检查
-        run: ./scripts/cloud/dev.sh run --rm --no-deps backend sh -ec 'go test -race -p=4 ./... -count=1; go vet ./...'
-      - name: 锁文件安装、依赖审计、前端回归与构建
-        run: ./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm ci --no-audit --no-fund; npm audit --audit-level=low; npm run test:query; npm run test:report; npm run test:dashboard; npm run test:automation; npm run build'
+      - name: 后端全量竞态、静态检查及前端审计、回归与构建
+        run: python scripts/cloud/regression.py --profile full
       - name: 构建实际生产镜像
         run: |
           docker build -t "$DBHUB_DASHBOARD_BACKEND_IMAGE" -f backend/Dockerfile backend
@@ -62,6 +62,7 @@ jobs:
         with:
           name: production-readiness-${{ github.sha }}
           path: |
+            ${{ runner.temp }}/dbhub-state/regression-artifacts/**/summary.json
             ${{ runner.temp }}/dbhub-state/dashboard-artifacts/**/checks.json
             ${{ runner.temp }}/dbhub-state/production-acceptance/**/checks.json
           if-no-files-found: warn

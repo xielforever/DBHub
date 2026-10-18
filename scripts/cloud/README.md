@@ -40,6 +40,8 @@ python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.
 ./scripts/cloud/dev.sh stop
 ```
 
+统一回归入口：`python3 scripts/cloud/regression.py --profile smoke` 检查关键业务链路，`--profile full` 执行后端全量竞态、静态检查和前端审计/回归/构建；`--profile release --soak-seconds 1800` 再构建当前提交的生产镜像，执行浏览器、故障恢复、完整备份恢复及真实时钟持续负载。使用 `--plan` 可预览命令。业务用例、人工验收模板、未执行项与生产准入条件见[生产上线评估与回归测试](../../docs/开发指南/生产上线评估与回归测试.md)。结果在私有状态目录 `regression-artifacts/<本次运行>/summary.json`；原始日志保留在同目录，仅共享汇总记录。
+
 查询队列和活动目标事务属于单个后端进程，重启后活动事务由数据库连接关闭回滚；已经提交的自动提交写入不因此回滚。跨实例部署需要会话路由或共享调度器。SQL 执行编号与回执保存在 PostgreSQL，独立处理器使用同一元数据库时也能防止相同编号重复执行；普通工作台仍不提供跨实例并发总量限制；本期受管报表及仪表盘另使用 PostgreSQL 共享租约，覆盖用户、账号、工作空间和全局配额，跨连接池已验证，完整多实例运行仍需验收。在线心跳和认证会话使用 Redis，业务表数据和任意 SQL 查询结果不进入 Redis 缓存。完整接口与支持边界见 [补齐验收契约](../../docs/开发指南/云端后端补齐验收.md) 和 [执行可靠性](../../docs/开发指南/SQL工作台执行可靠性.md)。
 
 可选浏览器验收：先启动服务，再运行 `./scripts/cloud/browser.sh`。浏览器依赖安装在临时容器中，截图和验收结果保存到私有状态目录 `browser-artifacts`，本轮文件以 `phase1-` 开头。检查真实 PostgreSQL/MySQL 查询、格式化、选中执行、单请求与真实取消、错误、截断、虚拟滚动和手机首屏；还验证刷新后恢复待确认编号、丢失写入响应后只查询回执而不重跑，并断言工作台不请求已暂缓的高级功能。脚本仅向本地 Cloud 开发数据库写入 `dbhub_cloud_demo` 验证表。
