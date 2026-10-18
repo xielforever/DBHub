@@ -1,0 +1,27 @@
+{
+  "purpose": "Illustrative UI concept data only; not production observations",
+  "unit": "万元",
+  "as_of": "2026-10-18T09:30:00+08:00",
+  "inventory_amount": "1280.00",
+  "low_stock_count": 12,
+  "trend": [
+    {"date": "2026-10-12", "amount": "1160.00"},
+    {"date": "2026-10-13", "amount": "1175.00"},
+    {"date": "2026-10-14", "amount": "1182.00"},
+    {"date": "2026-10-15", "amount": "1190.00"},
+    {"date": "2026-10-16", "amount": "1210.00"},
+    {"date": "2026-10-17", "amount": "1260.00"},
+    {"date": "2026-10-18", "amount": "1280.00"}
+  ],
+  "warehouses": [
+    {"name": "杭州", "amount": "620.00"},
+    {"name": "苏州", "amount": "410.00"},
+    {"name": "成都", "amount": "250.00"}
+  ],
+  "low_stock_preview": [
+    {"sku": "SKU001", "name": "线缆", "warehouse": "杭州", "stock": 8, "safety_stock": 20},
+    {"sku": "SKU002", "name": "连接器", "warehouse": "苏州", "stock": 15, "safety_stock": 30},
+    {"sku": "SKU003", "name": "开关", "warehouse": "成都", "stock": 6, "safety_stock": 10}
+  ],
+  "preview_note": "Only 3 of the 12 low-stock items are shown; dashboard cards are separate queries, not a shared transaction snapshot"
+}
