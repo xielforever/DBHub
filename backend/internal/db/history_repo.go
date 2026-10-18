@@ -100,11 +100,11 @@ func (r *HistoryRepository) List(ctx context.Context, userID int64, isAdmin bool
 	return out, total, rows.Err()
 }
 
-// Delete 删除单条历史（仅本人或管理员）。
+// Delete removes only the current actor's personal history, including for admins.
 func (r *HistoryRepository) Delete(ctx context.Context, id, userID int64, isAdmin bool) error {
 	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM sys_query_history WHERE id = $1 AND ($2 OR user_id = $3)`,
-		id, isAdmin, userID)
+		`DELETE FROM sys_query_history WHERE id = $1 AND user_id = $2`,
+		id, ActorID(ctx))
 	if err != nil {
 		return fmt.Errorf("删除查询历史失败: %w", err)
 	}
@@ -114,13 +114,9 @@ func (r *HistoryRepository) Delete(ctx context.Context, id, userID int64, isAdmi
 	return nil
 }
 
-// Clear 清空当前用户的历史（管理员可指定全部）。
+// Clear never truncates a shared table or removes another actor's history.
 func (r *HistoryRepository) Clear(ctx context.Context, userID int64, isAdmin bool) error {
-	if isAdmin {
-		_, err := r.pool.Exec(ctx, `TRUNCATE sys_query_history`)
-		return err
-	}
-	_, err := r.pool.Exec(ctx, `DELETE FROM sys_query_history WHERE user_id = $1`, userID)
+	_, err := r.pool.Exec(ctx, `DELETE FROM sys_query_history WHERE user_id = $1`, ActorID(ctx))
 	return err
 }
 

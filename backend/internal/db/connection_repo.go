@@ -240,6 +240,11 @@ func (r *ConnectionRepository) Update(ctx context.Context, c *Connection) error 
 	if e = r.prepareDefinition(ctx, tx, c, old); e != nil {
 		return e
 	}
+	if c.DefinitionRevisionID != nil && old.DefinitionRevisionID != nil && *c.DefinitionRevisionID != *old.DefinitionRevisionID {
+		if e = connectionPoliciesAbsent(ctx, tx, c.ID); e != nil {
+			return e
+		}
+	}
 	if c.Password != "" {
 		enc, e := r.cipher.Encrypt(c.Password)
 		if e != nil {
@@ -264,11 +269,43 @@ func (r *ConnectionRepository) Update(ctx context.Context, c *Connection) error 
 	return tx.Commit(ctx)
 }
 func (r *ConnectionRepository) Delete(ctx context.Context, id int64) error {
-	tag, e := r.pool.Exec(ctx, `DELETE FROM sys_connections WHERE id=$1 AND user_id=$2`, id, ActorID(ctx))
+	tx, e := r.pool.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	var owned int64
+	if e = tx.QueryRow(ctx, `SELECT id FROM sys_connections WHERE id=$1 AND user_id=$2 FOR UPDATE`, id, ActorID(ctx)).Scan(&owned); e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return e
+	}
+	// A published source can inherit its publisher's policies. Cascading them
+	// away would silently widen another user's results. The parent row lock
+	// also serializes this check with concurrent policy inserts via their FK.
+	if e = connectionPoliciesAbsent(ctx, tx, id); e != nil {
+		return e
+	}
+	tag, e := tx.Exec(ctx, `DELETE FROM sys_connections WHERE id=$1 AND user_id=$2`, id, ActorID(ctx))
 	if e == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return e
+	if e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func connectionPoliciesAbsent(ctx context.Context, tx pgx.Tx, id int64) error {
+	var policies bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_query_policies WHERE connection_id=$1)`, id).Scan(&policies); err != nil {
+		return err
+	}
+	if policies {
+		return ErrConnectionPolicyInUse
+	}
+	return nil
 }
 func (r *ConnectionRepository) Count(ctx context.Context) (total int64, byType map[string]int64, err error) {
 	byType = map[string]int64{}

@@ -136,7 +136,7 @@ func (r *DashboardRepository) Update(ctx context.Context, d *Dashboard) error {
 	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE sys_dashboards SET name=$2, description=$3, visibility=$4, layout=$5
-		WHERE id=$1`, d.ID, d.Name, d.Description, d.Visibility, d.Layout)
+		WHERE id=$1 AND (owner_user_id=$6 OR ($7 AND visibility='shared'))`, d.ID, d.Name, d.Description, d.Visibility, d.Layout, ActorID(ctx), ActorAdmin(ctx))
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (r *DashboardRepository) Update(ctx context.Context, d *Dashboard) error {
 }
 
 func (r *DashboardRepository) Delete(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_dashboards WHERE id=$1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_dashboards WHERE id=$1 AND (owner_user_id=$2 OR ($3 AND visibility='shared'))`, id, ActorID(ctx), ActorAdmin(ctx))
 	if err != nil {
 		return err
 	}
@@ -158,16 +158,16 @@ func (r *DashboardRepository) Delete(ctx context.Context, id int64) error {
 }
 
 func (r *DashboardRepository) SetStar(ctx context.Context, id int64, userID int64, star bool) error {
-	if star {
-		_, err := r.pool.Exec(ctx, `
-			UPDATE sys_dashboards SET starred_by = (
-				SELECT COALESCE(array_agg(DISTINCT x), '{}')
-				FROM unnest(array_append(COALESCE(starred_by,'{}'), $2)) x)
-			WHERE id=$1`, id, userID)
-		return err
+	if userID != ActorID(ctx) {
+		return ErrNotFound
 	}
-	_, err := r.pool.Exec(ctx, `
-		UPDATE sys_dashboards SET starred_by = array_remove(COALESCE(starred_by,'{}'), $2)
-		WHERE id=$1`, id, userID)
+	expression := `array_remove(COALESCE(starred_by,'{}'), $2)`
+	if star {
+		expression = `(SELECT COALESCE(array_agg(DISTINCT x), '{}') FROM unnest(array_append(COALESCE(starred_by,'{}'), $2)) x)`
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE sys_dashboards SET starred_by=`+expression+` WHERE id=$1 AND (owner_user_id=$2 OR visibility='shared')`, id, userID)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
 	return err
 }

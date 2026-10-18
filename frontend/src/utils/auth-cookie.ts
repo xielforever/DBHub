@@ -5,6 +5,7 @@
  * Authorization 请求头，导致登录成功后首个鉴权请求被判为「缺少认证令牌」。
  * 因此登录成功后同步写入同源 Cookie 作为兜底通道（后端按
  * Authorization → X-Access-Token → Cookie 顺序取令牌）。
+ * Cookie 认证的修改请求同时要求 X-DBHub-CSRF: 1，由 request.ts 自动添加。
  */
 
 export const ACCESS_COOKIE = 'dbhub_access_token'

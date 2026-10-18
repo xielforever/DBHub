@@ -156,3 +156,7 @@ var ErrNotFound = errors.New("记录不存在")
 
 // ErrDuplicate 唯一约束冲突（如用户名重复）。
 var ErrDuplicate = errors.New("记录已存在")
+
+var ErrNetworkInUse = errors.New("网络配置仍被连接引用，请先显式解除连接关联后再删除")
+
+var ErrConnectionPolicyInUse = errors.New("连接仍承载查询安全策略，请先显式处理策略再删除或切换目标修订")

@@ -244,6 +244,14 @@ func (r *ConnectionRepository) ValidateCurrent(ctx context.Context, c *Connectio
 	return nil
 }
 
+// ResolveDefinition uses a frozen ticket target, never the requester's mutable
+// connection configuration or credentials.
+func (r *ConnectionRepository) ResolveDefinition(ctx context.Context, definition int64) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx, `SELECT id FROM sys_connections WHERE definition_revision_id=$1 AND user_id=$2 AND dbhub_source_visible(definition_revision_id,$2)`, definition, ActorID(ctx)).Scan(&id)
+	return id, managedError(err)
+}
+
 func (r *ConnectionRepository) prepareDefinition(ctx context.Context, tx pgx.Tx, c *Connection, old *Connection) error {
 	if ActorID(ctx) == 0 || c.UserID != ActorID(ctx) {
 		return ErrNotFound

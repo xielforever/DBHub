@@ -236,9 +236,11 @@ func (r *ManagedReportRepository) checkAudienceChange(ctx context.Context, tx pg
 	var base, no, fixed int64
 	var us, gs, requests []int64
 	var snapshots []byte
-	var old []byte
-	e := tx.QueryRow(ctx, `SELECT c.base_publication_no,m.publication_no,c.account_id,c.user_ids,c.group_ids,c.request_ids,c.group_versions,rv.manifest FROM sys_report_audience_changes c JOIN sys_managed_reports m ON m.id=c.report_id LEFT JOIN sys_report_releases re ON re.id=m.active_release_id LEFT JOIN sys_report_reviews rv ON rv.id=re.review_id WHERE c.review_id=$1`, review).Scan(&base, &no, &fixed, &us, &gs, &requests, &snapshots, &old)
+	e := tx.QueryRow(ctx, `SELECT c.base_publication_no,m.publication_no,c.account_id,c.user_ids,c.group_ids,c.request_ids,c.group_versions FROM sys_report_audience_changes c JOIN sys_managed_reports m ON m.id=c.report_id WHERE c.review_id=$1`, review).Scan(&base, &no, &fixed, &us, &gs, &requests, &snapshots)
 	if e == pgx.ErrNoRows {
+		if approver {
+			return reportReviewerBenefit(ctx, tx, review, users, groups, ActorID(ctx))
+		}
 		return nil
 	}
 	if e != nil {
@@ -269,14 +271,8 @@ func (r *ManagedReportRepository) checkAudienceChange(ctx context.Context, tx pg
 	}
 
 	if approver {
-		var before ReportManifest
-		if e = json.Unmarshal(old, &before); e != nil {
+		if e = reportReviewerBenefit(ctx, tx, review, users, groups, ActorID(ctx)); e != nil {
 			return e
-		}
-		was := dashboardGrant(ctx, tx, before.UserIDs, before.GroupIDs, ActorID(ctx))
-		now := dashboardGrant(ctx, tx, us, gs, ActorID(ctx))
-		if !was && now {
-			return fmt.Errorf("%w: 新增权限的受益人不得审批，请交另一位管理员", ErrManagedInput)
 		}
 		var requester bool
 		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_access_requests WHERE id=ANY($1::bigint[]) AND requester_id=$2)`, nonNilIDs(requests), ActorID(ctx)).Scan(&requester); e != nil {

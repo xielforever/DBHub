@@ -1,6 +1,7 @@
 package reportapi
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -54,6 +55,10 @@ func (h *ShareHandler) Revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.shares.Revoke(r.Context(), id); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			httpx.Fail(w, httpx.NotFound("分享不存在或无权限"))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("吊销失败", err))
 		return
 	}
@@ -67,6 +72,10 @@ func (h *ShareHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.shares.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			httpx.Fail(w, httpx.NotFound("分享不存在或无权限"))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("删除失败", err))
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/user/dbhub/pkg/crypto"
 )
@@ -197,10 +198,14 @@ func (r *TunnelRepository) Update(ctx context.Context, t *SSHTunnel) error {
 	return tx.Commit(ctx)
 }
 
-// Delete 删除隧道（被连接引用时外键 SET NULL）。
+// Delete preserves in-use routes; RESTRICT foreign keys cover concurrent binds.
 func (r *TunnelRepository) Delete(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_ssh_tunnels WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_ssh_tunnels WHERE id = $1 AND user_id=$2`, id, ActorID(ctx))
 	if err != nil {
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "23503" {
+			return ErrNetworkInUse
+		}
 		return fmt.Errorf("删除 SSH 隧道失败: %w", err)
 	}
 	if tag.RowsAffected() == 0 {

@@ -318,7 +318,19 @@ func IntrospectSchema(ctx context.Context, r *RelDB, d, s string) ([]TableMeta, 
 	return out, nil
 }
 
-type RedisClient struct{ session connector.Session }
+type RedisClient struct {
+	session connector.Session
+	// HTTP callers revalidate the captured personal binding after opening the
+	// network session and immediately before each target command.
+	BeforeOperation func(context.Context) error
+}
+
+func (r *RedisClient) authorize(ctx context.Context) error {
+	if r.BeforeOperation != nil {
+		return r.BeforeOperation(ctx)
+	}
+	return nil
+}
 
 func (r *RedisClient) Close() {
 	ctx, c := context.WithTimeout(context.Background(), 5*time.Second)
@@ -328,6 +340,9 @@ func (r *RedisClient) Close() {
 	}
 }
 func RedisOverviewInfo(ctx context.Context, r *RedisClient) (*RedisInfo, error) {
+	if err := r.authorize(ctx); err != nil {
+		return nil, err
+	}
 	m, ok := r.session.(connector.KeyReader)
 	if !ok {
 		return nil, connector.Unsupported("不支持键值浏览")
@@ -335,6 +350,9 @@ func RedisOverviewInfo(ctx context.Context, r *RedisClient) (*RedisInfo, error) 
 	return m.Overview(ctx)
 }
 func ScanKeys(ctx context.Context, r *RedisClient, p string, max int64) ([]RedisKeyItem, error) {
+	if err := r.authorize(ctx); err != nil {
+		return nil, err
+	}
 	m, ok := r.session.(connector.KeyReader)
 	if !ok {
 		return nil, connector.Unsupported("不支持键扫描")
@@ -342,6 +360,9 @@ func ScanKeys(ctx context.Context, r *RedisClient, p string, max int64) ([]Redis
 	return m.Scan(ctx, p, max)
 }
 func InspectKey(ctx context.Context, r *RedisClient, k string) (*RedisValue, error) {
+	if err := r.authorize(ctx); err != nil {
+		return nil, err
+	}
 	m, ok := r.session.(connector.KeyReader)
 	if !ok {
 		return nil, connector.Unsupported("不支持键读取")
@@ -349,6 +370,9 @@ func InspectKey(ctx context.Context, r *RedisClient, k string) (*RedisValue, err
 	return m.Inspect(ctx, k)
 }
 func MutateKey(ctx context.Context, r *RedisClient, op string, in connector.KeyMutation) (map[string]any, error) {
+	if err := r.authorize(ctx); err != nil {
+		return nil, err
+	}
 	m, ok := r.session.(connector.KeyWriter)
 	if !ok {
 		return nil, connector.Unsupported("不支持键值修改")

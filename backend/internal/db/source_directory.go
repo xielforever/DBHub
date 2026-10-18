@@ -159,6 +159,9 @@ func (r *ConnectionRepository) SetDefinitionAccess(ctx context.Context, id int64
 	if result.RowsAffected() != 1 {
 		return ErrSourceVersionConflict
 	}
+	if e = lockAudienceGroups(ctx, tx, a.GroupIDs); e != nil {
+		return e
+	}
 	var valid bool
 	if e = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active AND dbhub_member_role(id) IS NOT NULL)=cardinality($1::bigint[]) AND (SELECT count(*) FROM sys_user_groups WHERE id=ANY($2::bigint[]))=cardinality($2::bigint[])`, nonNilIDs(a.UserIDs), nonNilIDs(a.GroupIDs)).Scan(&valid); e != nil {
 		return e

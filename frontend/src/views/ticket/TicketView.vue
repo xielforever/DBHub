@@ -46,7 +46,7 @@
       <ChangeTicketPane :tickets="tickets as any" :prefill="prefill" :create="onCreate" @update-status="onStatus" />
     </section>
 
-    <p class="text-[11px] text-white/25 text-center">工单保存到服务端，审批和执行均需管理员权限，失败结果会保留。</p>
+    <p class="text-[11px] text-white/25 text-center">工单由其他管理员审批，执行固定提交时的数据源修订；目标变化后需重新提交，失败结果会保留。</p>
   </div>
 </template>
 
@@ -82,7 +82,10 @@ async function onCreate(payload: TicketPayload):Promise<boolean> {
 async function onStatus(id:number,status:string) {
  try {
   if(status==='executed') {await ElMessageBox.confirm('执行将修改目标数据库，确认执行已批准的 SQL？','执行工单',{type:'warning',confirmButtonText:'执行',cancelButtonText:'取消'});await ticketApi.execute(id)}
-  else await ticketApi.updateStatus(id,status as TicketItem['status'])
+  else {
+   if(status==='approved')await ElMessageBox.confirm('确认已核对完整 SQL、目标数据源修订和影响范围，并批准此变更？','批准工单',{type:'warning',confirmButtonText:'批准',cancelButtonText:'取消'})
+   await ticketApi.updateStatus(id,status as TicketItem['status'])
+  }
   ElMessage.success(status==='executed'?'SQL 已实际执行':'审批已保存')
  } catch(e:unknown) {if(e instanceof Error)ElMessage.error(e.message)} finally {await reload()}
 }

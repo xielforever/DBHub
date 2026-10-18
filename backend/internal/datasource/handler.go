@@ -291,6 +291,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := h.conns.Update(r.Context(), conn); err != nil {
+		if errors.Is(err, db.ErrConnectionPolicyInUse) {
+			httpx.Fail(w, httpx.Conflict(err.Error()))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("更新连接失败", err))
 		return
 	}
@@ -316,6 +320,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.conns.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, db.ErrConnectionPolicyInUse) {
+			httpx.Fail(w, httpx.Conflict(err.Error()))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("删除连接失败", err))
 		return
 	}
@@ -603,6 +611,10 @@ func (h *Handler) DeleteTunnel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.tunnels.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, db.ErrNetworkInUse) {
+			httpx.Fail(w, httpx.Conflict(err.Error()))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("删除隧道失败", err))
 		return
 	}
@@ -623,6 +635,10 @@ func (h *Handler) TestTunnel(w http.ResponseWriter, r *http.Request) {
 	t := &db.SSHTunnel{
 		Host: in.Host, Port: in.Port, Username: in.Username, AuthType: in.AuthType, HostKey: in.HostKey,
 		PrivateKey: in.PrivateKey, Passphrase: in.Passphrase, Password: in.Password,
+	}
+	if err := target.ValidateDestination(&db.Connection{Host: t.Host, Port: t.Port}); err != nil {
+		httpx.Fail(w, httpx.BadRequest(err.Error()))
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()

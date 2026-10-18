@@ -60,9 +60,21 @@ func (r *UserRepository) SaveGroup(ctx context.Context, g *UserGroup, expected i
 		return e
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
+	if g.ID > 0 {
+		var version int64
+		if e = tx.QueryRow(ctx, `SELECT version FROM sys_user_groups WHERE id=$1 FOR UPDATE`, g.ID).Scan(&version); e != nil {
+			if e == pgx.ErrNoRows {
+				return ErrSourceVersionConflict
+			}
+			return e
+		}
+		if version != expected {
+			return ErrSourceVersionConflict
+		}
+	}
 	if g.ID > 0 && containsID(g.MemberIDs, ActorID(ctx)) {
 		var selfGrant bool
-		e = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM sys_user_group_members WHERE group_id=$1 AND user_id=$2) AND (EXISTS(SELECT 1 FROM sys_source_grants WHERE group_id=$1) OR EXISTS(SELECT 1 FROM sys_report_reviews rv JOIN sys_report_releases re ON re.review_id=rv.id JOIN sys_managed_reports mr ON mr.active_release_id=re.id WHERE rv.manifest->'group_ids' @> jsonb_build_array($1::bigint)) OR EXISTS(SELECT 1 FROM sys_managed_dashboards d JOIN sys_dashboard_releases re ON re.id=d.active_release_id JOIN sys_dashboard_reviews rv ON rv.id=re.review_id JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE v.definition->'group_ids' @> jsonb_build_array($1::bigint)))`, g.ID, ActorID(ctx)).Scan(&selfGrant)
+		e = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM sys_user_group_members WHERE group_id=$1 AND user_id=$2) AND (EXISTS(SELECT 1 FROM sys_source_grants WHERE group_id=$1) OR EXISTS(SELECT 1 FROM sys_report_reviews rv JOIN sys_report_releases re ON re.review_id=rv.id WHERE rv.manifest->'group_ids' @> jsonb_build_array($1::bigint)) OR EXISTS(SELECT 1 FROM sys_dashboard_releases re JOIN sys_dashboard_reviews rv ON rv.id=re.review_id JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE v.definition->'group_ids' @> jsonb_build_array($1::bigint)))`, g.ID, ActorID(ctx)).Scan(&selfGrant)
 		if e != nil {
 			return e
 		}

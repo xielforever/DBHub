@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -61,7 +60,7 @@ func (r *ShareRepository) GetByHash(ctx context.Context, hash string) (*ShareTok
 func (r *ShareRepository) ListBySubject(ctx context.Context, subjectType string, subjectID int64) ([]ShareToken, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, subject_type, subject_id, token_hash, created_by, expire_at, access_count, revoked, created_at
-		FROM sys_share_tokens WHERE subject_type=$1 AND subject_id=$2 ORDER BY created_at DESC`, subjectType, subjectID)
+		FROM sys_share_tokens WHERE subject_type=$1 AND subject_id=$2 AND created_by=$3 ORDER BY created_at DESC`, subjectType, subjectID, ActorID(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +82,7 @@ func (r *ShareRepository) IncrementAccess(ctx context.Context, id int64) error {
 }
 
 func (r *ShareRepository) Revoke(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE sys_share_tokens SET revoked=true WHERE id=$1`, id)
+	tag, err := r.pool.Exec(ctx, `UPDATE sys_share_tokens SET revoked=true WHERE id=$1 AND created_by=$2`, id, ActorID(ctx))
 	if err != nil {
 		return err
 	}
@@ -94,12 +93,12 @@ func (r *ShareRepository) Revoke(ctx context.Context, id int64) error {
 }
 
 func (r *ShareRepository) Delete(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_share_tokens WHERE id=$1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_share_tokens WHERE id=$1 AND created_by=$2`, id, ActorID(ctx))
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("not found")
+		return ErrNotFound
 	}
 	return nil
 }

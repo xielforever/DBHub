@@ -72,6 +72,8 @@ jobs:
           DBHUB_SOURCE_BUNDLE="$DBHUB_STATE_DIR/source-release" python scripts/deploy/runtime_check.py
       - name: 报表与仪表盘真实浏览器回归
         run: python scripts/cloud/dashboard_acceptance.py
+      - name: 独立审批与 Cookie CSRF 真实浏览器安全回归
+        run: python scripts/cloud/security_acceptance.py
       - name: 故障恢复、限流与完整备份恢复
         run: python scripts/cloud/production_acceptance.py --duration 0
       - name: 通知、数据源后台任务与自动备份

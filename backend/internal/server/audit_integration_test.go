@@ -149,6 +149,7 @@ func TestAuditOperationCoverage(t *testing.T) {
 	})
 	t.Run("export-approval-download-and-denials", func(t *testing.T) {
 		a.t = t
+		reviewer := securityReviewer(a)
 		export := a.call("POST", "/query/exports", a.admin, map[string]any{"connection_id": a.connID, "sql": "SELECT id FROM " + a.table, "format": "json", "reason": "audit verification"}, 200)
 		id := int64(export["id"].(float64))
 		path := fmt.Sprintf("/query/exports/%d", id)
@@ -160,7 +161,9 @@ func TestAuditOperationCoverage(t *testing.T) {
 		if row.Context.AuthFailure != "insufficient_role" {
 			t.Fatal("role rejection escaped audit")
 		}
-		a.call("POST", path+"/review", a.admin, map[string]any{"status": "approved"}, 200)
+		a.call("POST", path+"/review", a.admin, map[string]any{"status": "approved"}, 409)
+		expectAudit(t, a, "EXPORT_REVIEW", "rejected")
+		a.call("POST", path+"/review", reviewer, map[string]any{"status": "approved"}, 200)
 		expectAudit(t, a, "EXPORT_REVIEW", "export_approved")
 		a.call("GET", path+"/download", a.admin, nil, 200)
 		row = expectAudit(t, a, "EXPORT_DOWNLOAD", "download_response")

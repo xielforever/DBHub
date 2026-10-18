@@ -488,6 +488,7 @@ const rankOption = computed<EChartsCoreOption>(() => ({
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
     ...glassTooltip,
+    renderMode: 'richText',
     formatter: (params: Array<{ name: string; value: number }>) =>
       `${params[0]?.name}: ${params[0]?.value.toLocaleString()} 次`,
   },

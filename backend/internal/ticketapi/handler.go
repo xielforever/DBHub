@@ -113,19 +113,27 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("工单数据库必须与发布修订一致"))
 		return
 	}
+	if in.Database == "" {
+		in.Database = conn.Database
+	}
 	t := &db.Ticket{
-		Title:        in.Title,
-		Type:         in.Type,
-		TableName:    in.Table,
-		DatabaseName: in.Database,
-		ConnectionID: in.ConnectionID,
-		SQLText:      in.SQL,
-		Risk:         in.Risk,
-		Status:       "pending",
-		RequesterID:  c.Subject,
-		Reason:       in.Reason,
+		Title:                in.Title,
+		Type:                 in.Type,
+		TableName:            in.Table,
+		DatabaseName:         in.Database,
+		ConnectionID:         in.ConnectionID,
+		DefinitionRevisionID: conn.DefinitionRevisionID,
+		SQLText:              in.SQL,
+		Risk:                 in.Risk,
+		Status:               "pending",
+		RequesterID:          c.Subject,
+		Reason:               in.Reason,
 	}
 	if err := h.tickets.Create(r.Context(), t); err != nil {
+		if errors.Is(err, db.ErrManagedConflict) {
+			httpx.Fail(w, httpx.Conflict("目标连接已变化，请核对后重新提交"))
+			return
+		}
 		h.log.Error("创建工单失败", "err", err)
 		httpx.Fail(w, httpx.Internal("创建工单失败", err))
 		return
@@ -207,7 +215,7 @@ func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if e := h.tickets.Review(r.Context(), id, in.Status, claimsOf(r).Subject); e != nil {
-		httpx.Fail(w, httpx.Conflict("工单已处理或不存在"))
+		httpx.Fail(w, httpx.Conflict("工单已处理、目标已变化或无独立审批权限"))
 		return
 	}
 	httpx.OK(w, map[string]any{"id": id, "status": in.Status})
@@ -225,15 +233,23 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("历史工单没有目标连接，请重新建单"))
 		return
 	}
+	if ticket.DefinitionRevisionID == nil {
+		httpx.Fail(w, httpx.Conflict("历史工单缺少已核对的目标修订，请重新提交"))
+		return
+	}
 	conn, password, e := h.conns.GetSecrets(r.Context(), *ticket.ConnectionID)
 	if errors.Is(e, db.ErrNotFound) {
-		personalID, resolveErr := h.conns.ResolvePersonal(r.Context(), *ticket.ConnectionID)
+		personalID, resolveErr := h.conns.ResolveDefinition(r.Context(), *ticket.DefinitionRevisionID)
 		if resolveErr == nil {
 			conn, password, e = h.conns.GetSecrets(r.Context(), personalID)
 		}
 	}
 	if e != nil {
 		httpx.Fail(w, httpx.BadRequest("请先为工单目标的相同修订配置本人的连接"))
+		return
+	}
+	if conn.DefinitionRevisionID == nil || *conn.DefinitionRevisionID != *ticket.DefinitionRevisionID {
+		httpx.Fail(w, httpx.Conflict("目标修订已变化，请核对目标后重新提交工单"))
 		return
 	}
 	if ticket.DatabaseName != "" {
@@ -247,7 +263,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if e = h.tickets.ClaimExecution(r.Context(), id, claimsOf(r).Subject); e != nil {
+	if e = h.tickets.ClaimExecution(r.Context(), id, claimsOf(r).Subject, *ticket.DefinitionRevisionID); e != nil {
 		httpx.Fail(w, httpx.Conflict("仅可执行已批准且尚未执行的工单"))
 		return
 	}
@@ -258,7 +274,12 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	var result *target.ExecResult
 	if execErr == nil {
 		defer handle.Close()
-		result, execErr = target.ExecuteWithOptions(ctx, handle, ticket.SQLText, false, target.ExecuteOptions{Timeout: 30 * time.Second, MaxRows: 100, AllowUnsafeWrite: true, BeforeExecute: func() error { return h.conns.ValidateCurrent(ctx, conn) }})
+		result, execErr = target.ExecuteWithOptions(ctx, handle, ticket.SQLText, false, target.ExecuteOptions{Timeout: 30 * time.Second, MaxRows: 100, AllowUnsafeWrite: true, BeforeExecute: func() error {
+			if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
+				return err
+			}
+			return h.tickets.CheckExecution(ctx, id, *ticket.DefinitionRevisionID)
+		}})
 	}
 	// An approver's database identity must not become a result-data channel to
 	// the requester, including DML RETURNING and vendor utility statements.

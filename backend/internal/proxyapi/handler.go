@@ -147,6 +147,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.proxies.Delete(r.Context(), id); err != nil {
+		if errors.Is(err, db.ErrNetworkInUse) {
+			httpx.Fail(w, httpx.Conflict(err.Error()))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("删除代理失败", err))
 		return
 	}

@@ -36,13 +36,16 @@
           <span class="text-[10px] px-1 py-0.5 rounded bg-white/10 text-white/40">{{ typeLabel(t.type) }}</span>
           <span class="text-[10px] text-white/30">{{ formatTime(t.created_at) }}</span>
         </div>
-        <p class="text-[11px] font-mono text-white/45 truncate mt-1">{{ t.sql.slice(0,120) }}</p>
+        <pre v-if="t.status==='pending' && isAdmin" class="text-xs font-mono text-white/75 whitespace-pre-wrap break-all max-h-56 overflow-auto mt-2">{{ t.sql }}</pre>
+        <p v-else class="text-[11px] font-mono text-white/45 truncate mt-1">{{ t.sql.slice(0,120) }}</p>
+        <p class="text-[11px] text-white/45 mt-1">连接 #{{ t.connection_id ?? '已删除' }} · 数据源修订 #{{ t.definition_revision_id ?? '需重新提交' }} · 数据库 {{ t.database_name || '默认' }}</p>
         <p class="text-[11px] text-white/30 mt-1 flex items-center gap-2">
           <span>表 {{ t.table }}</span><span>·</span><span>申请人 {{ t.requester }}</span><span class="hidden sm:inline">· 风险 {{ riskBadge(t.risk) }}</span>
         </p>
         <div class="flex gap-1 mt-2">
-          <button v-if="t.status==='pending' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[11px] text-emerald-300" @click="updateStatus(t.id,'approved')">批准</button>
-          <button v-if="t.status==='pending' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[11px] text-rose-300" @click="updateStatus(t.id,'rejected')">拒绝</button>
+          <button v-if="t.status==='pending' && isAdmin && t.requester_id!==userId" class="ghost-button !py-0.5 !px-2 text-[11px] text-emerald-300" @click="updateStatus(t.id,'approved')">批准</button>
+          <button v-if="t.status==='pending' && isAdmin && t.requester_id!==userId" class="ghost-button !py-0.5 !px-2 text-[11px] text-rose-300" @click="updateStatus(t.id,'rejected')">拒绝</button>
+          <span v-if="t.status==='pending' && isAdmin && t.requester_id===userId" class="text-[11px] text-white/40">等待其他管理员审批</span>
           <button v-if="t.status==='approved' && isAdmin" class="ghost-button !py-0.5 !px-2 text-[11px] text-indigo-300" @click="updateStatus(t.id,'executed')">执行 SQL</button>
           <button class="ghost-button !py-0.5 !px-2 text-[11px]" @click="copySql(t.sql)">复制 SQL</button>
           <div class="flex-1" />
@@ -124,6 +127,7 @@ const emit = defineEmits<{
 const loading = ref(false)
 const connections=ref<ConnectionItem[]>([])
 const isAdmin=computed(()=>useUserStore().role==='admin')
+const userId=computed(()=>useUserStore().user?.id)
 onMounted(async()=>{try{connections.value=(await connectionApi.list()).items.filter(c=>c.type!=='redis')}catch{}})
 const statusFilter = ref('')
 const keyword = ref('')

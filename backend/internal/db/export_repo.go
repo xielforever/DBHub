@@ -42,7 +42,10 @@ func (r *QueryControls) ListExports(ctx context.Context, uid int64, admin bool) 
 	return out, rows.Err()
 }
 func (r *QueryControls) ReviewExport(ctx context.Context, id, uid int64, status string) error {
-	tag, e := r.pool.Exec(ctx, `UPDATE sys_export_requests SET status=$2,reviewed_by=$3 WHERE id=$1 AND status='pending'`, id, status, uid)
+	if !ActorAdmin(ctx) || uid != ActorID(ctx) || status != "approved" && status != "rejected" {
+		return ErrManagedDenied
+	}
+	tag, e := r.pool.Exec(ctx, `UPDATE sys_export_requests SET status=$2,reviewed_by=$3 WHERE id=$1 AND status='pending' AND user_id<>$3`, id, status, uid)
 	if e == nil && tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}

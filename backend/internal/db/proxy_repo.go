@@ -2,11 +2,13 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/user/dbhub/pkg/crypto"
 )
@@ -176,14 +178,16 @@ func (r *ProxyRepository) Update(ctx context.Context, p *Proxy) error {
 }
 
 func (r *ProxyRepository) Delete(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_proxies WHERE id=$1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_proxies WHERE id=$1 AND user_id=$2`, id, ActorID(ctx))
 	if err != nil {
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "23503" {
+			return ErrNetworkInUse
+		}
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	// 清理 connections 引用
-	_, _ = r.pool.Exec(ctx, `UPDATE sys_connections SET proxy_id=NULL WHERE proxy_id=$1`, id)
 	return nil
 }

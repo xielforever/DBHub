@@ -218,6 +218,9 @@ func audience(ctx context.Context, tx pgx.Tx, users, groups []int64) error {
 	if !validateSubjects(users) || !validateSubjects(groups) || len(users)+len(groups) == 0 {
 		return fmt.Errorf("%w: 至少选择一个有效用户或用户组", ErrManagedInput)
 	}
+	if err := lockAudienceGroups(ctx, tx, groups); err != nil {
+		return err
+	}
 	var valid bool
 	e := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active AND dbhub_member_role(id) IS NOT NULL)=cardinality($1::bigint[]) AND (SELECT count(*) FROM sys_user_groups WHERE id=ANY($2::bigint[]))=cardinality($2::bigint[])`, nonNilIDs(users), nonNilIDs(groups)).Scan(&valid)
 	if e != nil {

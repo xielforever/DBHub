@@ -29,6 +29,16 @@ SMOKE_TESTS = (
     'TestConnectorJDBCRealHTTP', 'TestAutomationInbox', 'TestAutomationSourceTasks',
     'TestMembershipRevokeRestoreInvalidatesOldQueryAndTransaction',
     'TestReadinessTracksSessionDependencyRecovery',
+    'TestSecurityAuditIndependentApprovals', 'TestSecurityAuditTicketTargetCannotDrift',
+    'TestSecurityAuditLegacyShareOwnership', 'TestSecurityAuditHistoryDeletionIsPersonal',
+    'TestSecurityAuditLegacyDashboardOwnership',
+    'TestSecurityAuditNetworkDependencyDeletion', 'TestSecurityAuditSSHTestHonorsAllowlist',
+    'TestSecurityAuditRedisRevocationBeforeDispatch',
+    'TestSecurityAuditReportBeneficiaryCannotBypassProposal',
+    'TestSecurityAuditCookieMutationNeedsCSRFHeader', 'TestSecurityAuditStaleAdminIdentityContext',
+    'TestSecurityAuditConcurrentIndependentDecisions',
+    'TestSecurityAuditReportBenefitRecheckedAtEveryGate',
+    'TestSecurityAuditOfflineGroupCannotSelfGrant',
 )
 OPTIONAL_GO_TESTS = {
     'TestJournalCrashHelper': 'Child-process helper, exercised by its parent tests',
@@ -41,6 +51,7 @@ OUTSIDE_SCOPE = [
     'Off-site backups, application key/driver/audit volume recovery and agreed RPO/RTO',
     'Real business workload capacity, alert delivery and multi-instance failover',
     'Full datasource version matrix and commercial GaussDB topology/TLS acceptance',
+    'Complete Go, JDBC/JRE and operating-system vulnerability scans with current advisory databases',
 ]
 
 
@@ -138,6 +149,7 @@ def commands(profile, suffix, soak_seconds, clients):
                 cmd += ['--secret', 'id=proxy_ca,src=' + ca]
             steps.append(('image-' + name, cmd + [context]))
         steps += [('dashboard', [sys.executable, 'scripts/cloud/dashboard_acceptance.py']),
+                  ('security-browser', [sys.executable, 'scripts/cloud/security_acceptance.py']),
                   ('production', [sys.executable, 'scripts/cloud/production_acceptance.py', '--duration', str(soak_seconds), '--clients', str(clients)]),
                   ('automation', [sys.executable, 'scripts/cloud/automation_acceptance.py'])]
     return steps, images
@@ -215,7 +227,7 @@ def main():
                     raise RuntimeError(name + ' failed; inspect private log ' + str(log))
                 if name == 'frontend':
                     item['tests_passed'] = frontend_results(log)
-                elif name in ('dashboard', 'production', 'automation'):
+                elif name in ('dashboard', 'security-browser', 'production', 'automation'):
                     item.update(acceptance_result(sorted(set(folder.glob('*/checks.json')) - previous)))
                     if name == 'production':
                         load = json.loads(Path(item['report']).read_text()).get('load', {})

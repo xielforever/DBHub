@@ -10,6 +10,7 @@ export interface TicketItem {
   table: string
   database_name: string
   connection_id?: number | null
+  definition_revision_id?: number | null
   sql: string
   risk: 'low' | 'medium' | 'high'
   status: 'pending' | 'approved' | 'rejected' | 'executing' | 'executed' | 'failed'
@@ -30,6 +31,7 @@ type RawTicket = {
   table_name: string
   database_name: string
   connection_id: number | null
+  definition_revision_id?: number | null
   sql: string
   sql_text: string
   risk: string
@@ -49,6 +51,7 @@ function adapt(raw: RawTicket): TicketItem {
     table: raw.table || raw.table_name,
     database_name: raw.database_name || '',
     connection_id: raw.connection_id,
+    definition_revision_id: raw.definition_revision_id,
     sql: raw.sql || raw.sql_text,
     risk: raw.risk as TicketItem['risk'],
     status: raw.status as TicketItem['status'],

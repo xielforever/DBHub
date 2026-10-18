@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/db"
 )
@@ -308,6 +309,28 @@ func TestMetadataSyncReliability(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer a.pool.Exec(ctx, "DROP ROLE "+roleSQL)
+		// Give this timeout/lock fixture its own target database. Collecting
+		// the shared metadata database could otherwise hit another test's
+		// migration locks and fail the initial, intentionally healthy scan.
+		targetName := name + "_partial"
+		targetSQL := pgx.Identifier{targetName}.Sanitize()
+		if _, err := a.pool.Exec(ctx, "CREATE DATABASE "+targetSQL); err != nil {
+			t.Fatal(err)
+		}
+		defer a.pool.Exec(ctx, "DROP DATABASE "+targetSQL+" WITH (FORCE)")
+		cfg := a.pool.Config().Copy()
+		cfg.ConnConfig.Database = targetName
+		cfg.ConnConfig.RuntimeParams["search_path"] = "public"
+		targetPool, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer targetPool.Close()
+		for _, schema := range schemas {
+			if _, err := targetPool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()+"; CREATE TABLE "+pgx.Identifier{schema, "same"}.Sanitize()+"(id int)"); err != nil {
+				t.Fatal(err)
+			}
+		}
 		limited := *conn
 		limited.DefinitionRevisionID = nil
 		limited.DefinitionFamilyID = ""
@@ -315,12 +338,17 @@ func TestMetadataSyncReliability(t *testing.T) {
 		limited.DefinitionRevisionID = nil
 		limited.DefinitionFamilyID = ""
 		limited.Name = "limited-sync"
+		limited.Database = targetName
 		limited.Username = role
 		limited.Password = "SyncProbePassword!9"
 		if err := a.deps.Conns.Create(ctx, &limited); err != nil {
 			t.Fatal(err)
 		}
 		defer a.deps.Conns.Delete(ctx, limited.ID)
+		// A published revision bounds collection to this database; private
+		// connections intentionally allow browsing other reachable databases.
+		definition := a.call("POST", fmt.Sprintf("/connections/%d/publish", limited.ID), a.admin, map[string]any{"visibility": "global"}, 201)
+		a.call("POST", fmt.Sprintf("/connections/%d/revision", limited.ID), a.admin, map[string]any{"definition_revision_id": definition["id"], "username": role, "password": "SyncProbePassword!9", "confirmed": true}, 200)
 		body := map[string]any{"connection_id": limited.ID}
 		first := a.call("POST", "/assets/sync", a.admin, body, 200)
 		status := first["connections"].([]any)[0].(map[string]any)
@@ -328,7 +356,7 @@ func TestMetadataSyncReliability(t *testing.T) {
 			t.Fatalf("initial real collection failed: %v", status["errors"])
 		}
 		before := digest(limited.ID)
-		lock, err := a.pool.Begin(ctx)
+		lock, err := targetPool.Begin(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}

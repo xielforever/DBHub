@@ -99,6 +99,9 @@ func (r *ManagedReportRepository) RegisterValidation(ctx context.Context, id str
 	if e = audience(ctx, tx, x.UserIDs, x.GroupIDs); e != nil {
 		return e
 	}
+	if e = r.checkAudienceChange(ctx, tx, x.ReviewID, x.AccountID, x.UserIDs, x.GroupIDs, true); e != nil {
+		return e
+	}
 	raw, _ := json.Marshal(x.Manifest)
 	_, e = tx.Exec(ctx, `INSERT INTO sys_report_validations(id,review_id,account_id,account_generation,account_version,manifest,manifest_hash,performed_by) VALUES($1::uuid,$2,$3,$4,$5,$6::jsonb,$7,$8)`, id, x.ReviewID, x.AccountID, x.Generation, x.AccountVersion, string(raw), x.Hash, ActorID(ctx))
 	if e != nil {
@@ -169,8 +172,9 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 		var selected *int64
 		if kind != "unpublish" {
 			var accountID, targetVersion int64
+			var decider *int64
 			var raw []byte
-			e = tx.QueryRow(ctx, `SELECT rv.account_id,rv.manifest,v.number FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id WHERE rv.id=$1 AND v.report_id=$2 AND rv.status='approved'`, reviewID, id).Scan(&accountID, &raw, &targetVersion)
+			e = tx.QueryRow(ctx, `SELECT rv.account_id,rv.manifest,v.number,rv.decided_by FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id WHERE rv.id=$1 AND v.report_id=$2 AND rv.status='approved'`, reviewID, id).Scan(&accountID, &raw, &targetVersion, &decider)
 			if e != nil {
 				return out, ErrManagedConflict
 			}
@@ -200,6 +204,16 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 			// conditions. A historical restore still validates the current
 			// account, audience, impact and publication number above/below.
 			if !wasPublished {
+				var role *string
+				if e = tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, decider).Scan(&role); e != nil {
+					return out, e
+				}
+				if role == nil || *role != "admin" || decider == nil {
+					return out, ErrManagedConflict
+				}
+				if e = reportReviewerBenefit(ctx, tx, reviewID, m.UserIDs, m.GroupIDs, *decider); e != nil {
+					return out, e
+				}
 				if e = r.checkAudienceChange(ctx, tx, reviewID, accountID, m.UserIDs, m.GroupIDs, false); e != nil {
 					return out, e
 				}

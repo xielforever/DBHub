@@ -1,0 +1,267 @@
+{
+  "schema_version": 1,
+  "started_date": "2026-10-18",
+  "base_commit": "4752d0ec93127c5ce690eeee177f862c5dc43558",
+  "source_changed_during_development": true,
+  "production_approval": "not_evaluated",
+  "scope": {
+    "literal_route_declarations": 218,
+    "literal_mutating_route_declarations": 126,
+    "includes_dynamic_command_and_workspace_alias_review": true
+  },
+  "findings": [
+    {
+      "id": "S01",
+      "priority": "P1",
+      "problem": "正式报表通过普通草稿送审，可绕过专用受众变更的新增受益人检查",
+      "remediation": "验证、验证记录入库、审批及首次发布均检查审阅人是否新增受益；下线后仍比较最近发布的受众。覆盖直接授权与组成员变化，保留独立审批和历史恢复正向用例",
+      "status": "fixed"
+    },
+    {
+      "id": "S02",
+      "priority": "P1",
+      "problem": "管理员可审批自己提交的变更工单",
+      "remediation": "仓储原子更新要求当前管理员、真实操作者及申请人不同；并发决定只有一次成功；执行仍需已批准状态",
+      "status": "fixed"
+    },
+    {
+      "id": "S03",
+      "priority": "P2",
+      "problem": "管理员可批准自己的导出申请",
+      "remediation": "独立管理员审批，禁止覆盖已决定状态；下载仍限申请人及其当前连接授权。历史自批的导出恢复待审",
+      "status": "fixed"
+    },
+    {
+      "id": "S04",
+      "priority": "P1",
+      "problem": "工单只保存可修改的个人连接 ID，批准后可更换目标修订再执行",
+      "remediation": "提交时冻结目标修订与数据库；审批、领取执行及发 SQL 前校验；执行者使用自己的同修订凭据，禁止借用申请人凭据",
+      "status": "fixed"
+    },
+    {
+      "id": "S05",
+      "priority": "P1",
+      "problem": "Redis 建立会话后撤销数据源权限，仍可派发删除命令",
+      "remediation": "在每次读取、扫描、概览及修改命令前重查当前成员、源授权、配置与驱动；真实 Redis 撤权用例确认原键保留",
+      "status": "fixed"
+    },
+    {
+      "id": "S06",
+      "priority": "P1",
+      "problem": "管理员请求暂停期间被撤权并恢复后，维护连接可继续重置其他人的密码",
+      "remediation": "维护事务锁定并核对捕获的成员版本；旧请求失败，新请求按当前授权正常执行",
+      "status": "fixed"
+    },
+    {
+      "id": "S07",
+      "priority": "P1",
+      "problem": "Cookie 兜底认证的修改请求缺少 CSRF 防护",
+      "remediation": "Cookie 修改请求必须带 `X-DBHub-CSRF: 1`，前端自动携带；跨源浏览器必须通过生产 CORS 白名单预检；普通 Bearer API 调用不增加要求",
+      "status": "fixed"
+    },
+    {
+      "id": "S08",
+      "priority": "P1",
+      "problem": "SSH 连通性测试绕过平台目标白名单",
+      "remediation": "测试在拨号前执行相同目标校验；本地 TCP 监听用例证明白名单外地址没有收到连接",
+      "status": "fixed"
+    },
+    {
+      "id": "S09",
+      "priority": "P1",
+      "problem": "删除隧道/代理会静默转为直连；删除发布者连接会级联清除查询策略，使他人结果范围扩大",
+      "remediation": "网络引用外键改为 `RESTRICT`；承载策略的连接在删除或切换目标修订前锁定父记录并检查依赖，覆盖并发创建策略，返回 409；显式处理策略后可操作。真实复现确认删除前只读账号返回 1 行，原删除路径会扩大到 2 行",
+      "status": "fixed"
+    },
+    {
+      "id": "S10",
+      "priority": "P2",
+      "problem": "管理员可以删除他人的个人查询历史，清空路径还尝试截断共享表",
+      "remediation": "单条删除及清空始终限当前用户，工作空间 RLS 继续生效；清空自己不影响其他人的记录",
+      "status": "fixed"
+    },
+    {
+      "id": "S11",
+      "priority": "P2",
+      "problem": "已停用的旧分享接口仍允许查询或撤销其他人的记录",
+      "remediation": "列表、撤销与删除均限制创建者；无权或不存在统一 404；公开读取及新建公开分享保持停用",
+      "status": "fixed"
+    },
+    {
+      "id": "S12",
+      "priority": "P1",
+      "problem": "报表下线后，可自行加入其历史受众组，再恢复发布取得数据权限",
+      "remediation": "用户组防自授权检查包含历史发布；已有组的版本与成员检查在同一行锁内，发布与组变更串行校验",
+      "status": "fixed"
+    },
+    {
+      "id": "S13",
+      "priority": "P3",
+      "problem": "旧仪表盘收藏可修改不可见的私有对象，仓储修改与删除缺少归属条件",
+      "remediation": "收藏要求当前可见且只修改本人的收藏；仓储修改、删除也校验归属，管理员仅可维护可见的工作空间共享旧定义",
+      "status": "fixed"
+    },
+    {
+      "id": "S14",
+      "priority": "P2",
+      "problem": "概览排行的自定义提示将连接名直接作为 HTML，恶意标签可插入 DOM",
+      "remediation": "此提示改为 Canvas 富文本绘制，连接名不进入 HTML 解释；真实生产浏览器验证恶意 `img` 标签不再生成元素。此处复现的是 HTML 注入，未将其夸大为已绕过生产 CSP 执行脚本",
+      "status": "fixed"
+    }
+  ],
+  "validation": {
+    "backend_full_race_vet": {
+      "status": "passed",
+      "private_log": "/workspace/dbhub-cloud/security-audit-verified-go.jsonl",
+      "commands": [
+        "go test -race -p=4 -json ./... -count=1 -timeout=15m",
+        "go vet -p=4 ./..."
+      ],
+      "packages_with_tests": 17,
+      "coverage": {
+        "passed_events_including_subtests": 384,
+        "skipped": [
+          "TestJournalCrashHelper",
+          "TestOpenGaussDemoHTTP",
+          "TestVersionMatrixTarget"
+        ],
+        "optional_skip_reasons": {
+          "TestJournalCrashHelper": "Child-process helper, exercised by its parent tests",
+          "TestOpenGaussDemoHTTP": "Run opengauss-demo-check.py separately; commercial GaussDB still needs real acceptance",
+          "TestVersionMatrixTarget": "Run compatibility.py separately for the full version matrix"
+        },
+        "missing_required_tests": [],
+        "unexpected_skips": [],
+        "failed_tests": []
+      },
+      "go_source_and_tests_sha256": "16cd8b027c3f1ad4806a2bce9b1b23a0b27674ac31916de03c5017c80df1f008",
+      "source_unchanged_during_verified_run": true
+    },
+    "targeted_policy_lifecycle": {
+      "status": "passed",
+      "private_log": "/workspace/dbhub-cloud/security-audit-policy-lifecycle.jsonl"
+    },
+    "frontend": {
+      "status": "passed",
+      "tests": 44,
+      "npm_audit_vulnerabilities": 0,
+      "typecheck": true,
+      "production_build": true
+    },
+    "production_browser": {
+      "status": "passed",
+      "checks": {
+        "candidate_images_and_current_migrations": {
+          "count": 37
+        },
+        "browser_independent_approval_full_sql_target_and_single_execution": true,
+        "browser_untrusted_connection_name_is_not_rendered_as_tooltip_html": true,
+        "production_publisher_delete_preserves_other_users_row_policy": true,
+        "browser_legitimate_cookie_only_mutation_with_csrf_header": true,
+        "browser_same_site_csrf_simple_post_and_untrusted_preflight_blocked": true
+      },
+      "temporary_resources_removed": true,
+      "backend_image": "sha256:fd0a0e43fe9bc64740237c84b70f95e6bc3edf6f882bda426fb34945b4d58db6",
+      "frontend_image": "sha256:af62405d327bd75d997437fc31541e259a15c3fcf2329c09709951912b5b5528",
+      "backend_binary_sha256": "99c436f069c9b57bce4b950eba1a68171253c6c52dd5958a4d61617014a93b2e",
+      "private_report": "/workspace/dbhub-cloud/production-acceptance/045cddee99/checks.json"
+    },
+    "regression_runner_selftests": {
+      "status": "passed",
+      "tests": 9
+    },
+    "workflow_actionlint": {
+      "status": "passed",
+      "version": "1.7.7"
+    },
+    "go_vulnerability_scan": {
+      "status": "blocked",
+      "database": "https://vuln.go.dev",
+      "reason": "Cloud network policy rejected advisory database access",
+      "vulnerability_count": null
+    },
+    "metadata_old_database_upgrade": {
+      "status": "passed",
+      "test": "TestSecurityUpgradePreservesHistoryAndInvalidatesUnsafeApprovals",
+      "old_migrations": 36,
+      "new_migrations": 37
+    }
+  },
+  "upgrade": {
+    "migration": "0037_security_execution_boundaries.sql",
+    "total_migrations": 37,
+    "old_pending_or_approved_tickets": "preserved_as_rejected_resubmission_required",
+    "historical_executing_executed_failed_tickets": "preserved",
+    "historical_self_approved_exports": "returned_to_pending",
+    "referenced_network_config_deletion": "409",
+    "connections_with_query_policies": "409_before_delete_or_target_revision_change",
+    "cookie_mutation_header": "X-DBHub-CSRF: 1"
+  },
+  "not_verified": [
+    "Production deployment network/TLS/secrets and business account privileges",
+    "Complete Go/JDBC/JRE/OS vulnerability scans",
+    "Actual production metadata upgrade/restore, business workload and UAT",
+    "Real Kubernetes cluster and commercial GaussDB"
+  ],
+  "source_file_sha256": {
+    ".github/workflows/production-readiness.yml": "c8b843ec7ff40eea817bceb4658e2db2d5de4ce2d12d39cc92dd4630419a7e8c",
+    "backend/internal/connectorruntime/runtime.go": "822d3ffece22538f11d663a318a1016b1201a0effc055416f9e41b7e34824693",
+    "backend/internal/datasource/catalog.go": "06d466755d6010e7eadea6ed3868ee2e742d07773879cc6ab5bb754af82d23e5",
+    "backend/internal/datasource/handler.go": "4f478da4d17f8010ddf914451516f11915d1a5f7e8659d09f1cc91244a2601d4",
+    "backend/internal/db/connection_repo.go": "d3a74aa2000e6f4da2fd83b022b42f708fcd81372bb3c3c93a26bdef864bf730",
+    "backend/internal/db/dashboard_audience.go": "4dc06c3fba57ce080058e99889a7ef13fa6d0c5ca650865ae755e531408c8c06",
+    "backend/internal/db/dashboard_repo.go": "979f905bfadd6f372b6e186a12e19239f6425c30f4058c6570dcbdad8ed31420",
+    "backend/internal/db/db.go": "b1f11a3808ee8c9265935e40b17faf79f4f46a1dd3f527e25dd36c41ca74d864",
+    "backend/internal/db/export_repo.go": "781d7f33acf775087261d5c33a3f88c5c3deb2fce0f03d5e6553ba4e5240febb",
+    "backend/internal/db/history_repo.go": "b1eb7963bb224bf0d8c6dbc99c20a0381208d07bb30768d0ffcd91a56685e89d",
+    "backend/internal/db/managed_report_types.go": "f999488ab53bd775dcc34a5d7ddb24a2d5e931635384b934ef196f012e42da5c",
+    "backend/internal/db/migrations/0037_security_execution_boundaries.sql": "345317285e1deb6dab48cf1a5b2cf0d66d7669a029703705ed9676283f213e02",
+    "backend/internal/db/proxy_repo.go": "295d3b8a70a357e75567bbd192bd7a4c25064a379224e115d26c6e7f6f32e69a",
+    "backend/internal/db/report_access_requests.go": "c37aadb8b5e59b13a24b97091e80b34d204f497597f9aa0c36132f16019bcf5f",
+    "backend/internal/db/report_audience.go": "5a5352342bfa2f8781bd2d38fc39b21aa46fb96778e9f37c533fa949529bee71",
+    "backend/internal/db/report_publication_repo.go": "a5d902f07db24cb91d19a9f73f78966772cc2bda515b909ae28b1e3c029ce698",
+    "backend/internal/db/security_migration_test.go": "1d1db43a164d56de5675531b1de840f33671be84b1b744d4889f3e99ad681d1d",
+    "backend/internal/db/share_repo.go": "bb36021772f642cae9c9cd9d242272e1d869f37a0ac4be5802574f19770d481b",
+    "backend/internal/db/source_definition.go": "ebfdf08af92571c9c5aa84ebb6f619e3b384281072f412bf18ee4ced035b0f7c",
+    "backend/internal/db/source_directory.go": "605004ca44cb8794f9258103afb2285295ba68f019a103a8a90d917fd2a836a1",
+    "backend/internal/db/ticket_repo.go": "3f5564ccf735a5e9f618813e839eb2b25124e3cb2d9ba64fe5aaabcc4006653d",
+    "backend/internal/db/tunnel_repo.go": "77b7fca4407fd56c99d99195eb164ad5eb3d944dc341333fa1eafc1bdf2165b7",
+    "backend/internal/db/user_groups.go": "a22d86a9234199eb697b194ba85db299af0e554de123b3bdcd91f0cdfa8d9802",
+    "backend/internal/db/workspace_repo.go": "5db9112a0910cced7d5236b3228af37f6c54d2d7478516c11852f74a1da5daa0",
+    "backend/internal/middleware/middleware.go": "bbac27f09460fbe497ae91e98dfce6f207fd12bc3f519aba05ed1d24eaf1d33d",
+    "backend/internal/proxyapi/handler.go": "a39a1a3601011ed917982c3ad4e623608c6ab48b1357d3e9ccdf92acfaaaa7a3",
+    "backend/internal/queryapi/handler.go": "8200341208f329dfaada0cb9c3e9c33238da97d98ad495e539e73cc7a39fe8c7",
+    "backend/internal/reportapi/dashboard_handler.go": "35def69981b366012f0cbdb466c4d0feded09f67f77ea8e03425f83b1f72ac84",
+    "backend/internal/reportapi/share_handler.go": "9d221ec921f04d3242aa86a8a19ace9d8ac969f3f863e0414fcf59ac6cfaaaf4",
+    "backend/internal/server/audit_integration_test.go": "5cd804f4faed518455b0b8bc5d1a131b78d2e63f4cac3b5c81283d25b71e71df",
+    "backend/internal/server/datasource_reliability_test.go": "901803b1e2531790cf46869833a7e183591afbd72e7beaa635c01ecfaa00f708",
+    "backend/internal/server/security_audit_test.go": "b3a87f38c78cd69ec39843b6130fd6724597c5fb0aee7b8acfd137e5980bf0d9",
+    "backend/internal/server/security_concurrency_test.go": "cfb099979e97483210c854e66b87cc1a7e011360244f02ef4cac8f09efd01d94",
+    "backend/internal/ticketapi/handler.go": "2f430f337a41b595041cf713c580c9bbada56b1a5bddebcfdf0ae1887e496ddf",
+    "docs/开发指南/权限与审批安全检查.md": "f673561518cdd185ef08c78bbc52401ec990493464b99eee9bcff3682817741c",
+    "docs/开发指南/生产上线评估与回归测试.md": "a22a85fa9f055882a0c52774d70e481480bbbe7270e638e015e51becab263c56",
+    "frontend/src/api/ticket.ts": "63a8dafd6e66c0fcc629308e75e868279508aaaf8f6b4f74ab313638622ae75d",
+    "frontend/src/utils/auth-cookie.ts": "b400acd8bb2e3e39d4b3a40489d79a6134857397544524257162153075a886ca",
+    "frontend/src/utils/request.ts": "f9f8a46502890f7dfe2d55e2128d873e264f348c3b8af39749cdf15e6f62968c",
+    "frontend/src/views/dashboard/DashboardView.vue": "c8bff23ef7d327db7afda27bed9a86a2cabad8e3416160b925b10a5d37122d04",
+    "frontend/src/views/query/components/ChangeTicketPane.vue": "2a7841aca605b9be1f43cd346bd23b3f3afe20b78090290e841dcb5aa9e30d53",
+    "frontend/src/views/ticket/TicketView.vue": "2d3ad51152dd7f1869064f8f500241bfaaa33ed6e35f3e5eedf94d3fe5a8fdde",
+    "scripts/cloud/regression.py": "1c4b070ac9e519a3578b52762e1c743e3e9366240b85443eb4c0dfec761bd51a",
+    "scripts/cloud/security_acceptance.py": "cbb1be53101ec7340601ef5b4aa6781c6338037bfced3a6a9b6c4c1cc6a7d8c8",
+    "scripts/cloud/test_regression.py": "cd53ddc795c8299c33ae736a367e359aee5f499fcbe30004eae1f8e8ca5a6e67"
+  },
+  "completed_at": "2026-10-18T15:43:43.485445+00:00",
+  "cloud_development": {
+    "metadata_backup_validated": true,
+    "private_backup_log": "/workspace/dbhub-cloud/security-audit-pre-upgrade-backup.log",
+    "migrations_before": 36,
+    "migrations_after": 37,
+    "backend_ready_http": 200,
+    "frontend_proxy_ready_http": 200,
+    "recent_sql_requests_before_and_after": 0,
+    "active_source_tasks": 0,
+    "pending_tickets": 0,
+    "historical_queued_receipt_from_2026_10_16": "retained_not_redispatched",
+    "production_deployed": false
+  }
+}

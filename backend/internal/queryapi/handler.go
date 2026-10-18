@@ -350,6 +350,7 @@ func (h *Handler) openRedis(r *http.Request, connID int64) (*target.RedisClient,
 	if err != nil {
 		return nil, nil, httpx.BadRequest("打开 Redis 失败: " + safeErr(err))
 	}
+	handle.BeforeOperation = func(ctx context.Context) error { return h.conns.ValidateCurrent(ctx, conn) }
 	return handle, handle.Close, nil
 }
 

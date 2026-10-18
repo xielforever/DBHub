@@ -45,6 +45,7 @@ request.interceptors.request.use((config) => {
     // 标准通道 + 自定义头兜底（部分网关会剥离 Authorization）
     config.headers.Authorization = `Bearer ${userStore.token}`
     config.headers['X-Access-Token'] = userStore.token
+    config.headers['X-DBHub-CSRF'] = '1'
     // Cookie 同源自动携带，是最不易被网关剥离的通道；每次请求确保存在
     if (!document.cookie.includes('dbhub_access_token=')) {
       setAuthCookie(userStore.token)

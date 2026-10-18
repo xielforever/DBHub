@@ -106,6 +106,7 @@ class RegressionEvidenceTests(unittest.TestCase):
             self.assertEqual('-run' in command, profile == 'smoke')
             self.assertEqual('vet' in names, profile != 'smoke')
             self.assertEqual('production' in names, profile == 'release')
+            self.assertEqual('security-browser' in names, profile == 'release')
             if profile == 'release':
                 command = next(cmd for name, cmd in steps if name == 'production')
                 self.assertEqual(command[command.index('--duration') + 1], '1800')

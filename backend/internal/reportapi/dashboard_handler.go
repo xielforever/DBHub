@@ -216,6 +216,10 @@ func (h *DashboardHandler) Star(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.dashboards.SetStar(r.Context(), id, c.Subject, in.Star); err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			httpx.Fail(w, httpx.NotFound("仪表盘不存在或无权限"))
+			return
+		}
 		httpx.Fail(w, httpx.Internal("收藏失败", err))
 		return
 	}

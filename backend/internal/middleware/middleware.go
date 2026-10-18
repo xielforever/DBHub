@@ -126,7 +126,7 @@ func CORS(allowedOrigins []string) Middleware {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Add("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-Access-Token")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-Id, X-Access-Token, X-Workspace-ID, X-DBHub-CSRF")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			}
 			if r.Method == http.MethodOptions {
@@ -188,6 +188,16 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 				} else {
 					httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "会话服务暂不可用"})
 				}
+				return
+			}
+			// SameSite cookies can still accompany a simple request from an
+			// untrusted sibling origin. Require a non-simple header whenever a
+			// mutation relies on cookie authentication. Browser cross-origin
+			// callers then need the configured CORS preflight to succeed.
+			cookieAuth := !strings.HasPrefix(strings.TrimSpace(r.Header.Get("Authorization")), "Bearer ") && strings.TrimSpace(r.Header.Get("X-Access-Token")) == ""
+			if cookieAuth && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions && r.Header.Get("X-DBHub-CSRF") != "1" {
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "csrf_header_missing" })
+				httpx.Fail(w, httpx.Forbidden("Cookie 认证的修改请求必须携带 X-DBHub-CSRF: 1"))
 				return
 			}
 			claims.Role = user.Role

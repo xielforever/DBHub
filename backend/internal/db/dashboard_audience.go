@@ -34,6 +34,10 @@ func (r *ManagedDashboardRepository) checkReviewerBenefit(ctx context.Context, q
 	if err != nil || before == nil {
 		return err
 	}
+	allGroups := append(append([]int64{}, before.GroupIDs...), next.GroupIDs...)
+	if err = lockAudienceGroups(ctx, q, allGroups); err != nil {
+		return err
+	}
 	var benefits bool
 	err = q.QueryRow(ctx, `SELECT dbhub_member_role($1) IS NOT NULL
  AND NOT ($1=ANY($2::bigint[]) OR EXISTS(SELECT 1 FROM sys_user_group_members WHERE user_id=$1 AND group_id=ANY($3::bigint[])))

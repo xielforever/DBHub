@@ -148,7 +148,7 @@ func workspaceAdminTx(ctx context.Context, tx pgx.Tx) error {
 		return ErrManagedDenied
 	}
 	var uid int64
-	e := tx.QueryRow(ctx, `SELECT m.user_id FROM sys_workspace_members m JOIN sys_users u ON u.id=m.user_id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.active AND m.role_code='admin' AND u.is_active AND w.enabled FOR SHARE OF m,u,w`, WorkspaceID(ctx), ActorID(ctx)).Scan(&uid)
+	e := tx.QueryRow(ctx, `SELECT m.user_id FROM sys_workspace_members m JOIN sys_users u ON u.id=m.user_id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.active AND m.role_code='admin' AND u.is_active AND w.enabled AND ($3::bigint=0 OR m.version=$3) FOR SHARE OF m,u,w`, WorkspaceID(ctx), ActorID(ctx), MemberEpoch(ctx)).Scan(&uid)
 	if e != nil {
 		return ErrManagedDenied
 	}
