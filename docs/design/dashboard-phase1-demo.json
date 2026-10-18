@@ -1,27 +1,684 @@
 {
-  "purpose": "Illustrative UI concept data only; not production observations",
-  "unit": "万元",
-  "as_of": "2026-10-18T09:30:00+08:00",
+  "purpose": "Illustrative UI concept data only; not production observations or a passed product test",
+  "workspace": {
+    "id": "a11dce41-4c10-47be-bdfa-97e2904d6001",
+    "name": "演示工作空间"
+  },
+  "dashboard": {
+    "name": "库存总览",
+    "publication_no": 3,
+    "binding_policy": "follow_published",
+    "allow_unknown_freshness": false,
+    "result_fresh_seconds": 300,
+    "stale_result_retention_seconds": 1800
+  },
+  "money_unit": "万元",
+  "currency": "CNY",
+  "timezone": "Asia/Shanghai",
+  "query_completed_at": "2026-10-18T09:30:00+08:00",
+  "data_as_of": "2026-10-18T09:25:00+08:00",
+  "evaluated_at": "2026-10-18T09:30:10+08:00",
   "inventory_amount": "1280.00",
   "low_stock_count": 12,
   "trend": [
-    {"date": "2026-10-12", "amount": "1160.00"},
-    {"date": "2026-10-13", "amount": "1175.00"},
-    {"date": "2026-10-14", "amount": "1182.00"},
-    {"date": "2026-10-15", "amount": "1190.00"},
-    {"date": "2026-10-16", "amount": "1210.00"},
-    {"date": "2026-10-17", "amount": "1260.00"},
-    {"date": "2026-10-18", "amount": "1280.00"}
+    {
+      "date": "2026-10-12",
+      "amount": "1160.00"
+    },
+    {
+      "date": "2026-10-13",
+      "amount": "1175.00"
+    },
+    {
+      "date": "2026-10-14",
+      "amount": "1182.00"
+    },
+    {
+      "date": "2026-10-15",
+      "amount": "1190.00"
+    },
+    {
+      "date": "2026-10-16",
+      "amount": "1210.00"
+    },
+    {
+      "date": "2026-10-17",
+      "amount": "1260.00"
+    },
+    {
+      "date": "2026-10-18",
+      "amount": "1280.00"
+    }
   ],
   "warehouses": [
-    {"name": "杭州", "amount": "620.00"},
-    {"name": "苏州", "amount": "410.00"},
-    {"name": "成都", "amount": "250.00"}
+    {
+      "name": "杭州",
+      "amount": "620.00"
+    },
+    {
+      "name": "苏州",
+      "amount": "410.00"
+    },
+    {
+      "name": "成都",
+      "amount": "250.00"
+    }
+  ],
+  "low_stock_items": [
+    {
+      "sku": "SKU001",
+      "name": "线缆",
+      "warehouse": "杭州",
+      "stock": 8,
+      "safety_stock": 20
+    },
+    {
+      "sku": "SKU002",
+      "name": "连接器",
+      "warehouse": "苏州",
+      "stock": 15,
+      "safety_stock": 30
+    },
+    {
+      "sku": "SKU003",
+      "name": "开关",
+      "warehouse": "成都",
+      "stock": 6,
+      "safety_stock": 10
+    },
+    {
+      "sku": "SKU004",
+      "name": "料箱",
+      "warehouse": "杭州",
+      "stock": 4,
+      "safety_stock": 12
+    },
+    {
+      "sku": "SKU005",
+      "name": "标签",
+      "warehouse": "杭州",
+      "stock": 2,
+      "safety_stock": 10
+    },
+    {
+      "sku": "SKU006",
+      "name": "端子",
+      "warehouse": "苏州",
+      "stock": 7,
+      "safety_stock": 20
+    },
+    {
+      "sku": "SKU007",
+      "name": "支架",
+      "warehouse": "成都",
+      "stock": 3,
+      "safety_stock": 8
+    },
+    {
+      "sku": "SKU008",
+      "name": "传感器",
+      "warehouse": "杭州",
+      "stock": 5,
+      "safety_stock": 15
+    },
+    {
+      "sku": "SKU009",
+      "name": "接头",
+      "warehouse": "苏州",
+      "stock": 9,
+      "safety_stock": 16
+    },
+    {
+      "sku": "SKU010",
+      "name": "电源",
+      "warehouse": "成都",
+      "stock": 1,
+      "safety_stock": 5
+    },
+    {
+      "sku": "SKU011",
+      "name": "导轨",
+      "warehouse": "杭州",
+      "stock": 6,
+      "safety_stock": 14
+    },
+    {
+      "sku": "SKU012",
+      "name": "按钮",
+      "warehouse": "苏州",
+      "stock": 11,
+      "safety_stock": 25
+    }
   ],
   "low_stock_preview": [
-    {"sku": "SKU001", "name": "线缆", "warehouse": "杭州", "stock": 8, "safety_stock": 20},
-    {"sku": "SKU002", "name": "连接器", "warehouse": "苏州", "stock": 15, "safety_stock": 30},
-    {"sku": "SKU003", "name": "开关", "warehouse": "成都", "stock": 6, "safety_stock": 10}
+    {
+      "sku": "SKU001",
+      "name": "线缆",
+      "warehouse": "杭州",
+      "stock": 8,
+      "safety_stock": 20
+    },
+    {
+      "sku": "SKU002",
+      "name": "连接器",
+      "warehouse": "苏州",
+      "stock": 15,
+      "safety_stock": 30
+    },
+    {
+      "sku": "SKU003",
+      "name": "开关",
+      "warehouse": "成都",
+      "stock": 6,
+      "safety_stock": 10
+    }
   ],
-  "preview_note": "Only 3 of the 12 low-stock items are shown; dashboard cards are separate queries, not a shared transaction snapshot"
+  "reports": [
+    {
+      "tile_key": "inventory-total",
+      "report_id": 103,
+      "required": true,
+      "width": "half",
+      "binding_policy": "follow_published",
+      "contract_hash": "abcc07de4a8036adb8bc30713e4994f051ec32b71deb56d9eb9c53e5a5e0b963",
+      "contract": {
+        "scope_key": "demo_three_warehouses",
+        "scope_description": "杭州、苏州、成都；可售库存；不含在途；金额按含税采购成本计价",
+        "timezone": "Asia/Shanghai",
+        "execution_boundary": {
+          "source_revision_id": 9001,
+          "database_name": "demo_inventory",
+          "report_account_id": 9001,
+          "workspace_id": "a11dce41-4c10-47be-bdfa-97e2904d6001"
+        },
+        "freshness": {
+          "mode": "watermark_column",
+          "column": "__data_as_of",
+          "max_data_age_seconds": 900,
+          "max_future_skew_seconds": 60
+        },
+        "semantic_key": "inventory_amount_at_cost",
+        "meaning": "三个指定仓库可售库存按含税采购成本计价的当前金额",
+        "result_schema": [
+          {
+            "name": "amount",
+            "logical_type": "lossless_numeric",
+            "nullable": false
+          },
+          {
+            "name": "__data_as_of",
+            "logical_type": "timestamp_with_timezone",
+            "nullable": false
+          }
+        ],
+        "chart_type": "metric",
+        "unit": "CNY_10000",
+        "currency": "CNY",
+        "time_window": {
+          "kind": "current_snapshot"
+        },
+        "comparison_key": "inventory_current_balance"
+      },
+      "review_observed_publication_no": 9,
+      "refresh_actual_publication_no": 9,
+      "query_completed_at": "2026-10-18T09:30:00+08:00",
+      "data_as_of": "2026-10-18T09:25:00+08:00",
+      "query_result": {
+        "columns": [
+          "amount",
+          "__data_as_of"
+        ],
+        "rows": [
+          [
+            "1280.00",
+            "2026-10-18T09:25:00+08:00"
+          ]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "tile_key": "low-stock-count",
+      "report_id": 104,
+      "required": true,
+      "width": "half",
+      "binding_policy": "follow_published",
+      "contract_hash": "1420f6a36162cca6c80e9815b65225f17b3b139178023a10dae7836b26bf5613",
+      "contract": {
+        "scope_key": "demo_three_warehouses",
+        "scope_description": "杭州、苏州、成都；可售库存；不含在途；金额按含税采购成本计价",
+        "timezone": "Asia/Shanghai",
+        "execution_boundary": {
+          "source_revision_id": 9001,
+          "database_name": "demo_inventory",
+          "report_account_id": 9001,
+          "workspace_id": "a11dce41-4c10-47be-bdfa-97e2904d6001"
+        },
+        "freshness": {
+          "mode": "watermark_column",
+          "column": "__data_as_of",
+          "max_data_age_seconds": 900,
+          "max_future_skew_seconds": 60
+        },
+        "semantic_key": "low_stock_sku_count",
+        "meaning": "当前库存低于安全库存的SKU数量，按SKU唯一计数",
+        "result_schema": [
+          {
+            "name": "count",
+            "logical_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "__data_as_of",
+            "logical_type": "timestamp_with_timezone",
+            "nullable": false
+          }
+        ],
+        "chart_type": "metric",
+        "unit": "item_count",
+        "currency": null,
+        "time_window": {
+          "kind": "current_snapshot"
+        },
+        "comparison_key": "low_stock_count"
+      },
+      "review_observed_publication_no": 2,
+      "refresh_actual_publication_no": 2,
+      "query_completed_at": "2026-10-18T09:30:00+08:00",
+      "data_as_of": "2026-10-18T09:25:00+08:00",
+      "query_result": {
+        "columns": [
+          "count",
+          "__data_as_of"
+        ],
+        "rows": [
+          [
+            12,
+            "2026-10-18T09:25:00+08:00"
+          ]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "tile_key": "inventory-trend",
+      "report_id": 101,
+      "required": true,
+      "width": "wide",
+      "binding_policy": "follow_published",
+      "contract_hash": "f37b4649e50159e2df7c1b4b8a352455d7572ebf610e85eaf7ef1564db13fe30",
+      "contract": {
+        "scope_key": "demo_three_warehouses",
+        "scope_description": "杭州、苏州、成都；可售库存；不含在途；金额按含税采购成本计价",
+        "timezone": "Asia/Shanghai",
+        "execution_boundary": {
+          "source_revision_id": 9001,
+          "database_name": "demo_inventory",
+          "report_account_id": 9001,
+          "workspace_id": "a11dce41-4c10-47be-bdfa-97e2904d6001"
+        },
+        "freshness": {
+          "mode": "watermark_column",
+          "column": "__data_as_of",
+          "max_data_age_seconds": 900,
+          "max_future_skew_seconds": 60
+        },
+        "semantic_key": "inventory_amount_last_7_days",
+        "meaning": "近七个业务日的库存金额趋势，当日截至业务水位",
+        "result_schema": [
+          {
+            "name": "date",
+            "logical_type": "date",
+            "nullable": false
+          },
+          {
+            "name": "amount",
+            "logical_type": "lossless_numeric",
+            "nullable": false
+          },
+          {
+            "name": "__data_as_of",
+            "logical_type": "timestamp_with_timezone",
+            "nullable": false
+          }
+        ],
+        "chart_type": "line",
+        "unit": "CNY_10000",
+        "currency": "CNY",
+        "time_window": {
+          "kind": "rolling_days",
+          "days": 7
+        },
+        "comparison_key": "inventory_daily_trend"
+      },
+      "review_observed_publication_no": 4,
+      "refresh_actual_publication_no": 4,
+      "query_completed_at": "2026-10-18T09:30:00+08:00",
+      "data_as_of": "2026-10-18T09:25:00+08:00",
+      "query_result": {
+        "columns": [
+          "date",
+          "amount",
+          "__data_as_of"
+        ],
+        "rows": [
+          [
+            "2026-10-12",
+            "1160.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "2026-10-13",
+            "1175.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "2026-10-14",
+            "1182.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "2026-10-15",
+            "1190.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "2026-10-16",
+            "1210.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "2026-10-17",
+            "1260.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "2026-10-18",
+            "1280.00",
+            "2026-10-18T09:25:00+08:00"
+          ]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "tile_key": "warehouse-distribution",
+      "report_id": 102,
+      "required": true,
+      "width": "narrow",
+      "binding_policy": "follow_published",
+      "contract_hash": "58ad21b0c231b303a8de4a6120ba6b4550ba4391f392904928a07ffdc3508b64",
+      "contract": {
+        "scope_key": "demo_three_warehouses",
+        "scope_description": "杭州、苏州、成都；可售库存；不含在途；金额按含税采购成本计价",
+        "timezone": "Asia/Shanghai",
+        "execution_boundary": {
+          "source_revision_id": 9001,
+          "database_name": "demo_inventory",
+          "report_account_id": 9001,
+          "workspace_id": "a11dce41-4c10-47be-bdfa-97e2904d6001"
+        },
+        "freshness": {
+          "mode": "watermark_column",
+          "column": "__data_as_of",
+          "max_data_age_seconds": 900,
+          "max_future_skew_seconds": 60
+        },
+        "semantic_key": "inventory_amount_by_warehouse",
+        "meaning": "按仓库分组的当前可售库存成本金额",
+        "result_schema": [
+          {
+            "name": "warehouse",
+            "logical_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "amount",
+            "logical_type": "lossless_numeric",
+            "nullable": false
+          },
+          {
+            "name": "__data_as_of",
+            "logical_type": "timestamp_with_timezone",
+            "nullable": false
+          }
+        ],
+        "chart_type": "bar",
+        "unit": "CNY_10000",
+        "currency": "CNY",
+        "time_window": {
+          "kind": "current_snapshot"
+        },
+        "comparison_key": "inventory_current_balance"
+      },
+      "review_observed_publication_no": 6,
+      "refresh_actual_publication_no": 6,
+      "query_completed_at": "2026-10-18T09:30:00+08:00",
+      "data_as_of": "2026-10-18T09:25:00+08:00",
+      "query_result": {
+        "columns": [
+          "warehouse",
+          "amount",
+          "__data_as_of"
+        ],
+        "rows": [
+          [
+            "杭州",
+            "620.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "苏州",
+            "410.00",
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "成都",
+            "250.00",
+            "2026-10-18T09:25:00+08:00"
+          ]
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "tile_key": "low-stock-table",
+      "report_id": 105,
+      "required": true,
+      "width": "full",
+      "binding_policy": "follow_published",
+      "contract_hash": "27d37784295c5478d747297ebd405191da86cc910aadeb2fbb5bdb3be9fd052c",
+      "contract": {
+        "scope_key": "demo_three_warehouses",
+        "scope_description": "杭州、苏州、成都；可售库存；不含在途；金额按含税采购成本计价",
+        "timezone": "Asia/Shanghai",
+        "execution_boundary": {
+          "source_revision_id": 9001,
+          "database_name": "demo_inventory",
+          "report_account_id": 9001,
+          "workspace_id": "a11dce41-4c10-47be-bdfa-97e2904d6001"
+        },
+        "freshness": {
+          "mode": "watermark_column",
+          "column": "__data_as_of",
+          "max_data_age_seconds": 900,
+          "max_future_skew_seconds": 60
+        },
+        "semantic_key": "low_stock_item_detail",
+        "meaning": "低于安全库存的SKU明细，库存数量单位为件",
+        "result_schema": [
+          {
+            "name": "sku",
+            "logical_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "name",
+            "logical_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "warehouse",
+            "logical_type": "string",
+            "nullable": false
+          },
+          {
+            "name": "stock",
+            "logical_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "safety_stock",
+            "logical_type": "integer",
+            "nullable": false
+          },
+          {
+            "name": "__data_as_of",
+            "logical_type": "timestamp_with_timezone",
+            "nullable": false
+          }
+        ],
+        "chart_type": "table",
+        "unit": "stock_piece",
+        "currency": null,
+        "time_window": {
+          "kind": "current_snapshot"
+        },
+        "comparison_key": "low_stock_detail"
+      },
+      "review_observed_publication_no": 3,
+      "refresh_actual_publication_no": 3,
+      "query_completed_at": "2026-10-18T09:30:00+08:00",
+      "data_as_of": "2026-10-18T09:25:00+08:00",
+      "query_result": {
+        "columns": [
+          "sku",
+          "name",
+          "warehouse",
+          "stock",
+          "safety_stock",
+          "__data_as_of"
+        ],
+        "rows": [
+          [
+            "SKU001",
+            "线缆",
+            "杭州",
+            8,
+            20,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU002",
+            "连接器",
+            "苏州",
+            15,
+            30,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU003",
+            "开关",
+            "成都",
+            6,
+            10,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU004",
+            "料箱",
+            "杭州",
+            4,
+            12,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU005",
+            "标签",
+            "杭州",
+            2,
+            10,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU006",
+            "端子",
+            "苏州",
+            7,
+            20,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU007",
+            "支架",
+            "成都",
+            3,
+            8,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU008",
+            "传感器",
+            "杭州",
+            5,
+            15,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU009",
+            "接头",
+            "苏州",
+            9,
+            16,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU010",
+            "电源",
+            "成都",
+            1,
+            5,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU011",
+            "导轨",
+            "杭州",
+            6,
+            14,
+            "2026-10-18T09:25:00+08:00"
+          ],
+          [
+            "SKU012",
+            "按钮",
+            "苏州",
+            11,
+            25,
+            "2026-10-18T09:25:00+08:00"
+          ]
+        ],
+        "truncated": false
+      }
+    }
+  ],
+  "comparison_groups": [
+    {
+      "key": "current_inventory_amount",
+      "tile_keys": [
+        "inventory-total",
+        "warehouse-distribution"
+      ],
+      "comparison_key": "inventory_current_balance",
+      "max_watermark_skew_seconds": 300
+    }
+  ],
+  "expected_display": {
+    "required_total": 5,
+    "required_success": 5,
+    "completeness": "complete",
+    "freshness": "fresh",
+    "headline": "完整 5/5 · 查询 09:30 · 数据截止 09:25"
+  },
+  "hash_note": "Illustrative canonical JSON hash, not a claim that a production data_contract serializer exists",
+  "preview_note": "Three of twelve low-stock rows are shown in the concept; source result has twelve. Cards use separate readonly queries, not one database snapshot."
 }
