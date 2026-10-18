@@ -3,9 +3,57 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+
 	"github.com/jackc/pgx/v5"
 )
+
+// Keep the last released audience after unpublishing as well. An offline
+// dashboard must not become a way to approve one's own new recipient grant.
+func dashboardReleasedDefinition(ctx context.Context, q reportQueryer, id int64) (*DashboardDefinition, error) {
+	var raw []byte
+	err := q.QueryRow(ctx, `SELECT v.definition FROM sys_dashboard_releases re JOIN sys_dashboard_reviews rv ON rv.id=re.review_id AND rv.workspace_id=re.workspace_id JOIN sys_dashboard_versions v ON v.id=rv.version_id AND v.workspace_id=rv.workspace_id WHERE re.dashboard_id=$1 AND re.review_id IS NOT NULL ORDER BY re.number DESC LIMIT 1`, id).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var before DashboardDefinition
+	if err = json.Unmarshal(raw, &before); err != nil {
+		return nil, err
+	}
+	return &before, nil
+}
+
+// Initial publication keeps its independent, non-submitter review. Subsequent
+// audience changes use this same guard through every entry and approval gate.
+func (r *ManagedDashboardRepository) checkReviewerBenefit(ctx context.Context, q reportQueryer, id int64, next DashboardDefinition, reviewer int64) error {
+	before, err := dashboardReleasedDefinition(ctx, q, id)
+	if err != nil || before == nil {
+		return err
+	}
+	var benefits bool
+	err = q.QueryRow(ctx, `SELECT dbhub_member_role($1) IS NOT NULL
+ AND NOT ($1=ANY($2::bigint[]) OR EXISTS(SELECT 1 FROM sys_user_group_members WHERE user_id=$1 AND group_id=ANY($3::bigint[])))
+ AND ($1=ANY($4::bigint[]) OR EXISTS(SELECT 1 FROM sys_user_group_members WHERE user_id=$1 AND group_id=ANY($5::bigint[])))`, reviewer, nonNilIDs(before.UserIDs), nonNilIDs(before.GroupIDs), nonNilIDs(next.UserIDs), nonNilIDs(next.GroupIDs)).Scan(&benefits)
+	if err != nil {
+		return err
+	}
+	if benefits {
+		return fmt.Errorf("%w: 新增受众的受益人不能审批本次授权变更，请选择其他审阅人", ErrManagedInput)
+	}
+	return nil
+}
+
+func (r *ManagedDashboardRepository) checkReviewerBenefitForReview(ctx context.Context, q reportQueryer, review int64, next DashboardDefinition, reviewer int64) error {
+	var id int64
+	if err := q.QueryRow(ctx, `SELECT dashboard_id FROM sys_dashboard_reviews WHERE id=$1`, review).Scan(&id); err != nil {
+		return err
+	}
+	return r.checkReviewerBenefit(ctx, q, id, next, reviewer)
+}
 
 func (r *ManagedDashboardRepository) AudienceChange(ctx context.Context, key string, id, base, reviewer int64, users, groups []int64) (ReportCommandResult, error) {
 	return r.reports.command(ctx, key, "dashboard-audience", []any{id, base, reviewer, users, groups}, false, true, func(tx pgx.Tx) (ReportCommandResult, error) {
@@ -43,11 +91,10 @@ func (r *ManagedDashboardRepository) AudienceChange(ctx context.Context, key str
 		if e = json.Unmarshal(raw, &d); e != nil {
 			return out, e
 		}
-		wasRecipient := dashboardGrant(ctx, tx, d.UserIDs, d.GroupIDs, reviewer)
 		d.UserIDs = normalizedIDs(users)
 		d.GroupIDs = normalizedIDs(groups)
-		if !wasRecipient && dashboardGrant(ctx, tx, d.UserIDs, d.GroupIDs, reviewer) {
-			return out, fmt.Errorf("%w: 新增受众的受益人不能审批本次授权变更", ErrManagedInput)
+		if e = r.checkReviewerBenefit(ctx, tx, id, d, reviewer); e != nil {
+			return out, e
 		}
 		if _, e = r.checkDefinition(ctx, tx, d, ActorID(ctx)); e != nil {
 			return out, e

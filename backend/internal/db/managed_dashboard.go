@@ -435,6 +435,9 @@ func (r *ManagedDashboardRepository) Submit(ctx context.Context, key string, id,
 		if _, e := r.checkDefinition(ctx, tx, d, ActorID(ctx)); e != nil {
 			return out, e
 		}
+		if e := r.checkReviewerBenefit(ctx, tx, id, d, reviewer); e != nil {
+			return out, e
+		}
 		if _, e := r.checkDefinition(ctx, tx, d, reviewer); e != nil {
 			return out, e
 		}

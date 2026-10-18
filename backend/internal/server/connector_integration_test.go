@@ -350,7 +350,18 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 		if got["status"] != "unknown" {
 			t.Fatal(got)
 		}
+		transaction := a.call("POST", "/query/transaction/begin", a.admin, map[string]any{"connection_id": pgID}, 200)
+		var before string
+		if err := a.pool.QueryRow(context.Background(), "SELECT secret FROM public."+a.table+" WHERE id=1").Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": pgID, "transaction_id": transaction["transaction_id"], "sql": "UPDATE " + a.table + " SET secret='driver-revoked' WHERE id=1"}, 200)
 		a.call("PATCH", fmt.Sprintf("/connector-drivers/%d/status", drivers["postgresql"]), a.admin, map[string]any{"enabled": false}, 200)
+		a.call("POST", "/query/transaction/commit", a.admin, map[string]any{"connection_id": pgID, "transaction_id": transaction["transaction_id"]}, 409)
+		var after string
+		if err := a.pool.QueryRow(context.Background(), "SELECT secret FROM public."+a.table+" WHERE id=1").Scan(&after); err != nil || after != before {
+			t.Fatal("disabled JDBC driver allowed an existing transaction to commit", after, err)
+		}
 		caps := a.call("GET", pgPath+"/capabilities", a.admin, nil, 200)
 		if caps["sql"] != false {
 			t.Fatal(caps)

@@ -48,6 +48,9 @@ func (r *ManagedDashboardRepository) ValidateReview(ctx context.Context, key str
 		if e = json.Unmarshal(raw, &d); e != nil {
 			return out, e
 		}
+		if e = r.checkReviewerBenefitForReview(ctx, tx, review, d, reviewer); e != nil {
+			return out, e
+		}
 		refs, e := r.checkDefinition(ctx, tx, d, ActorID(ctx))
 		if e != nil {
 			return out, e
@@ -130,6 +133,9 @@ func (r *ManagedDashboardRepository) Decision(ctx context.Context, key string, r
 			if e = json.Unmarshal(raw, &d); e != nil {
 				return out, e
 			}
+			if e = r.checkReviewerBenefitForReview(ctx, tx, review, d, reviewer); e != nil {
+				return out, e
+			}
 			refs, e := r.checkDefinition(ctx, tx, d, ActorID(ctx))
 			if e != nil {
 				return out, e
@@ -189,6 +195,9 @@ func (r *ManagedDashboardRepository) Reassign(ctx context.Context, key string, i
 		if e := json.Unmarshal(raw, &d); e != nil {
 			return out, e
 		}
+		if e := r.checkReviewerBenefitForReview(ctx, tx, id, d, reviewer); e != nil {
+			return out, e
+		}
 		if _, e := r.checkDefinition(ctx, tx, d, reviewer); e != nil {
 			return out, e
 		}
@@ -242,6 +251,11 @@ func (r *ManagedDashboardRepository) Release(ctx context.Context, key string, id
 			var was bool
 			if e := tx.QueryRow(ctx, `SELECT (SELECT v.number FROM sys_dashboard_releases re JOIN sys_dashboard_reviews rv ON rv.id=re.review_id JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE re.dashboard_id=$2 AND re.review_id IS NOT NULL ORDER BY re.number DESC LIMIT 1),(SELECT review_id FROM sys_dashboard_releases WHERE id=$1),EXISTS(SELECT 1 FROM sys_dashboard_releases WHERE dashboard_id=$2 AND review_id=$3)`, active, id, review).Scan(&previous, &currentReview, &was); e != nil {
 				return out, e
+			}
+			if !was {
+				if e := r.checkReviewerBenefit(ctx, tx, id, d, reviewer); e != nil {
+					return out, e
+				}
 			}
 			if currentReview != nil && *currentReview == review || kind == "rollback" && !was || kind == "publish" && previous != nil && (version < *previous || active != nil && version == *previous) {
 				return out, ErrManagedConflict

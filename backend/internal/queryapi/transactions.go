@@ -206,6 +206,22 @@ func (h *Handler) FinishTransaction(commit bool) http.HandlerFunc {
 		status := "rolled_back"
 		field := "rolled_back"
 		if commit {
+			// The pinned target session outlives a request. Source grants,
+			// definitions, drivers and connection configuration can change
+			// without changing the workspace membership epoch.
+			if e = h.conns.ValidateCurrent(ctx, tx.Handle.Conn); e != nil {
+				cleanup, cleanupCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+				rollbackErr := tx.Handle.Rollback(cleanup)
+				cleanupCancel()
+				if rollbackErr != nil {
+					auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "unknown" })
+					httpx.Fail(w, httpx.New(50300, "提交已拒绝，回滚结果待确认，请核实目标数据库", nil))
+					return
+				}
+				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.Outcome = "rolled_back" })
+				httpx.JSON(w, http.StatusConflict, httpx.Envelope{Code: 40900, Message: "数据源配置或授权无法确认，事务已回滚，请重新连接", Data: map[string]any{"transaction_id": tx.ID, "status": "rolled_back", "rolled_back": true}})
+				return
+			}
 			e = tx.Handle.Commit(ctx)
 			status = "committed"
 			field = "committed"

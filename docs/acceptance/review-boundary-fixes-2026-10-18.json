@@ -1,0 +1,72 @@
+{
+  "checked_at": "2026-10-18T11:28:43.765288+00:00",
+  "status": "passed",
+  "base_commit": "70a634a62395162bc84e8fdeff16eec384146fe1",
+  "branch": "fix/review-authorization-boundaries",
+  "source_sha256": {
+    "backend/internal/db/dashboard_audience.go": "b75187a3c2037b0b98aab298c71f5552a06e75a26d4e9554a1eb02e589fc0365",
+    "backend/internal/db/dashboard_lifecycle.go": "85039fded49dd928e3a22f8a1777afbccfb1e42e5b528d29367d092d5107d6ed",
+    "backend/internal/db/dashboard_preflight.go": "65149e2e0ab75da1c8c35173d33fcaecb1b1665aea0d5390f59d1c008c53a798",
+    "backend/internal/db/managed_dashboard.go": "32db79abad6c530d9f8a2b8a428369b0c0593bad193151ec1411fb0ed96d0602",
+    "backend/internal/db/report_publication_repo.go": "e43abdf4025d88c4b5b8ed1415acae2da024a51efbcb0eeb64d8c09c5e267172",
+    "backend/internal/queryapi/transactions.go": "413c700b78fa60cbccbe5f41674ad54adf4f3f584856e93659fb6fd808ce0c9d",
+    "backend/internal/server/connector_integration_test.go": "e2e76122b373f574cb8488f14f3aa328d35f2c10643a0e291beeefb6916dcb8c",
+    "backend/internal/server/review_boundary_regression_test.go": "62ccaed14d62176cceb116c4e47be29a0613548c24891b8d5b341ad4d5b3a10b"
+  },
+  "resolved_findings": [
+    "P1: existing transaction commit after datasource revocation",
+    "P2: restoring published audience-change report versions",
+    "P2: dashboard new beneficiary approval via reassignment or normal submit"
+  ],
+  "schema_migration_count": 36,
+  "new_database_migration_required": false,
+  "targeted_race_regression": "passed; additional exception and JDBC coverage passed in complete suite",
+  "full_race_and_vet": {
+    "result": "passed",
+    "commands": [
+      "go test -race -p=4 -json ./... -count=1 -timeout=15m",
+      "go vet ./..."
+    ],
+    "test_events_passed_including_subtests": 353,
+    "packages_with_tests_passed": 17,
+    "skipped_test_names": [
+      "TestJournalCrashHelper",
+      "TestVersionMatrixTarget",
+      "TestOpenGaussDemoHTTP"
+    ],
+    "server_package_seconds": 398.323,
+    "critical_test_outcomes": {
+      "TestReviewFixTransactionRechecksSourceBeforeCommit": "passed",
+      "TestReviewFixTransactionRechecksSourceBeforeCommit/rollback-result-unknown": "passed",
+      "TestReviewFixPublishedAudienceVersionCanBeRestored": "passed",
+      "TestReviewFixDashboardBeneficiaryCheckedAtEveryGate": "passed",
+      "TestConnectorJDBCRealHTTP/jdbc-deadline-and-driver-disable-close-new-access": "passed"
+    }
+  },
+  "private_logs": {
+    "original_red": "/workspace/dbhub-cloud/review-fix-red.log",
+    "dashboard_red": "/workspace/dbhub-cloud/review-fix-dashboard-red.log",
+    "targeted": "/workspace/dbhub-cloud/review-fix-targeted.jsonl",
+    "full": "/workspace/dbhub-cloud/review-fix-full-race-vet.jsonl"
+  },
+  "pre_fix_verified": [
+    "Datasource revocation followed by transaction commit returned HTTP 200",
+    "Previously published audience-change report could not be republished (HTTP 409)",
+    "New dashboard beneficiary appeared in preflight eligible reviewers",
+    "Group revocation before dashboard validation/release still returned HTTP 200"
+  ],
+  "current_authorization_guards_preserved": [
+    "Unavailable account/source/driver",
+    "Current audience membership",
+    "Expected publication number and impact confirmation",
+    "First-publication proposal expiry/cancellation",
+    "Independent reviewer, current role and member epoch"
+  ],
+  "historical_recovery": "Only a previously formally published approved version skips one-time proposal conditions; current eligibility remains required",
+  "not_rerun": [
+    "Standalone full datasource version matrix",
+    "openGauss demo HTTP: external fixture not configured",
+    "Frontend suite and browser flow: no frontend source changes",
+    "External production deployment"
+  ]
+}

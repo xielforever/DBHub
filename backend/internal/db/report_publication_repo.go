@@ -192,20 +192,23 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 			if impact.Blocked != expectedDashboards {
 				return out, fmt.Errorf("%w: 请确认将因口径变化被阻断的当前仪表盘数量（%d）", ErrManagedConflict, impact.Blocked)
 			}
-			if e = r.checkAudienceChange(ctx, tx, reviewID, accountID, m.UserIDs, m.GroupIDs, false); e != nil {
+			var wasPublished bool
+			if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_report_releases WHERE report_id=$1 AND review_id=$2)`, id, reviewID).Scan(&wasPublished); e != nil {
 				return out, e
+			}
+			// Proposal bases and unfinished access requests are first-release
+			// conditions. A historical restore still validates the current
+			// account, audience, impact and publication number above/below.
+			if !wasPublished {
+				if e = r.checkAudienceChange(ctx, tx, reviewID, accountID, m.UserIDs, m.GroupIDs, false); e != nil {
+					return out, e
+				}
 			}
 			if e = audience(ctx, tx, m.UserIDs, m.GroupIDs); e != nil {
 				return out, e
 			}
-			if kind == "rollback" {
-				var existed bool
-				if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_report_releases WHERE report_id=$1 AND review_id=$2)`, id, reviewID).Scan(&existed); e != nil {
-					return out, e
-				}
-				if !existed {
-					return out, ErrManagedConflict
-				}
+			if kind == "rollback" && !wasPublished {
+				return out, ErrManagedConflict
 			}
 			if active == nil && kind == "publish" {
 				var previous *int64

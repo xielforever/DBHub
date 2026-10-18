@@ -155,6 +155,10 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 	if err != nil {
 		return nil, err
 	}
+	before, err := dashboardReleasedDefinition(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
 	out := &DashboardPreflight{ID: id, Version: version, CheckedAt: time.Now().UTC(), Issues: []DashboardIssue{}, Reviewers: []DashboardSubject{}}
 	add := func(code, message, action string) {
 		out.Issues = append(out.Issues, DashboardIssue{Code: code, Severity: "error", Message: message, Action: action})
@@ -259,6 +263,9 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 			if candidate.ID == owner {
 				continue
 			}
+			if before != nil && recipients[candidate.ID] && !directory.granted(candidate.ID, &DashboardReport{UserIDs: before.UserIDs, GroupIDs: before.GroupIDs}) {
+				continue
+			}
 			eligible := true
 			for _, p := range refs {
 				if !directory.granted(candidate.ID, p) {
@@ -272,7 +279,7 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 		}
 	}
 	if len(out.Reviewers) == 0 {
-		add("no_reviewer", "暂无同时拥有全部引用报表查看权的独立管理员，请先配置人员及报表授权", "configure_reviewer")
+		add("no_reviewer", "暂无合格独立管理员：须有全部引用报表查看权，且不能是本次新增受众的受益人", "configure_reviewer")
 	}
 	out.CanSubmit = true
 	for _, issue := range out.Issues {
