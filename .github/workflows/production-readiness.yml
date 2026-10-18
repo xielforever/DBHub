@@ -18,13 +18,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      DBHUB_STATE_DIR: ${{ runner.temp }}/dbhub-state
-      DBHUB_BUILD_ROOT: ${{ runner.temp }}/dbhub-build
       DBHUB_DASHBOARD_BACKEND_IMAGE: dbhub-backend:release-check
       DBHUB_DASHBOARD_FRONTEND_IMAGE: dbhub-frontend:release-check
       DBHUB_DASHBOARD_USE_IMAGE: "1"
       DBHUB_CHROMIUM_PATH: ""
     steps:
+      - name: 配置本次运行的隔离目录
+        run: |
+          printf 'DBHUB_STATE_DIR=%s/dbhub-state\nDBHUB_BUILD_ROOT=%s/dbhub-build\n' "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
