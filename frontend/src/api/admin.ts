@@ -24,7 +24,7 @@ export interface UserItem {
 
 export interface UserGroup {id: number; name: string; description: string; version: number; member_ids: number[]; updated_at: string}
 export interface AuditLog {
- context: {actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; transaction_id?: string; job_id?: string; export_id?: number; http_status?: number; response_failed?: boolean; auth_failure?: string; route?: string; outcome?: string}
+ context: {actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; transaction_id?: string; job_id?: string; export_id?: number; report_id?: number; report_version?: number; http_status?: number; response_failed?: boolean; auth_failure?: string; route?: string; outcome?: string}
   event_id?: string
   id: number
   user_id: number | null

@@ -200,6 +200,10 @@ func classify(method, path string) (action, resource, name string) {
 	resource, name = strings.ToUpper(firstOr(parts, 0)), firstOr(parts, 1)
 	last := firstOr(parts, len(parts)-1)
 	switch {
+	case body == "reports/preview" && method == http.MethodPost:
+		return "REPORT_PREVIEW", "REPORT", ""
+	case len(parts) == 3 && parts[0] == "reports" && last == "execute" && method == http.MethodPost:
+		return "REPORT_EXECUTE", "REPORT", parts[1]
 	case body == "auth/login":
 		return "LOGIN", "AUTH", ""
 	case body == "auth/refresh":
@@ -229,6 +233,8 @@ func classify(method, path string) (action, resource, name string) {
 	switch {
 	case parts[0] == "connections":
 		resource = "CONNECTION"
+	case parts[0] == "reports":
+		resource = "REPORT"
 	case parts[0] == "ssh-tunnels":
 		resource = "SSH_TUNNEL"
 	case parts[0] == "users" || parts[0] == "roles":

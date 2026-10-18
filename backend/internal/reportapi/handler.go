@@ -1,17 +1,19 @@
 package reportapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"strconv"
-	"strings"
-
-	"log/slog"
-
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/sqlparse"
+	"log/slog"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 )
 
 type Handler struct {
@@ -21,13 +23,9 @@ type Handler struct {
 }
 
 func NewHandler(reports *db.ReportRepository, conns *db.ConnectionRepository, log *slog.Logger) *Handler {
-	return &Handler{reports: reports, conns: conns, log: log}
+	return &Handler{reports, conns, log}
 }
-
-func claimsOf(r *http.Request) *auth.Claims {
-	c, _ := auth.ClaimsFromContext(r.Context())
-	return c
-}
+func claimsOf(r *http.Request) *auth.Claims { c, _ := auth.ClaimsFromContext(r.Context()); return c }
 
 type createRequest struct {
 	Name         string          `json:"name"`
@@ -38,243 +36,293 @@ type createRequest struct {
 	ChartType    string          `json:"chart_type"`
 	ChartConfig  json.RawMessage `json:"chart_config"`
 	Visibility   string          `json:"visibility"`
+	RequestID    string          `json:"request_id"`
 }
 
+var creationKeyPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+func validateFields(rep *db.Report) error {
+	rep.Name = strings.TrimSpace(rep.Name)
+	rep.Description = strings.TrimSpace(rep.Description)
+	rep.SQLText = strings.TrimSpace(rep.SQLText)
+	rep.DatabaseName = strings.TrimSpace(rep.DatabaseName)
+	for _, s := range []string{rep.Name, rep.Description, rep.SQLText, rep.DatabaseName} {
+		if strings.ContainsRune(s, 0) {
+			return httpx.BadRequest("报表字段不能包含空字符")
+		}
+	}
+	if rep.Name == "" || utf8.RuneCountInString(rep.Name) > 128 {
+		return httpx.BadRequest("报表名称必填，且不能超过128字")
+	}
+	if utf8.RuneCountInString(rep.Description) > 512 || utf8.RuneCountInString(rep.DatabaseName) > 128 {
+		return httpx.BadRequest("描述不能超过512字，数据库名不能超过128字")
+	}
+	if rep.SQLText == "" || len(rep.SQLText) > 128*1024 {
+		return httpx.BadRequest("SQL 必填，且不能超过128KB")
+	}
+	if rep.Visibility != "private" && rep.Visibility != "shared" {
+		return httpx.BadRequest("可见性非法")
+	}
+	switch rep.ChartType {
+	case "table", "bar", "line", "pie", "metric":
+	default:
+		return httpx.BadRequest("图表类型非法")
+	}
+	if rep.ChartConfig == nil {
+		rep.ChartConfig = json.RawMessage(`{}`)
+	}
+	var cfg struct {
+		Dimension string   `json:"dimension,omitempty"`
+		Metrics   []string `json:"metrics,omitempty"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(rep.ChartConfig))
+	dec.DisallowUnknownFields()
+	if len(rep.ChartConfig) > 4096 || dec.Decode(&cfg) != nil || string(rep.ChartConfig) == "null" {
+		return httpx.BadRequest("图表配置只接受维度和指标；请在 SQL 中完成聚合、排序与筛选")
+	}
+	if len(cfg.Metrics) > 6 || utf8.RuneCountInString(cfg.Dimension) > 128 {
+		return httpx.BadRequest("最多选择6个指标，字段名不能超过128字")
+	}
+	seen := map[string]bool{}
+	for _, m := range cfg.Metrics {
+		if strings.TrimSpace(m) == "" || utf8.RuneCountInString(m) > 128 || seen[m] {
+			return httpx.BadRequest("指标字段不能为空、重复或超过128字")
+		}
+		seen[m] = true
+	}
+	if rep.ChartType != "table" && len(cfg.Metrics) == 0 {
+		return httpx.BadRequest("请选择数值指标")
+	}
+	if (rep.ChartType == "bar" || rep.ChartType == "line" || rep.ChartType == "pie") && strings.TrimSpace(cfg.Dimension) == "" {
+		return httpx.BadRequest("请选择维度字段")
+	}
+	if (rep.ChartType == "pie" || rep.ChartType == "metric") && len(cfg.Metrics) != 1 {
+		return httpx.BadRequest("饼图和指标卡只接受一个指标")
+	}
+	rep.ChartConfig, _ = json.Marshal(cfg)
+	return nil
+}
+func (h *Handler) validateConnection(r *http.Request, rep *db.Report) error {
+	conn, err := h.conns.Get(r.Context(), rep.ConnectionID)
+	if err != nil {
+		return httpx.BadRequest("请选择本人的有效个人连接")
+	}
+	if err = h.conns.ValidateCurrent(r.Context(), conn); err != nil {
+		return httpx.Forbidden("个人连接或数据源授权不可用，请重新配置")
+	}
+	caps := conn.SupportedCapabilities()
+	if !caps.SQL || !caps.EnforcedReadOnly || conn.DefinitionRevisionID == nil {
+		return httpx.BadRequest("该连接暂不支持报表所需的只读 SQL")
+	}
+	if err = sqlparse.ValidateReport(rep.SQLText, conn.SQLDialect()); err != nil {
+		return httpx.BadRequest(err.Error())
+	}
+	rep.DefinitionRevisionID = *conn.DefinitionRevisionID
+	return nil
+}
+func reportError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, db.ErrNotFound):
+		httpx.Fail(w, httpx.NotFound("报表不存在或无权访问"))
+	case errors.Is(err, db.ErrReportConflict):
+		httpx.Fail(w, httpx.Conflict("报表已被修改，或创建编号已用于其他内容；请重新加载后核对"))
+	default:
+		httpx.Fail(w, httpx.Internal("报表操作失败", err))
+	}
+}
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
 	var in createRequest
 	if err := httpx.DecodeJSON(w, r, &in); err != nil {
 		httpx.Fail(w, err)
 		return
-	}
-	in.Name = strings.TrimSpace(in.Name)
-	in.SQL = strings.TrimSpace(in.SQL)
-	if in.Name == "" {
-		httpx.Fail(w, httpx.BadRequest("报表名称必填"))
-		return
-	}
-	if len([]rune(in.Name)) > 128 {
-		httpx.Fail(w, httpx.BadRequest("报表名称不能超过128字"))
-		return
-	}
-	if in.ConnectionID <= 0 {
-		httpx.Fail(w, httpx.BadRequest("connection_id 必填"))
-		return
-	}
-	if in.SQL == "" {
-		httpx.Fail(w, httpx.BadRequest("SQL 不能为空"))
-		return
-	}
-	// 单语句校验（与工作台一致）
-	if strings.Count(in.SQL, ";") > 1 || (strings.Contains(in.SQL, ";") && !strings.HasSuffix(strings.TrimSpace(in.SQL), ";")) {
-		// 简易校验，允许末尾分号
-		trimmed := strings.TrimSpace(in.SQL)
-		if strings.Count(trimmed, ";") > 1 {
-			httpx.Fail(w, httpx.BadRequest("一次只允许一条 SQL"))
-			return
-		}
 	}
 	if in.ChartType == "" {
 		in.ChartType = "table"
 	}
-	if in.ChartType != "table" && in.ChartType != "bar" && in.ChartType != "line" && in.ChartType != "pie" && in.ChartType != "metric" {
-		httpx.Fail(w, httpx.BadRequest("图表类型非法"))
-		return
-	}
 	if in.Visibility == "" {
 		in.Visibility = "private"
 	}
-	if in.Visibility != "private" && in.Visibility != "shared" {
-		httpx.Fail(w, httpx.BadRequest("可见性非法"))
+	in.RequestID = strings.ToLower(in.RequestID)
+	if !creationKeyPattern.MatchString(in.RequestID) || in.RequestID == "00000000-0000-0000-0000-000000000000" {
+		httpx.Fail(w, httpx.BadRequest("创建编号必须为非空 UUID"))
 		return
 	}
-	if in.ChartConfig == nil {
-		in.ChartConfig = json.RawMessage("{}")
-	}
-	// 校验连接存在
-	if _, err := h.conns.Get(r.Context(), in.ConnectionID); err != nil {
-		httpx.Fail(w, httpx.BadRequest("指定的数据源不存在"))
+	rep := &db.Report{Name: in.Name, Description: in.Description, ConnectionID: in.ConnectionID, DatabaseName: in.Database, SQLText: in.SQL, ChartType: in.ChartType, ChartConfig: in.ChartConfig, Visibility: in.Visibility, OwnerUserID: claimsOf(r).Subject, CreationKey: in.RequestID}
+	if err := validateFields(rep); err != nil {
+		httpx.Fail(w, err)
 		return
 	}
-	rep := &db.Report{
-		Name:         in.Name,
-		Description:  strings.TrimSpace(in.Description),
-		ConnectionID: in.ConnectionID,
-		DatabaseName: strings.TrimSpace(in.Database),
-		SQLText:      in.SQL,
-		ChartType:    in.ChartType,
-		ChartConfig:  in.ChartConfig,
-		Visibility:   in.Visibility,
-		OwnerUserID:  c.Subject,
+	if err := h.validateConnection(r, rep); err != nil {
+		httpx.Fail(w, err)
+		return
 	}
 	if err := h.reports.Create(r.Context(), rep); err != nil {
-		httpx.Fail(w, httpx.Internal("创建报表失败", err))
+		reportError(w, err)
 		return
 	}
-	httpx.OK(w, rep)
+	saved, err := h.reports.Get(r.Context(), rep.ID)
+	if err != nil {
+		reportError(w, err)
+		return
+	}
+	httpx.OK(w, saved)
 }
-
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
+	w.Header().Set("Cache-Control", "no-store")
 	q := r.URL.Query()
-	page, _ := strconv.Atoi(q.Get("page"))
-	pageSize, _ := strconv.Atoi(q.Get("page_size"))
-	if page <= 0 {
-		page = 1
+	page, size := 1, 20
+	var err error
+	if q.Has("page") {
+		page, err = strconv.Atoi(q.Get("page"))
+		if err != nil || page < 1 || page > 1000000 {
+			httpx.Fail(w, httpx.BadRequest("page 非法"))
+			return
+		}
 	}
-	if pageSize <= 0 || pageSize > 100 {
-		pageSize = 20
+	if q.Has("page_size") {
+		size, err = strconv.Atoi(q.Get("page_size"))
+		if err != nil || size < 1 || size > 100 {
+			httpx.Fail(w, httpx.BadRequest("page_size 非法"))
+			return
+		}
 	}
-	scope := q.Get("scope") // mine | starred | shared | all
-	f := db.ReportFilter{
-		Keyword: strings.TrimSpace(q.Get("q")),
-		Offset:  (page - 1) * pageSize,
-		Limit:   pageSize,
-	}
-	switch scope {
+	f := db.ReportFilter{Keyword: strings.TrimSpace(q.Get("q")), Offset: (page - 1) * size, Limit: size}
+	switch q.Get("scope") {
 	case "mine":
-		f.OwnerID = c.Subject
+		f.OwnerID = claimsOf(r).Subject
 	case "starred":
-		f.StarredBy = c.Subject
+		f.StarredBy = claimsOf(r).Subject
 	case "shared":
 		f.Visibility = "shared"
+	case "", "all":
 	default:
-		// all: 不过滤
+		httpx.Fail(w, httpx.BadRequest("scope 非法"))
+		return
 	}
-	if connID, _ := strconv.ParseInt(q.Get("connection_id"), 10, 64); connID > 0 {
-		f.ConnectionID = connID
+	if q.Has("connection_id") {
+		f.ConnectionID, err = strconv.ParseInt(q.Get("connection_id"), 10, 64)
+		if err != nil || f.ConnectionID < 1 {
+			httpx.Fail(w, httpx.BadRequest("connection_id 非法"))
+			return
+		}
 	}
 	items, total, err := h.reports.List(r.Context(), f)
 	if err != nil {
-		httpx.Fail(w, httpx.Internal("查询报表失败", err))
+		reportError(w, err)
 		return
 	}
-	// 注入当前用户收藏标记（List 已处理 starred）
-	// 非 admin 隐藏他人 private？按 PRD：非 owner 不可改他人私有报表，但列表可见性：我的/共享/收藏分 scope
-	// 这里 scope=all 时，private 仅本人可见（除 admin）
-	if scope == "" || scope == "all" {
-		filtered := make([]db.Report, 0, len(items))
-		for _, it := range items {
-			if it.Visibility == "private" && it.OwnerUserID != c.Subject && c.Role != "admin" {
-				continue
-			}
-			filtered = append(filtered, it)
-		}
-		// total 需重新计算？简化：保留原 total，前端以 items 为准
-		items = filtered
+	httpx.OK(w, map[string]any{"items": items, "total": total, "page": page, "page_size": size})
+}
+func reportID(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if e != nil || id < 1 {
+		httpx.Fail(w, httpx.BadRequest("ID 非法"))
+		return 0, false
 	}
-	httpx.OK(w, map[string]any{"items": items, "total": total, "page": page, "page_size": pageSize})
+	return id, true
+}
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	rep, e := h.reports.Get(r.Context(), id)
+	if e != nil {
+		reportError(w, e)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.OK(w, rep)
 }
 
-func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if id <= 0 {
-		httpx.Fail(w, httpx.BadRequest("ID 非法"))
+type updateRequest struct {
+	Name         *string         `json:"name"`
+	Description  *string         `json:"description"`
+	ConnectionID *int64          `json:"connection_id"`
+	Database     *string         `json:"database"`
+	SQL          *string         `json:"sql"`
+	ChartType    *string         `json:"chart_type"`
+	ChartConfig  json.RawMessage `json:"chart_config"`
+	Visibility   *string         `json:"visibility"`
+	Version      int64           `json:"version"`
+}
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
 		return
 	}
 	rep, err := h.reports.Get(r.Context(), id)
 	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			httpx.Fail(w, &httpx.AppError{Code: httpx.CodeNotFound, Message: "报表不存在"})
-			return
-		}
-		httpx.Fail(w, httpx.Internal("查询报表失败", err))
+		reportError(w, err)
 		return
 	}
-	c := claimsOf(r)
-	// 私有报表仅 owner/admin 可见
-	if rep.Visibility == "private" && rep.OwnerUserID != c.Subject && c.Role != "admin" {
-		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeForbidden, Message: "无权查看该私有报表"})
+	if rep.OwnerUserID != claimsOf(r).Subject {
+		httpx.Fail(w, httpx.Forbidden("仅所有者可编辑报表"))
 		return
 	}
-	// 注入 starred
-	for _, uid := range rep.StarredBy {
-		if uid == c.Subject {
-			rep.Starred = true
-			break
-		}
-	}
-	httpx.OK(w, rep)
-}
-
-func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if id <= 0 {
-		httpx.Fail(w, httpx.BadRequest("ID 非法"))
-		return
-	}
-	existing, err := h.reports.Get(r.Context(), id)
-	if err != nil {
-		httpx.Fail(w, httpx.Internal("查询报表失败", err))
-		return
-	}
-	if existing.OwnerUserID != c.Subject && c.Role != "admin" {
-		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeForbidden, Message: "仅所有者可编辑"})
-		return
-	}
-	var in createRequest
-	if err := httpx.DecodeJSON(w, r, &in); err != nil {
+	var in updateRequest
+	if err = httpx.DecodeJSON(w, r, &in); err != nil {
 		httpx.Fail(w, err)
 		return
 	}
-	if in.Name != "" {
-		existing.Name = strings.TrimSpace(in.Name)
+	if in.Version < 1 || in.Version != rep.Version {
+		httpx.Fail(w, httpx.Conflict("报表版本已变化，请重新加载后核对"))
+		return
 	}
-	if in.Description != "" || r.Method == "PUT" {
-		existing.Description = strings.TrimSpace(in.Description)
+	definitionChanged := in.ConnectionID != nil || in.Database != nil || in.SQL != nil || in.ChartType != nil || in.ChartConfig != nil
+	if in.Name != nil {
+		rep.Name = *in.Name
 	}
-	if in.ConnectionID > 0 {
-		existing.ConnectionID = in.ConnectionID
+	if in.Description != nil {
+		rep.Description = *in.Description
 	}
-	if in.Database != "" {
-		existing.DatabaseName = strings.TrimSpace(in.Database)
+	if in.ConnectionID != nil {
+		rep.ConnectionID = *in.ConnectionID
 	}
-	if in.SQL != "" {
-		existing.SQLText = strings.TrimSpace(in.SQL)
+	if in.Database != nil {
+		rep.DatabaseName = *in.Database
 	}
-	if in.ChartType != "" {
-		if in.ChartType != "table" && in.ChartType != "bar" && in.ChartType != "line" && in.ChartType != "pie" && in.ChartType != "metric" {
-			httpx.Fail(w, httpx.BadRequest("图表类型非法"))
-			return
-		}
-		existing.ChartType = in.ChartType
+	if in.SQL != nil {
+		rep.SQLText = *in.SQL
+	}
+	if in.ChartType != nil {
+		rep.ChartType = *in.ChartType
 	}
 	if in.ChartConfig != nil {
-		existing.ChartConfig = in.ChartConfig
+		rep.ChartConfig = in.ChartConfig
 	}
-	if in.Visibility != "" {
-		if in.Visibility != "private" && in.Visibility != "shared" {
-			httpx.Fail(w, httpx.BadRequest("可见性非法"))
+	if in.Visibility != nil {
+		rep.Visibility = *in.Visibility
+	}
+	if err = validateFields(rep); err != nil {
+		httpx.Fail(w, err)
+		return
+	}
+	if definitionChanged {
+		if err = h.validateConnection(r, rep); err != nil {
+			httpx.Fail(w, err)
 			return
 		}
-		existing.Visibility = in.Visibility
 	}
-	if err := h.reports.Update(r.Context(), existing); err != nil {
-		httpx.Fail(w, httpx.Internal("更新报表失败", err))
+	if err = h.reports.Update(r.Context(), rep); err != nil {
+		reportError(w, err)
 		return
 	}
-	httpx.OK(w, existing)
-}
-
-func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if id <= 0 {
-		httpx.Fail(w, httpx.BadRequest("ID 非法"))
-		return
-	}
-	existing, err := h.reports.Get(r.Context(), id)
+	saved, err := h.reports.Get(r.Context(), rep.ID)
 	if err != nil {
-		httpx.Fail(w, httpx.Internal("查询报表失败", err))
+		reportError(w, err)
 		return
 	}
-	if existing.OwnerUserID != c.Subject && c.Role != "admin" {
-		httpx.Fail(w, &httpx.AppError{Code: httpx.CodeForbidden, Message: "仅所有者可删除"})
+	httpx.OK(w, saved)
+}
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
 		return
 	}
 	if err := h.reports.Delete(r.Context(), id); err != nil {
-		httpx.Fail(w, httpx.Internal("删除报表失败", err))
+		reportError(w, err)
 		return
 	}
 	httpx.OK(w, map[string]any{"id": id})
@@ -285,19 +333,17 @@ type starRequest struct {
 }
 
 func (h *Handler) Star(w http.ResponseWriter, r *http.Request) {
-	c := claimsOf(r)
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if id <= 0 {
-		httpx.Fail(w, httpx.BadRequest("ID 非法"))
+	id, ok := reportID(w, r)
+	if !ok {
 		return
 	}
 	var in starRequest
-	if err := httpx.DecodeJSON(w, r, &in); err != nil {
-		httpx.Fail(w, err)
+	if e := httpx.DecodeJSON(w, r, &in); e != nil {
+		httpx.Fail(w, e)
 		return
 	}
-	if err := h.reports.SetStar(r.Context(), id, c.Subject, in.Star); err != nil {
-		httpx.Fail(w, httpx.Internal("收藏失败", err))
+	if e := h.reports.SetStar(r.Context(), id, claimsOf(r).Subject, in.Star); e != nil {
+		reportError(w, e)
 		return
 	}
 	httpx.OK(w, map[string]any{"starred": in.Star})

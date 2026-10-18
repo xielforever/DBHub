@@ -65,7 +65,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'dashboards',
         name: 'dashboards',
-        component: () => import('../views/report/DashboardView.vue'),
+        redirect: '/reports',
         meta: { title: pageTitles.dashboards, icon: 'LayoutDashboard' },
       },
       {

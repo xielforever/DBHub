@@ -75,8 +75,12 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
  ('legacy-result','dml','inventory',$1,'UPDATE inventory SET id=1 RETURNING id','low','executed',2,'{"kind":"write","affected_rows":1,"rows":[["private-fixture"]],"columns":["id"]}'::jsonb)`, source); e != nil {
 		t.Fatal(e)
 	}
+	var legacyReportID int64
+	if e = pool.QueryRow(ctx, `INSERT INTO sys_reports(name,connection_id,sql_text,visibility,owner_user_id) VALUES('legacy-report',$1,'SELECT 1','shared',1) RETURNING id`, source).Scan(&legacyReportID); e != nil {
+		t.Fatal(e)
+	}
 	applied, e := Migrate(ctx, pool)
-	if e != nil || len(applied) != 4 || applied[0] != "0022_personal_connections.sql" || applied[1] != "0023_definition_binding_index.sql" || applied[2] != "0024_source_audience_directory.sql" || applied[3] != "0025_reliable_audit.sql" {
+	if e != nil || len(applied) != 5 || applied[0] != "0022_personal_connections.sql" || applied[1] != "0023_definition_binding_index.sql" || applied[2] != "0024_source_audience_directory.sql" || applied[3] != "0025_reliable_audit.sql" || applied[4] != "0026_report_phase1.sql" {
 		t.Fatal("legacy upgrade failed", applied, e)
 	}
 	var invalid int
@@ -101,8 +105,21 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 	if e != nil || len(defs) != 0 {
 		t.Fatal("migration published the old target", e)
 	}
+	reports := NewReportRepository(pool)
+	legacyReport, e := reports.Get(actor, legacyReportID)
+	if e != nil || legacyReport.DefinitionRevisionID != *owned.DefinitionRevisionID || legacyReport.Visibility != "private" || legacyReport.Version != 1 {
+		t.Fatal("legacy report target or private scope was not retained", e)
+	}
 	var leaked int
 	if e = pool.QueryRow(ctx, `SELECT count(*) FROM sys_source_definitions WHERE config::text LIKE '%'||$1||'%' OR config ?| ARRAY['username','password']`, secret).Scan(&leaked); e != nil || leaked != 0 {
 		t.Fatal("published authentication material", e)
 	}
+	if e = repo.Delete(actor, source); e != nil {
+		t.Fatal(e)
+	}
+	retained, e := reports.Get(actor, legacyReportID)
+	if e != nil || retained.ConnectionID != 0 || retained.DefinitionRevisionID != legacyReport.DefinitionRevisionID {
+		t.Fatal("legacy report was deleted with its personal binding", e)
+	}
+
 }

@@ -1,343 +1,98 @@
 <template>
   <div class="space-y-5">
-    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div>
-        <h1 class="text-xl font-semibold">报表</h1>
-        <p class="text-sm text-white/45 mt-1">工作台另存的图表沉淀，支持私有/共享与收藏</p>
-      </div>
-      <div class="flex items-center gap-2">
-        <el-select v-model="scope" class="w-32" popper-class="glass-popper" @change="reload(1)">
-          <el-option label="全部" value="all" />
-          <el-option label="我的" value="mine" />
-          <el-option label="共享" value="shared" />
-          <el-option label="收藏" value="starred" />
-        </el-select>
-        <button class="ghost-button text-xs py-1.5 px-3 flex items-center gap-1" @click="reload(1)">
-          <RefreshCw class="w-3.5 h-3.5" />刷新
-        </button>
-      </div>
+    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div><h1 class="text-xl font-semibold">报表</h1><p class="text-sm text-white/50 mt-1">保存只读查询与图表，使用自己的数据库账号查看最新数据</p></div>
+      <button v-if="canWrite" class="liquid-button text-sm" @click="create">新建报表</button>
     </header>
-
-    <div class="flex flex-wrap items-center gap-2.5">
-      <div class="relative w-full sm:w-72">
-        <Search class="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input v-model.trim="keyword" class="glass-input pl-9 py-1.5 text-sm w-full" placeholder="搜索报表名称/描述/SQL" @input="reload(1)" />
-      </div>
-    </div>
-
-    <div v-loading="loading" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      <article v-for="rep in items" :key="rep.id" class="glass-card p-4 flex flex-col gap-3 hover:-translate-y-0.5 transition-transform">
-        <div class="flex items-start justify-between gap-2">
-          <div class="min-w-0">
-            <h3 class="font-medium truncate flex items-center gap-1.5">
-              {{ rep.name }}
-              <Star v-if="rep.starred" class="w-3 h-3 text-amber-300 fill-amber-300" />
-            </h3>
-            <p class="text-[11px] text-white/40 truncate mt-0.5">{{ rep.description || '无描述' }}</p>
-          </div>
-          <span class="px-2 py-0.5 rounded-full text-[10px] shrink-0" :class="rep.visibility==='shared' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/8 text-white/50'">
-            {{ rep.visibility==='shared' ? '共享' : '私有' }}
-          </span>
-        </div>
-
-        <div class="rounded-xl bg-black/30 border border-white/5 p-2 h-[180px] overflow-hidden">
-          <ChartCard
-            :chart-type="rep.chart_type"
-            :columns="previewColumns(rep)"
-            :rows="previewRows(rep)"
-            :config="rep.chart_config"
-            height="160px"
-          />
-        </div>
-
-        <div class="flex items-center gap-2 text-[11px] text-white/40">
-          <span class="px-1.5 py-0.5 rounded bg-white/5">{{ rep.chart_type }}</span>
-          <span>{{ rep.owner_name }}</span>
-          <span class="flex-1" />
-          <span>{{ formatTime(rep.updated_at) }}</span>
-        </div>
-
-        <div class="flex items-center gap-1.5 pt-2 border-t border-white/10">
-          <button class="ghost-button flex-1 text-xs py-1.5" @click="openReport(rep)">查看</button>
-
-          <button class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-amber-500/15 hover:text-amber-300" title="收藏" @click="toggleStar(rep)">
-            <Star class="w-4 h-4" :class="rep.starred ? 'fill-amber-300 text-amber-300' : ''" />
-          </button>
-          <button v-if="canWrite" class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-white/10 hover:text-white" title="编辑" @click="openEdit(rep)">
-            <Pencil class="w-4 h-4" />
-          </button>
-          <button v-if="canWrite" class="w-8 h-8 rounded-lg flex items-center justify-center text-white/40 hover:bg-rose-500/20 hover:text-rose-300" title="删除" @click="remove(rep)">
-            <Trash2 class="w-4 h-4" />
-          </button>
+    <form class="flex flex-wrap items-center gap-2" @submit.prevent="reload(1)">
+      <el-select v-model="scope" aria-label="报表范围" class="!w-32" @change="reload(1)"><el-option label="全部" value="all" /><el-option label="我的" value="mine" /><el-option label="登录后共享" value="shared" /><el-option label="收藏" value="starred" /></el-select>
+      <input v-model.trim="keyword" aria-label="搜索报表" class="glass-input text-sm flex-1 min-w-0 sm:max-w-sm" placeholder="搜索名称、描述或 SQL" />
+      <button type="submit" class="ghost-button text-xs">搜索</button>
+      <button type="button" class="ghost-button text-xs" :disabled="loading" @click="reload()">刷新</button>
+    </form>
+    <p v-if="listError" class="text-sm text-rose-300" role="alert">{{ listError }}</p>
+    <div v-loading="loading" aria-label="报表列表" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 min-h-24">
+      <article v-for="rep in items" :key="rep.id" class="glass-card p-4 space-y-3 min-w-0" :aria-label="`报表：${rep.name}`">
+        <div class="flex items-start justify-between gap-2"><h2 class="font-medium break-words min-w-0">{{ rep.name }}</h2><span class="text-[11px] shrink-0 text-indigo-200">{{ rep.visibility === 'shared' ? '登录后共享' : '仅自己' }}</span></div>
+        <p class="text-xs text-white/50 break-words">{{ rep.description || '无描述' }}</p>
+        <p class="text-xs text-white/60">{{ chartLabels[rep.chart_type] }} · {{ rep.source_name }} · 修订 {{ rep.source_revision }}</p>
+        <p v-if="!rep.connection_id" class="text-xs text-amber-200">查看前需配置此修订的个人连接</p>
+        <div class="flex items-center justify-between gap-2 text-[11px] text-white/40"><span>{{ rep.owner_name }}</span><time :datetime="rep.updated_at">{{ formatTime(rep.updated_at) }}</time></div>
+        <div class="flex flex-wrap items-center gap-2 border-t border-white/10 pt-3">
+          <button class="ghost-button text-xs flex-1" @click="openReport(rep)">查看</button>
+          <button class="ghost-button text-xs" :disabled="pending.has(rep.id)" :aria-pressed="rep.starred" @click="toggleStar(rep)">{{ rep.starred ? '取消收藏' : '收藏' }}</button>
+          <template v-if="canManage(rep)"><button class="ghost-button text-xs" @click="edit(rep)">编辑</button><button class="ghost-button text-xs text-rose-300" :disabled="pending.has(rep.id)" @click="remove(rep)">删除</button></template>
         </div>
       </article>
-      <div v-if="!loading && !items.length" class="col-span-full glass-card p-12 flex flex-col items-center gap-3 text-center">
-        <BarChart3 class="w-10 h-10 text-white/20" />
-        <p class="text-white/50 text-sm">暂无报表，在 数据工作台「图表」Tab 另存为报表</p>
-      </div>
+      <div v-if="!loading && !listError && !items.length" class="col-span-full glass-card p-10 text-center space-y-2"><p class="text-sm text-white/60">暂无报表</p><p class="text-xs text-white/40">{{ canWrite ? '点击“新建报表”，选择个人连接并保存只读 SQL。' : '共享报表将在获得对应数据源权限后显示。' }}</p></div>
     </div>
-
-    <div class="flex items-center justify-between text-xs text-white/50">
-      <span>共 {{ total }} 个报表</span>
-      <div class="flex items-center gap-1">
-        <button class="ghost-button px-2.5 py-1" :disabled="page<=1" @click="reload(page-1)">上一页</button>
-        <span class="px-2">{{ page }} / {{ totalPages }}</span>
-        <button class="ghost-button px-2.5 py-1" :disabled="page>=totalPages" @click="reload(page+1)">下一页</button>
-      </div>
-    </div>
-
-    <!-- 详情/编辑 Dialog -->
-    <el-dialog v-model="detailOpen" :title="current?.name || '报表详情'" width="760px" class="glass-dialog">
-      <template v-if="current">
-        <div class="space-y-4">
-          <div class="flex flex-wrap gap-2 text-xs items-center">
-            <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">数据源 #{{ current.connection_id }}</span>
-            <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ current.database_name || '默认库' }}</span>
-            <span class="px-2 py-0.5 rounded-full" :class="current.visibility==='shared' ? 'bg-emerald-400/15 text-emerald-300' : 'bg-white/8 text-white/50'">{{ current.visibility==='shared' ? '共享' : '私有' }}</span>
-            <span class="flex-1" />
-
-          </div>
-          <pre class="text-xs font-mono bg-black/30 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap">{{ current.sql_text }}</pre>
-
-          <div v-loading="detailLoading" class="glass-card p-3">
-            <ChartCard
-              v-if="detailColumns.length"
-              :chart-type="current.chart_type"
-              :columns="detailColumns"
-              :rows="detailRows"
-              :config="current.chart_config"
-              height="360px"
-            />
-            <p v-else class="text-sm text-white/40 py-8 text-center">加载中或执行失败</p>
-          </div>
-
-          <div v-if="editing" class="space-y-3 border-t border-white/10 pt-4">
-            <p class="text-xs text-white/40 uppercase tracking-widest">编辑</p>
-            <el-input v-model="editForm.name" placeholder="报表名称" />
-            <el-input v-model="editForm.description" type="textarea" :rows="2" placeholder="描述" />
-            <el-select v-model="editForm.visibility" class="w-full" popper-class="glass-popper">
-              <el-option label="私有" value="private" />
-              <el-option label="共享" value="shared" />
-            </el-select>
-            <div class="flex justify-end gap-2">
-              <button class="ghost-button" @click="editing=false">取消</button>
-              <button class="liquid-button" :disabled="saving" @click="saveEdit">保存</button>
-            </div>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
-
-    <!-- 分享 -->
-    <el-dialog v-model="shareOpen" title="分享报表" width="520px" class="glass-dialog">
-      <div class="space-y-4">
-        <div class="flex gap-2">
-          <el-select v-model="shareForm.expireDays" class="w-40" popper-class="glass-popper">
-            <el-option label="1天" :value="1" />
-            <el-option label="7天" :value="7" />
-            <el-option label="30天" :value="30" />
-            <el-option label="永久" :value="undefined" />
-          </el-select>
-          <button class="liquid-button text-xs flex items-center gap-1" :disabled="sharing" @click="createShare"><Share2 class="w-3.5 h-3.5" />生成链接</button>
-        </div>
-        <div v-if="lastShareToken" class="space-y-2">
-          <p class="text-xs text-white/50">分享链接（仅明文显示一次，请复制保存）：</p>
-          <div class="flex gap-2">
-            <el-input :model-value="shareLink" readonly />
-            <button class="ghost-button text-xs" @click="copyLink">复制</button>
-          </div>
-        </div>
-        <div v-loading="shareLoading" class="space-y-2">
-          <p class="text-xs text-white/40">已生成链接</p>
-          <div v-for="s in shareList" :key="s.id" class="flex items-center gap-2 text-xs bg-white/5 rounded-lg p-2">
-            <span class="font-mono truncate flex-1">{{ s.id }} · 访问 {{ s.access_count }} 次</span>
-            <span v-if="s.revoked" class="text-rose-300">已吊销</span>
-            <span v-else-if="s.expire_at && new Date(s.expire_at) < new Date()" class="text-amber-300">已过期</span>
-            <button v-if="!s.revoked" class="ghost-button text-[11px] py-0.5 px-2" @click="revokeShare(s.id)">吊销</button>
-          </div>
-        </div>
+    <div class="flex items-center justify-between text-xs text-white/50"><span>共 {{ total }} 个报表</span><div class="flex items-center gap-2"><button class="ghost-button px-2 py-1" :disabled="page <= 1 || loading" @click="reload(page-1)">上一页</button><span>{{ page }} / {{ totalPages }}</span><button class="ghost-button px-2 py-1" :disabled="page >= totalPages || loading" @click="reload(page+1)">下一页</button></div></div>
+    <ReportEditor v-if="editorOpen" :report="editing" @close="editorOpen=false" @saved="saved" />
+    <el-dialog v-model="detailOpen" :title="current?.name || '报表详情'" width="min(960px, calc(100vw - 24px))" class="glass-dialog">
+      <div v-if="current" class="space-y-4 min-w-0">
+        <p class="text-xs text-white/55">{{ current.source_name }} · 修订 {{ current.source_revision }} · {{ current.database_name || '连接默认数据库' }} · 使用本人数据库账号执行</p>
+        <pre class="text-xs font-mono bg-black/25 rounded-lg p-3 max-h-48 overflow-auto whitespace-pre-wrap break-words">{{ current.sql_text }}</pre>
+        <div class="flex flex-wrap items-center gap-3"><button class="ghost-button text-xs" :disabled="detail.state.value.status === 'loading'" @click="runDetail">{{ detail.state.value.status === 'loading' ? '查询中…' : '刷新数据' }}</button><button v-if="detail.state.value.status === 'loading'" class="ghost-button text-xs" @click="detail.reset">取消查询</button><RouterLink v-if="!current.connection_id" to="/connections" class="text-xs text-indigo-200 underline">配置个人连接（修订 {{ current.source_revision }}）</RouterLink></div>
+        <p v-if="detail.state.value.status === 'loading'" role="status" class="py-8 text-center text-sm text-white/55">正在执行只读查询…</p>
+        <p v-else-if="detail.state.value.status === 'error'" role="alert" class="text-sm text-rose-300">{{ detail.state.value.message }}</p>
+        <ReportResult v-else-if="detail.state.value.status === 'success'" :key="detail.state.value.data.report.id" :type="detail.state.value.data.report.chart_type" :config="detail.state.value.data.report.chart_config" :result="detail.state.value.data.result" :title="detail.state.value.data.report.name" />
+        <p v-else class="text-sm text-white/50">查询已停止，可刷新数据重新执行只读查询。</p>
       </div>
     </el-dialog>
   </div>
 </template>
-
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { BarChart3, Pencil, RefreshCw, Search, Share2, Star, Trash2 } from 'lucide-vue-next'
-import ChartCard from '../../components/business/chart/ChartCard.vue'
+import { computed, onMounted, onScopeDispose, reactive, ref, watch } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { reportApi, type ReportItem } from '../../api/report'
-import { shareApi, type ShareItem } from '../../api/share'
-import { workbenchApi } from '../../api/workbench'
+import type { ExecResult } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
-
-const userStore = useUserStore()
-const canWrite = computed(() => userStore.role !== 'readonly')
-
-const scope = ref<'all' | 'mine' | 'shared' | 'starred'>('all')
-const keyword = ref('')
-const items = ref<ReportItem[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = 12
-const loading = ref(false)
-const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
-
-async function reload(p?: number) {
-  if (p) page.value = p
-  loading.value = true
-  try {
-    const res = await reportApi.list({
-      q: keyword.value || undefined,
-      scope: scope.value,
-      page: page.value,
-      page_size: pageSize,
-    })
-    items.value = res.items
-    total.value = res.total
-  } catch {
-    /* 拦截器提示 */
-  } finally {
-    loading.value = false
-  }
+import ReportEditor from './ReportEditor.vue'
+import ReportResult from './ReportResult.vue'
+import { useReportRun } from './useReportRun'
+const user = useUserStore(), canWrite = computed(() => ['admin','developer'].includes(user.role))
+const chartLabels = { table:'表格',bar:'柱状图',line:'折线图',pie:'饼图',metric:'指标卡' }
+const items = ref<ReportItem[]>([]), total = ref(0), page = ref(1), loading = ref(false), listError = ref(''), keyword = ref(''), scope = ref<'all'|'mine'|'shared'|'starred'>('all')
+const totalPages = computed(() => Math.max(1,Math.ceil(total.value/12)))
+const pending = reactive(new Set<number>())
+let listGeneration = 0, listAbort: AbortController | undefined
+async function reload(p = page.value) {
+  page.value = p
+  const run = ++listGeneration
+  listAbort?.abort()
+  const controller = new AbortController(); listAbort = controller
+  loading.value = true; listError.value = ''
+  try { const response = await reportApi.list({ scope:scope.value,q:keyword.value || undefined,page:p,page_size:12 },controller.signal); if (run !== listGeneration) return; items.value=response.items;total.value=response.total; if (p>1 && !response.items.length && response.total<=12*(p-1)) await reload(Math.max(1,Math.ceil(response.total/12))) }
+  catch (error) { if (run===listGeneration) { items.value=[];total.value=0;listError.value=error instanceof Error?error.message:'报表加载失败' } }
+  finally { if (run===listGeneration) loading.value=false }
 }
-
-function formatTime(s: string): string {
-  if (!s) return '—'
-  try {
-    const d = new Date(s)
-    return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`
-  } catch { return s.slice(0,16) }
-}
-
-function previewColumns(rep: ReportItem): string[] {
-  // 报表卡片缩略图用配置维度+指标作列头，实际渲染由 ChartCard 按真实数据
-  // 这里若无真实数据则用占位
-  return [rep.chart_config?.dimension || '维度', ...(rep.chart_config?.metrics || ['指标'])]
-}
-function previewRows(_rep: ReportItem): unknown[][] {
-  // 缩略图不执行真实 SQL，避免列表页 N+1 查询；用空数据让 ChartCard 显示空态或占位
-  // 真实数据在详情页加载
-  return []
-}
-
-// 详情
-const detailOpen = ref(false)
-const current = ref<ReportItem | null>(null)
-const detailColumns = ref<string[]>([])
-const detailRows = ref<unknown[][]>([])
-const detailLoading = ref(false)
-const editing = ref(false)
-const saving = ref(false)
-const editForm = reactive({ name: '', description: '', visibility: 'private' as 'private' | 'shared' })
-
-async function openReport(rep: ReportItem) {
-  current.value = rep
-  detailOpen.value = true
-  editing.value = false
-  detailColumns.value = []
-  detailRows.value = []
-  detailLoading.value = true
-  try {
-    // 执行固化 SQL 获取最新结果（复用工作台执行约束）
-    if (!rep.connection_id) { ElMessage.warning('请先从数据源目录添加此报表对应修订的个人连接'); return }
-    const res = await workbenchApi.execute(rep.connection_id, rep.sql_text, rep.database_name)
-    if (res.kind === 'query') {
-      detailColumns.value = res.columns ?? []
-      detailRows.value = res.rows ?? []
-    }
-  } catch {
-    /* 拦截器提示 */
-  } finally {
-    detailLoading.value = false
-  }
-}
-function openEdit(rep: ReportItem) {
-  current.value = rep
-  editForm.name = rep.name
-  editForm.description = rep.description
-  editForm.visibility = rep.visibility
-  editing.value = true
-  detailOpen.value = true
-}
-async function saveEdit() {
-  if (!current.value) return
-  if (!editForm.name.trim()) {
-    ElMessage.warning('名称必填')
-    return
-  }
-  saving.value = true
-  try {
-    const updated = await reportApi.update(current.value.id, {
-      name: editForm.name.trim(),
-      description: editForm.description.trim(),
-      visibility: editForm.visibility,
-    })
-    current.value = updated
-    ElMessage.success('已更新')
-    editing.value = false
-    reload()
-  } catch {
-    /* 拦截器提示 */
-  } finally {
-    saving.value = false
-  }
-}
+const canManage = (rep: ReportItem) => canWrite.value && rep.owner_user_id===user.user?.id
+const formatTime = (value: string) => new Date(value).toLocaleString()
+const editorOpen = ref(false), editing = ref<ReportItem>()
+function create() { editing.value=undefined;editorOpen.value=true }
+async function edit(rep: ReportItem) { try { editing.value=await reportApi.get(rep.id);editorOpen.value=true } catch { /* API shows the failure. */ } }
+function saved() { editorOpen.value=false;void reload() }
 async function toggleStar(rep: ReportItem) {
-  try {
-    const res = await reportApi.star(rep.id, !rep.starred)
-    rep.starred = res.starred
-    ElMessage.success(res.starred ? '已收藏' : '已取消收藏')
-  } catch {
-    /* 拦截器提示 */
-  }
+  if (pending.has(rep.id)) return
+  pending.add(rep.id)
+  try { const result=await reportApi.star(rep.id,!rep.starred);rep.starred=result.starred;if(scope.value==='starred'&&!result.starred)void reload() } catch { /* API shows the failure. */ } finally { pending.delete(rep.id) }
 }
 async function remove(rep: ReportItem) {
-  try {
-    await ElMessageBox.confirm(`确认删除报表「${rep.name}」？`, '删除确认', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
-  } catch { return }
-  await reportApi.remove(rep.id)
-  ElMessage.success('已删除')
-  reload()
+  if (pending.has(rep.id)) return
+  try { await ElMessageBox.confirm(`确认删除报表「${rep.name}」？`, '删除报表', { type:'warning',confirmButtonText:'删除',cancelButtonText:'取消' }) } catch { return }
+  pending.add(rep.id)
+  try { await reportApi.remove(rep.id);await reload() } catch { /* API shows the failure. */ } finally { pending.delete(rep.id) }
 }
-
-// 分享
-const shareOpen = ref(false)
-const shareForm = reactive<{ expireDays?: number }>({ expireDays: 7 })
-const shareList = ref<ShareItem[]>([])
-const shareLoading = ref(false)
-const sharing = ref(false)
-const lastShareToken = ref('')
-const shareSubjectId = ref<number | null>(null)
-const shareLink = computed(() => lastShareToken.value ? `${window.location.origin}/s/${lastShareToken.value}` : '')
-
-async function loadShares() {
-  if (!shareSubjectId.value) return
-  shareLoading.value = true
-  try {
-    const res = await shareApi.list('report', shareSubjectId.value)
-    shareList.value = res.items
-  } finally { shareLoading.value = false }
+const detailOpen=ref(false), current=ref<ReportItem>()
+const detail=useReportRun<{ report:ReportItem;result:ExecResult }>()
+function openReport(rep: ReportItem) { current.value=rep;detailOpen.value=true;void runDetail() }
+async function runDetail() {
+  const id=current.value?.id
+  if (!id) return
+  const success=await detail.run(String(id),async signal=>{const report=await reportApi.get(id,signal);const result=await reportApi.execute(id,report.version,signal);return {report,result}})
+  if (success&&detail.state.value.status==='success') current.value=detail.state.value.data.report
 }
-async function createShare() {
-  if (!shareSubjectId.value) return
-  sharing.value = true
-  try {
-    const res = await shareApi.create({ subject_type: 'report', subject_id: shareSubjectId.value, expire_days: shareForm.expireDays })
-    lastShareToken.value = res.token
-    ElMessage.success('分享链接已生成')
-    loadShares()
-  } finally { sharing.value = false }
-}
-function copyLink() {
-  navigator.clipboard.writeText(shareLink.value)
-  ElMessage.success('已复制')
-}
-async function revokeShare(id: number) {
-  await shareApi.revoke(id)
-  ElMessage.success('已吊销')
-  loadShares()
-}
-
-onMounted(() => reload(1))
+watch(detailOpen,open=>{if(!open)detail.reset()},{flush:'sync'})
+onMounted(()=>void reload(1))
+onScopeDispose(()=>{listGeneration++;listAbort?.abort()})
 </script>

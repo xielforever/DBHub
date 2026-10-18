@@ -155,6 +155,17 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 	pgID := int64(pg["id"].(float64))
 	pgPath := fmt.Sprintf("/connections/%d", pgID)
 	pgRO := a.personalFor(pgID, a.readonly, password)
+	t.Run("jdbc-admin-report-always-uses-database-readonly-transaction", func(t *testing.T) {
+		a.t = t
+		rep := a.call("POST", "/reports", a.admin, map[string]any{"name": "JDBC read-only report", "connection_id": pgID, "sql": "SELECT current_setting('transaction_read_only') AS mode", "visibility": "shared"}, 200)
+		path := fmt.Sprintf("/reports/%d/execute", int64(rep["id"].(float64)))
+		for _, token := range []string{a.admin, a.readonly} {
+			result := a.call("POST", path, token, map[string]any{"request_id": testRequestID(), "version": rep["version"]}, 200)
+			if result["rows"].([]any)[0].([]any)[0] != "on" {
+				t.Fatal("JDBC report escaped the forced read-only transaction")
+			}
+		}
+	})
 	t.Run("jdbc-postgres-parameters-types-and-saved-check", func(t *testing.T) {
 		a.t = t
 		a.call("POST", pgPath+"/test", a.admin, nil, 200)

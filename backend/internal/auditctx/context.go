@@ -21,6 +21,8 @@ type Data struct {
 	TransactionID      string `json:"transaction_id,omitempty"`
 	JobID              string `json:"job_id,omitempty"`
 	ExportID           int64  `json:"export_id,omitempty"`
+	ReportID           int64  `json:"report_id,omitempty"`
+	ReportVersion      int64  `json:"report_version,omitempty"`
 	HTTPStatus         int    `json:"http_status,omitempty"`
 	ResponseFailed     bool   `json:"response_failed,omitempty"`
 	AuthFailure        string `json:"auth_failure,omitempty"`

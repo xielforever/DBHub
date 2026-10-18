@@ -149,6 +149,7 @@ func TestSourceAudienceAndDirectory(t *testing.T) {
 		a.call("PUT", gp, a.admin, map[string]any{"name": "stale", "member_ids": []int64{3}, "expected_version": 1}, 409)
 		a.call("GET", path+"/revisions", a.readonly, nil, 404)
 		a.call("GET", rp, a.readonly, nil, 404)
+		a.call("POST", rp+"/execute", a.readonly, map[string]any{"version": 1, "request_id": testRequestID()}, 404)
 		a.call("POST", "/query/execute", a.readonly, map[string]any{"connection_id": roID, "sql": "SELECT 1"}, 403)
 		a.call("POST", devPath+"/test", a.developer, nil, 200)
 	})
@@ -166,6 +167,7 @@ func TestSourceAudienceAndDirectory(t *testing.T) {
 		}
 		a.call("GET", ep+"/download", a.developer, nil, 404)
 		a.call("GET", rp, a.developer, nil, 404)
+		a.call("POST", rp+"/execute", a.developer, map[string]any{"version": 1, "request_id": testRequestID()}, 404)
 		shared := a.call("GET", "/reports?scope=shared", a.developer, nil, 200)
 		if shared["total"] != float64(0) {
 			t.Fatal("revoked report source remains visible")

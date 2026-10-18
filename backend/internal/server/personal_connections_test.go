@@ -207,6 +207,10 @@ func TestPersonalConnectionIsolation(t *testing.T) {
 		if viewer["connection_id"] != float64(devID) {
 			t.Fatal("shared report inherited the creator's connection")
 		}
+		result := a.call("POST", rp+"/execute", a.developer, map[string]any{"request_id": testRequestID(), "version": viewer["version"]}, 200)
+		if result["rows"].([]any)[0].([]any)[0] != reader {
+			t.Fatal("shared report executed with another database identity")
+		}
 		a.call("POST", "/shares", a.admin, map[string]any{"subject_type": "report", "subject_id": rep["id"]}, 403)
 	})
 	t.Run("concurrent-add-creates-one-binding", func(t *testing.T) {

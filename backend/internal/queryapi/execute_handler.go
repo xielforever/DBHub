@@ -23,6 +23,12 @@ var requestIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-
 
 // Execute uses an independent connection unless the request explicitly names a transaction.
 func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
+	h.execute(w, r, false, nil)
+}
+
+// execute shares admission, receipts, policy rewriting and audit with the
+// workbench. Report routes always force a database read-only transaction.
+func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode bool, reports *db.ReportRepository) {
 	started := time.Now()
 	h.metrics.beginRequest()
 	observed := &metricsResponseWriter{ResponseWriter: w}
@@ -38,10 +44,21 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	}()
 	w.Header().Set("Cache-Control", "no-store")
 	c := claimsOf(r)
+	readOnly := reportMode || c.Role == "readonly"
 	var in executeRequest
-	if e := httpx.DecodeJSON(w, r, &in); e != nil {
-		httpx.Fail(w, e)
+	var reportID, reportVersion int64
+	var decodeErr error
+	if reportMode {
+		in, reportID, reportVersion, decodeErr = h.reportRequest(w, r, reports)
+	} else {
+		decodeErr = httpx.DecodeJSON(w, r, &in)
+	}
+	if decodeErr != nil {
+		httpx.Fail(w, decodeErr)
 		return
+	}
+	if reportID > 0 {
+		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ReportID, d.ReportVersion = reportID, reportVersion })
 	}
 	if in.ConnectionID < 1 || strings.TrimSpace(in.SQL) == "" {
 		httpx.Fail(w, httpx.BadRequest("connection_id 和 sql 必填"))
@@ -62,6 +79,23 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("Redis 不支持 SQL"))
 		return
 	}
+	if reportMode {
+		caps := h.drivers.Capabilities(conn)
+		if !caps.SQL || !caps.EnforcedReadOnly {
+			httpx.Fail(w, httpx.BadRequest("此连接不支持报表所需的只读 SQL"))
+			return
+		}
+		if e := sqlparse.ValidateReport(in.SQL, conn.SQLDialect()); e != nil {
+			httpx.Fail(w, httpx.BadRequest(e.Error()))
+			return
+		}
+		if in.TimeoutMS <= 0 || in.TimeoutMS > 30000 {
+			in.TimeoutMS = 30000
+		}
+		if in.MaxRows <= 0 || in.MaxRows > 1000 {
+			in.MaxRows = 1000
+		}
+	}
 	if in.Database != "" {
 		conn.Database = in.Database
 	}
@@ -74,10 +108,21 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return
 	}
-	raw, e := json.Marshal(struct {
+	// Keep the existing workbench signature stable across this upgrade. Report
+	// receipts additionally bind the execution mode and immutable definition.
+	var signature any = struct {
 		Request executeRequest
 		Role    string
-	}{in, c.Role})
+	}{in, c.Role}
+	if reportMode {
+		signature = struct {
+			Execution     any
+			Scope         string
+			ReportID      int64
+			ReportVersion int64
+		}{signature, "report", reportID, reportVersion}
+	}
+	raw, e := json.Marshal(signature)
 	if e != nil {
 		httpx.Fail(w, httpx.BadRequest("请求参数无法编码"))
 		return
@@ -135,7 +180,22 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	}
 	var execErr error
 	defer func() { finish(execErr) }()
-	if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
+	validate := func() error {
+		if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
+			return err
+		}
+		if reports != nil {
+			latest, err := reports.Get(ctx, reportID)
+			if err != nil {
+				return err
+			}
+			if latest.Version != reportVersion || latest.ConnectionID != conn.ID {
+				return fmt.Errorf("报表定义或个人连接已变化，请重新加载")
+			}
+		}
+		return nil
+	}
+	if err := validate(); err != nil {
 		execErr = err
 		receipt.Status, receipt.Message = "rejected", "个人连接配置或授权已变化，未发送 SQL。"
 		respond(409, receipt.Message, nil)
@@ -155,14 +215,14 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 	if in.MaxRows <= 0 || in.MaxRows > settings.MaxRows {
 		in.MaxRows = settings.MaxRows
 	}
-	opt := target.ExecuteOptions{Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, ExecutionKey: fmt.Sprintf("query:%d:%s", c.Subject, in.RequestID), AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
+	opt := target.ExecuteOptions{LosslessNumbers: reportMode, Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, ExecutionKey: fmt.Sprintf("query:%d:%s", c.Subject, in.RequestID), AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
 	sent := false
 	var executionStarted time.Time
 	opt.BeforeExecute = func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := h.conns.ValidateCurrent(ctx, conn); err != nil {
+		if err := validate(); err != nil {
 			return err
 		}
 		if err := h.controls.StartExecution(ctx, c.Subject, in.RequestID); err != nil {
@@ -181,7 +241,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			executionOutcome := "unknown"
 			if runErr == nil && result != nil {
 				executionOutcome = "succeeded"
-			} else if runErr != nil && (c.Role == "readonly" || definiteStatementError(runErr)) {
+			} else if runErr != nil && (readOnly || definiteStatementError(runErr)) {
 				executionOutcome = "failed"
 			}
 			h.metrics.finishExecution(executionOutcome, time.Since(executionStarted))
@@ -192,7 +252,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 			return nil, e
 		}
 		opt.Args = values
-		return target.ExecuteWithOptions(ctx, handle, rewritten, c.Role == "readonly", opt)
+		return target.ExecuteWithOptions(ctx, handle, rewritten, readOnly, opt)
 	}
 	var result *target.ExecResult
 	if in.TransactionID == "" {
@@ -233,7 +293,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		receipt.Status, receipt.Message = "unknown", "执行结果待确认；取消、超时或连接中断不代表写入已回滚，请先核实目标数据库。"
 		if !sent {
 			receipt.Status, receipt.Message = "rejected", "执行前检查未通过，未发送 SQL。"
-		} else if c.Role == "readonly" || definiteStatementError(execErr) {
+		} else if readOnly || definiteStatementError(execErr) {
 			receipt.Status, receipt.Message = "failed", "数据库已返回执行错误。"
 		}
 		message := "执行失败: " + safeErr(execErr)

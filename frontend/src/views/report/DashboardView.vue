@@ -166,7 +166,6 @@ import ChartCard from '../../components/business/chart/ChartCard.vue'
 import { reportDashboardApi as dashboardApi, type DashboardItem } from '../../api/dashboard'
 import { reportApi, type ReportItem } from '../../api/report'
 import { shareApi, type ShareItem } from '../../api/share'
-import { workbenchApi } from '../../api/workbench'
 import { useUserStore } from '../../stores/user'
 
 const userStore = useUserStore()
@@ -279,7 +278,7 @@ async function refreshAll() {
     reportLoading.value[cell.report_id] = true
     try {
       if (!rep.connection_id) { ElMessage.warning('请先从数据源目录添加此报表对应修订的个人连接'); return }
-    const res = await workbenchApi.execute(rep.connection_id, rep.sql_text, rep.database_name)
+    const res = await reportApi.execute(rep.id, rep.version)
       if (res.kind === 'query') {
         reportData.value[cell.report_id] = { columns: res.columns ?? [], rows: res.rows ?? [] }
       }

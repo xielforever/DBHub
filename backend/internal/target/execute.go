@@ -13,6 +13,7 @@ import (
 
 type ExecuteOptions struct {
 	MaxRows          int
+	LosslessNumbers  bool
 	Timeout          time.Duration
 	Args             []any
 	AllowUnsafeWrite bool
@@ -150,6 +151,12 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 			if e != nil {
 				return nil, e
 			}
+			if opt.LosslessNumbers {
+				for i, value := range values {
+					field := rows.FieldDescriptions()[i]
+					values[i] = losslessPGValue(value, rows.RawValues()[i], field.DataTypeOID, field.Format)
+				}
+			}
 			result.Rows = append(result.Rows, values)
 		}
 		if err = rows.Err(); err != nil {
@@ -210,6 +217,9 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 				for i, value := range values {
 					if b, ok := value.([]byte); ok {
 						values[i] = string(b)
+					}
+					if opt.LosslessNumbers {
+						values[i] = losslessNumber(values[i])
 					}
 				}
 				result.Rows = append(result.Rows, values)

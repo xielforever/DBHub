@@ -2,7 +2,10 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,85 +14,102 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Report 报表：一张图表 = 查询 + 图表配置
+var ErrReportConflict = errors.New("报表已被修改，或创建编号已用于其他内容")
+
 type Report struct {
-	ID           int64           `json:"id"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	ConnectionID int64           `json:"connection_id"`
-	DatabaseName string          `json:"database_name"`
-	SQLText      string          `json:"sql_text"`
-	ChartType    string          `json:"chart_type"`
-	ChartConfig  json.RawMessage `json:"chart_config"`
-	Visibility   string          `json:"visibility"`
-	OwnerUserID  int64           `json:"owner_user_id"`
-	StarredBy    []int64         `json:"starred_by"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	OwnerName    string          `json:"owner_name,omitempty"`
-	Starred      bool            `json:"starred,omitempty"`
+	ID                   int64           `json:"id"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
+	ConnectionID         int64           `json:"connection_id"`
+	DefinitionRevisionID int64           `json:"definition_revision_id"`
+	SourceName           string          `json:"source_name"`
+	SourceFamilyID       string          `json:"source_family_id"`
+	SourceRevision       int             `json:"source_revision"`
+	DatabaseName         string          `json:"database_name"`
+	SQLText              string          `json:"sql_text"`
+	ChartType            string          `json:"chart_type"`
+	ChartConfig          json.RawMessage `json:"chart_config"`
+	Visibility           string          `json:"visibility"`
+	OwnerUserID          int64           `json:"owner_user_id"`
+	StarredBy            []int64         `json:"starred_by"`
+	CreatedAt            time.Time       `json:"created_at"`
+	UpdatedAt            time.Time       `json:"updated_at"`
+	OwnerName            string          `json:"owner_name,omitempty"`
+	Starred              bool            `json:"starred"`
+	Version              int64           `json:"version"`
+	CreationKey          string          `json:"-"`
 }
 
-// ReportFilter 列表过滤
 type ReportFilter struct {
 	Keyword      string
-	OwnerID      int64 // 仅我的
-	StarredBy    int64 // 仅收藏
+	OwnerID      int64
+	StarredBy    int64
 	Visibility   string
 	ConnectionID int64
 	Offset       int
 	Limit        int
 }
 
-type ReportRepository struct {
-	pool *pgxpool.Pool
-}
+type ReportRepository struct{ pool *pgxpool.Pool }
 
-func NewReportRepository(pool *pgxpool.Pool) *ReportRepository {
-	return &ReportRepository{pool: pool}
-}
+func NewReportRepository(pool *pgxpool.Pool) *ReportRepository { return &ReportRepository{pool: pool} }
 
 func (r *ReportRepository) Create(ctx context.Context, rep *Report) error {
-	if rep.ChartConfig == nil {
-		rep.ChartConfig = json.RawMessage("{}")
+	// Retrying an uncertain create uses the same key AND original payload. Never
+	// turn a retry into an update of an existing report.
+	payload, err := json.Marshal([]any{rep.Name, rep.Description, rep.ConnectionID, rep.DefinitionRevisionID, rep.DatabaseName, rep.SQLText, rep.ChartType, rep.ChartConfig, rep.Visibility})
+	if err != nil {
+		return err
 	}
-	return r.pool.QueryRow(ctx, `
-		INSERT INTO sys_reports
-		(name, description, connection_id, database_name, sql_text, chart_type, chart_config, visibility, owner_user_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		RETURNING id, created_at, updated_at`,
-		rep.Name, rep.Description, rep.ConnectionID, rep.DatabaseName, rep.SQLText,
-		rep.ChartType, rep.ChartConfig, rep.Visibility, rep.OwnerUserID,
-	).Scan(&rep.ID, &rep.CreatedAt, &rep.UpdatedAt)
+	digest := sha256.Sum256(payload)
+	hash := hex.EncodeToString(digest[:])
+	err = r.pool.QueryRow(ctx, `INSERT INTO sys_reports
+ (name,description,connection_id,definition_revision_id,database_name,sql_text,chart_type,chart_config,visibility,owner_user_id,creation_key,creation_hash)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,'')::uuid,$12)
+ ON CONFLICT(owner_user_id,creation_key) WHERE creation_key IS NOT NULL DO NOTHING
+ RETURNING id,created_at,updated_at,version`, rep.Name, rep.Description, rep.ConnectionID, rep.DefinitionRevisionID, rep.DatabaseName, rep.SQLText, rep.ChartType, rep.ChartConfig, rep.Visibility, ActorID(ctx), rep.CreationKey, hash).Scan(&rep.ID, &rep.CreatedAt, &rep.UpdatedAt, &rep.Version)
+	if errors.Is(err, pgx.ErrNoRows) && rep.CreationKey != "" {
+		var original string
+		err = r.pool.QueryRow(ctx, `SELECT id,created_at,updated_at,version,creation_hash FROM sys_reports WHERE owner_user_id=$1 AND creation_key=$2::uuid`, ActorID(ctx), rep.CreationKey).Scan(&rep.ID, &rep.CreatedAt, &rep.UpdatedAt, &rep.Version, &original)
+		if err == nil && original != hash {
+			return ErrReportConflict
+		}
+	}
+	return err
 }
 
-func (r *ReportRepository) Get(ctx context.Context, id int64) (*Report, error) {
+func reportConnection(ctx context.Context) string {
+	return "COALESCE((SELECT mine.id FROM sys_connections mine WHERE mine.user_id=" + fmt.Sprint(ActorID(ctx)) + " AND mine.definition_revision_id=r.definition_revision_id),0)"
+}
+func reportVisible(ctx context.Context) string {
+	actor := fmt.Sprint(ActorID(ctx))
+	return "((r.owner_user_id=" + actor + " OR r.visibility='shared') AND dbhub_source_visible(r.definition_revision_id," + actor + "))"
+}
+func reportColumns(ctx context.Context) string {
+	return `r.id,r.name,r.description,` + reportConnection(ctx) + `,r.definition_revision_id,d.name,d.family_id::text,d.revision,r.database_name,r.sql_text,r.chart_type,r.chart_config,r.visibility,r.owner_user_id,COALESCE(r.starred_by,'{}'),r.created_at,r.updated_at,COALESCE(u.username,''),COALESCE(` + fmt.Sprint(ActorID(ctx)) + `=ANY(r.starred_by),FALSE),r.version`
+}
+
+const reportJoins = ` FROM sys_reports r JOIN sys_source_definitions d ON d.id=r.definition_revision_id LEFT JOIN sys_users u ON u.id=r.owner_user_id `
+
+func scanReport(row pgx.Row) (*Report, error) {
 	rep := &Report{}
-	err := r.pool.QueryRow(ctx, `
-		SELECT r.id, r.name, r.description, `+reportConnection(ctx)+`, r.database_name, r.sql_text,
-		       r.chart_type, r.chart_config, r.visibility, r.owner_user_id,
-		       COALESCE(r.starred_by,'{}'), r.created_at, r.updated_at,
-		       COALESCE(u.username,'')
-		FROM sys_reports r
-		LEFT JOIN sys_users u ON u.id = r.owner_user_id
-		WHERE r.id = $1 AND (r.owner_user_id=$2 OR r.visibility='shared') AND `+reportSourceVisible(ctx), id, ActorID(ctx)).Scan(
-		&rep.ID, &rep.Name, &rep.Description, &rep.ConnectionID, &rep.DatabaseName, &rep.SQLText,
-		&rep.ChartType, &rep.ChartConfig, &rep.Visibility, &rep.OwnerUserID,
-		&rep.StarredBy, &rep.CreatedAt, &rep.UpdatedAt, &rep.OwnerName)
-	if err == pgx.ErrNoRows {
+	err := row.Scan(&rep.ID, &rep.Name, &rep.Description, &rep.ConnectionID, &rep.DefinitionRevisionID, &rep.SourceName, &rep.SourceFamilyID, &rep.SourceRevision, &rep.DatabaseName, &rep.SQLText, &rep.ChartType, &rep.ChartConfig, &rep.Visibility, &rep.OwnerUserID, &rep.StarredBy, &rep.CreatedAt, &rep.UpdatedAt, &rep.OwnerName, &rep.Starred, &rep.Version)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	return rep, err
 }
-
+func (r *ReportRepository) Get(ctx context.Context, id int64) (*Report, error) {
+	return scanReport(r.pool.QueryRow(ctx, `SELECT `+reportColumns(ctx)+reportJoins+` WHERE r.id=$1 AND `+reportVisible(ctx), id))
+}
 func (r *ReportRepository) List(ctx context.Context, f ReportFilter) ([]Report, int64, error) {
 	if f.Limit <= 0 || f.Limit > 100 {
 		f.Limit = 20
 	}
-	conds := []string{"(r.owner_user_id=" + fmt.Sprint(ActorID(ctx)) + " OR r.visibility='shared')", reportSourceVisible(ctx)}
+	conds := []string{reportVisible(ctx)}
 	args := []any{}
-	add := func(tmpl string, vals ...any) {
-		for _, v := range vals {
+	add := func(tmpl string, values ...any) {
+		for _, v := range values {
 			args = append(args, v)
 			tmpl = strings.Replace(tmpl, "?", fmt.Sprintf("$%d", len(args)), 1)
 		}
@@ -100,104 +120,65 @@ func (r *ReportRepository) List(ctx context.Context, f ReportFilter) ([]Report, 
 		add("(r.name ILIKE ? OR r.description ILIKE ? OR r.sql_text ILIKE ?)", like, like, like)
 	}
 	if f.OwnerID > 0 {
-		add("r.owner_user_id = ?", f.OwnerID)
+		add("r.owner_user_id=?", f.OwnerID)
 	}
 	if f.StarredBy > 0 {
-		add("? = ANY(r.starred_by)", f.StarredBy)
+		add("?=ANY(r.starred_by)", f.StarredBy)
 	}
 	if f.Visibility != "" {
-		add("r.visibility = ?", f.Visibility)
+		add("r.visibility=?", f.Visibility)
 	}
 	if f.ConnectionID > 0 {
-		add("r.connection_id = ?", f.ConnectionID)
+		add(reportConnection(ctx)+"=?", f.ConnectionID)
 	}
 	where := strings.Join(conds, " AND ")
 	var total int64
 	if err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sys_reports r WHERE `+where, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("统计报表失败: %w", err)
+		return nil, 0, err
 	}
-	q := fmt.Sprintf(`
-		SELECT r.id, r.name, r.description, `+reportConnection(ctx)+`, r.database_name, r.sql_text,
-		       r.chart_type, r.chart_config, r.visibility, r.owner_user_id,
-		       COALESCE(r.starred_by,'{}'), r.created_at, r.updated_at,
-		       COALESCE(u.username,''),
-		       COALESCE($%d = ANY(r.starred_by), FALSE)
-		FROM sys_reports r
-		LEFT JOIN sys_users u ON u.id = r.owner_user_id
-		WHERE %s
-		ORDER BY r.updated_at DESC
-		LIMIT $%d OFFSET $%d`, len(args)+1, where, len(args)+2, len(args)+3)
-	args = append(args, f.StarredBy, f.Limit, f.Offset)
+	q := `SELECT ` + reportColumns(ctx) + reportJoins + ` WHERE ` + where + fmt.Sprintf(` ORDER BY r.updated_at DESC,r.id DESC LIMIT $%d OFFSET $%d`, len(args)+1, len(args)+2)
+	args = append(args, f.Limit, f.Offset)
 	rows, err := r.pool.Query(ctx, q, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("查询报表失败: %w", err)
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := []Report{}
 	for rows.Next() {
-		var rep Report
-		if err := rows.Scan(
-			&rep.ID, &rep.Name, &rep.Description, &rep.ConnectionID, &rep.DatabaseName, &rep.SQLText,
-			&rep.ChartType, &rep.ChartConfig, &rep.Visibility, &rep.OwnerUserID,
-			&rep.StarredBy, &rep.CreatedAt, &rep.UpdatedAt, &rep.OwnerName, &rep.Starred); err != nil {
+		rep, err := scanReport(rows)
+		if err != nil {
 			return nil, 0, err
 		}
-		out = append(out, rep)
+		out = append(out, *rep)
 	}
 	return out, total, rows.Err()
 }
-
 func (r *ReportRepository) Update(ctx context.Context, rep *Report) error {
-	if rep.ChartConfig == nil {
-		rep.ChartConfig = json.RawMessage("{}")
+	err := r.pool.QueryRow(ctx, `UPDATE sys_reports SET name=$2,description=$3,connection_id=NULLIF($4,0),definition_revision_id=$5,database_name=$6,sql_text=$7,chart_type=$8,chart_config=$9,visibility=$10,version=version+1
+ WHERE id=$1 AND owner_user_id=$11 AND version=$12 RETURNING version,updated_at`, rep.ID, rep.Name, rep.Description, rep.ConnectionID, rep.DefinitionRevisionID, rep.DatabaseName, rep.SQLText, rep.ChartType, rep.ChartConfig, rep.Visibility, ActorID(ctx), rep.Version).Scan(&rep.Version, &rep.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrReportConflict
 	}
-	tag, err := r.pool.Exec(ctx, `
-		UPDATE sys_reports SET
-			name=$2, description=$3, connection_id=$4, database_name=$5,
-			sql_text=$6, chart_type=$7, chart_config=$8, visibility=$9
-		WHERE id=$1`, rep.ID, rep.Name, rep.Description, rep.ConnectionID, rep.DatabaseName,
-		rep.SQLText, rep.ChartType, rep.ChartConfig, rep.Visibility)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *ReportRepository) Delete(ctx context.Context, id int64) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_reports WHERE id=$1`, id)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func (r *ReportRepository) SetStar(ctx context.Context, id int64, userID int64, star bool) error {
-	if star {
-		_, err := r.pool.Exec(ctx, `
-			UPDATE sys_reports SET starred_by = (
-				SELECT COALESCE(array_agg(DISTINCT x), '{}')
-				FROM unnest(array_append(COALESCE(starred_by,'{}'), $2)) x)
-			WHERE id=$1`, id, userID)
-		return err
-	}
-	_, err := r.pool.Exec(ctx, `
-		UPDATE sys_reports SET starred_by = array_remove(COALESCE(starred_by,'{}'), $2)
-		WHERE id=$1`, id, userID)
 	return err
 }
-
-// A shared report is a definition; its viewer never inherits the owner's identity.
-func reportConnection(ctx context.Context) string {
-	actor := fmt.Sprint(ActorID(ctx))
-	return "CASE WHEN r.owner_user_id=" + actor + " THEN r.connection_id ELSE COALESCE((SELECT mine.id FROM sys_connections mine JOIN sys_connections src ON src.id=r.connection_id WHERE mine.user_id=" + actor + " AND mine.definition_revision_id=src.definition_revision_id),0) END"
+func (r *ReportRepository) Delete(ctx context.Context, id int64) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM sys_reports WHERE id=$1 AND owner_user_id=$2`, id, ActorID(ctx))
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
 }
-
-func reportSourceVisible(ctx context.Context) string {
-	return "EXISTS(SELECT 1 FROM sys_connections rs WHERE rs.id=r.connection_id AND dbhub_source_visible(rs.definition_revision_id," + fmt.Sprint(ActorID(ctx)) + "))"
+func (r *ReportRepository) SetStar(ctx context.Context, id, userID int64, star bool) error {
+	if userID != ActorID(ctx) || userID < 1 {
+		return ErrNotFound
+	}
+	expression := `array_remove(COALESCE(r.starred_by,'{}'),$2)`
+	if star {
+		expression = `ARRAY(SELECT DISTINCT x FROM unnest(array_append(COALESCE(r.starred_by,'{}'),$2)) x)`
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE sys_reports r SET starred_by=`+expression+` WHERE id=$1 AND `+reportVisible(ctx), id, userID)
+	if err == nil && tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return err
 }

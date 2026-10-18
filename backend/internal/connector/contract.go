@@ -64,6 +64,8 @@ type ObjectRef struct {
 	Name, Kind string
 }
 type ExecuteOptions struct {
+	// LosslessNumbers keeps exact decimal / large integer text on the JSON wire.
+	LosslessNumbers  bool
 	MaxRows          int
 	Timeout          time.Duration
 	Args             []any

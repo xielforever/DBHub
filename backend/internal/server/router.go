@@ -324,6 +324,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		// ---------- 报表中心（M3/M4） ----------
 		if deps.Reports != nil {
 			rH := reportapi.NewHandler(deps.Reports, deps.Conns, log)
+			mux.Handle("POST /api/v1/reports/preview", middleware.Chain(http.HandlerFunc(qH.PreviewReport), requireAuth, canWrite))
+			mux.Handle("POST /api/v1/reports/{id}/execute", middleware.Chain(qH.ExecuteReport(deps.Reports), requireAuth))
 			mux.Handle("POST /api/v1/reports",
 				middleware.Chain(http.HandlerFunc(rH.Create), requireAuth, canWrite))
 			mux.Handle("GET /api/v1/reports",

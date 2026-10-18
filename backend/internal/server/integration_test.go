@@ -207,7 +207,7 @@ func (a *apiTest) personalFor(sourceID int64, token, password string) int64 {
 }
 func (a *apiTest) call(method, path, token string, body any, want int) map[string]any {
 	a.t.Helper()
-	if method == "POST" && path == "/query/execute" {
+	if method == "POST" && (path == "/query/execute" || path == "/reports") {
 		if payload, ok := body.(map[string]any); ok {
 			if _, exists := payload["request_id"]; !exists {
 				payload["request_id"] = testRequestID()

@@ -1,0 +1,112 @@
+{
+  "verified_at": "2026-10-18T00:41:15.478566+00:00",
+  "scope": "first-phase independent read-only reports; authenticated definition sharing; exact numeric wire values; dashboards deferred",
+  "base_commit": "d02b10ff9152fcbcffc21148688870a5aa8102c2",
+  "go": {
+    "passed_test_items": 230,
+    "tested_packages": 15,
+    "failed": 0,
+    "skipped": [
+      "TestJournalCrashHelper",
+      "TestVersionMatrixTarget",
+      "TestOpenGaussDemoHTTP"
+    ],
+    "race_detector": true,
+    "go_vet": "passed",
+    "raw_report_sha256": "808f37669e61b6c960703d5658909fb55000ac1d5b49ae0ce3c71fb68626321d"
+  },
+  "frontend": {
+    "report_tests": 12,
+    "workbench_tests": 14,
+    "failed": 0,
+    "typecheck": "passed",
+    "production_build": "passed",
+    "existing_warning": "large output chunks"
+  },
+  "browser": {
+    "target": "final production nginx + production backend images with real PostgreSQL; the nine initial flows also passed against Cloud development services",
+    "checks": [
+      "independent creation previews a real read-only query and saves a shared chart",
+      "view executes the saved definition through the dedicated report route and exposes chart source rows",
+      "concurrent edits produce a visible conflict without overwriting the saved definition",
+      "line, pie and metric charts render complete real query results without client aggregation",
+      "large integers, high precision decimals and JSON cell numbers retain their exact values",
+      "truncation is explicit, row 1000 remains reachable, and the mobile page fits the viewport",
+      "a real SQL error is visible and does not masquerade as an empty or old result",
+      "readonly viewer uses a personal binding and keeps access after the publisher deletes their connection",
+      "unbound owner cannot borrow viewer credentials and anonymous sharing remains disabled",
+      "all real browser paths finish without page script errors"
+    ],
+    "mocked_checks": [],
+    "page_errors": [],
+    "desktop": [
+      1440,
+      1000
+    ],
+    "mobile": [
+      390,
+      844
+    ],
+    "raw_report_sha256": "2c424eb5fd5c483e2707f30e58192cd7460d827794ce92be364ecb6f0818d8a9",
+    "screenshots": [
+      "images/report-phase1-desktop.png",
+      "images/report-phase1-mobile.png"
+    ]
+  },
+  "production_runtime": {
+    "backend_image": "sha256:aa5c887320bc7445850b6b07e464aea2bd13101c89c892a3f6d9295ffa6e02bc",
+    "frontend_image": "sha256:c39c8d562c3df2366b29ef596aa3e87715e3bd57873b1dd079f2e015cc6ef411",
+    "backend_readonly_root": true,
+    "backend_uid": "65532:65532",
+    "audit_volume": "dbhub-report-audit",
+    "checks": [
+      "production backend readiness executable",
+      "production nginx proxies readiness to production backend"
+    ],
+    "target_allowlist": "postgres:5432 (owned local fixture only)"
+  },
+  "operational": {
+    "production_audit_ready": true,
+    "production_audit_pending": 0,
+    "operational_checks": [
+      "production audit spool drained before cleanup"
+    ]
+  },
+  "cleanup": {
+    "owned_browser_container_removed": true,
+    "owned_production_containers_removed": true,
+    "owned_audit_volume_removed": true,
+    "owned_network_removed": true,
+    "fixture_users_remaining": 0,
+    "fixture_connections_remaining": 0,
+    "fixture_definitions_remaining": 0,
+    "interrupted_test_schema_removed": true,
+    "interrupted_test_temporary_directory_removed": true
+  },
+  "boundaries": [
+    "Report results are live per-viewer queries, not shared cached rows.",
+    "At most 1000 rows and 30 seconds per report SQL, subject to stricter server settings.",
+    "Browser aggregation, anonymous shares, schedules, exports and dashboard authoring are outside this phase.",
+    "Real native PostgreSQL/MySQL and PostgreSQL JDBC were exercised; no new openGauss container or full version matrix was run in this change.",
+    "Validation used local Cloud fixtures; production business load, domains and real organization rollout were not exercised."
+  ],
+  "source_sha256": {
+    "backend/internal/connector/contract.go": "3a855bcf8e6e11c52584650095b647ca8c742d6b489ad305d4ea3a08f5828fbc",
+    "backend/internal/connector/native/native.go": "f9958b9485f3bcda78fdffd738339e3413939d9cb5f3375e02b101441f6c089e",
+    "backend/internal/db/migrations/0026_report_phase1.sql": "db9407aa3146ef5a2390d23da54fe83ac09a67d24bd6549877773a1f4575659e",
+    "backend/internal/db/report_repo.go": "87cbc0677f3a19b554a1fbdffbd4e6342b912f1f3ef1fad3e48e4c9567aa44a3",
+    "backend/internal/queryapi/execute_handler.go": "59093591544ebacd48f1c4993befd4983795613f6b60d6b239cd3e7ee27af5f6",
+    "backend/internal/queryapi/report.go": "1ecacd6034314f36805245ac0792bf14944e19a1ee22476fe233e007e4092a9c",
+    "backend/internal/reportapi/handler.go": "33068c9fda1cd8fcb702ea04c9f7a3cd15b5f9c9237986fe0d309f63a572984d",
+    "backend/internal/sqlparse/report.go": "584cb4cd1c85a856b2fe9098e3be04b743eb21825b701294d4e4bd60de7ead6b",
+    "backend/internal/target/execute.go": "a894baff53dbfb4f46e318d830842aae052f9a1edcee5c2a8f3aada863eae06b",
+    "backend/internal/target/lossless.go": "9b8f8127ea2e9fbe610b9c372b8608d2eb730102162e1270e44cf3ce20af8b0b",
+    "frontend/src/api/report.ts": "09f55c8bb162585ea5d1e945b795703a5930368a3f61eee2c1d4f5d8eea7226c",
+    "frontend/src/views/report/ReportEditor.vue": "631bc8d21acaf9daefeb8dd3153be88f632f3e598a9a38696ad02986f8b42f29",
+    "frontend/src/views/report/ReportResult.vue": "24eb0423651bdc672dbf1a03fbe5dc22cf59d460807a1d3234b1d81401413a56",
+    "frontend/src/views/report/ReportsView.vue": "f7fbdae6a65229474763671bca04ff8807e62942de6f317c4500a046ccbf8a2c",
+    "frontend/src/views/report/reportChart.ts": "19f57c3696957491c53a4add0416f342770dc425b4510df7fc975a73d46e31c9",
+    "frontend/src/views/report/useReportRun.ts": "3a49d665cedbfc396bc0bbf7b90c0587aa48da7d2689b92f9cfb96516a8997c9",
+    "scripts/cloud/report_browser_test.py": "3dcd8186627e8c10ab1d6500372e653f769ebe7b0ded3419ff309e7bd7a1ee18"
+  }
+}
