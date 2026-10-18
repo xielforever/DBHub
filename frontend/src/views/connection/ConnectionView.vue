@@ -286,7 +286,7 @@ const publishing = ref(false)
 async function addedFromCatalog() { activeTab.value = 'mine'; await fetchConnections() }
 async function publishDefinition(c: ConnectionItem) {
  if (publishing.value) return
- try { await ElMessageBox.confirm(`发布「${c.name}」的地址、库名和驱动配置到全局目录？使用者需要填写自己的数据库账号。`, '发布数据源定义', { type:'info',confirmButtonText:'发布定义' }) } catch { return }
+ try { await ElMessageBox.confirm(`发布「${c.name}」的地址、库名和驱动配置到当前工作空间目录？使用者需要填写自己的数据库账号。`, '发布数据源定义', { type:'info',confirmButtonText:'发布定义' }) } catch { return }
  publishing.value = true
  try { await sourceCatalogApi.publish(c.id,'global'); ElMessage.success('数据源定义已发布'); activeTab.value='catalog' } catch { /* API displays failure */ } finally { publishing.value=false }
 }

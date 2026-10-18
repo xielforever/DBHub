@@ -78,11 +78,11 @@ type TableListItem struct {
 
 // MetadataRepository 资产元数据仓储。
 type MetadataRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewMetadataRepository(pool *pgxpool.Pool) *MetadataRepository {
-	return &MetadataRepository{pool: pool}
+	return &MetadataRepository{pool: scopedPool(pool)}
 }
 
 func mustJSON(v any) json.RawMessage {

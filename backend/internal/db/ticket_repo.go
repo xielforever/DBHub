@@ -43,11 +43,11 @@ type TicketFilter struct {
 }
 
 type TicketRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewTicketRepository(pool *pgxpool.Pool) *TicketRepository {
-	return &TicketRepository{pool: pool}
+	return &TicketRepository{pool: scopedPool(pool)}
 }
 
 func (r *TicketRepository) Create(ctx context.Context, t *Ticket) error {

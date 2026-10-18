@@ -65,7 +65,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'dashboards',
         name: 'dashboards',
-        redirect: '/reports',
+        component: () => import('../views/dashboard/ManagedDashboardsView.vue'),
         meta: { title: pageTitles.dashboards, icon: 'LayoutDashboard' },
       },
       {
@@ -108,7 +108,7 @@ const router = createRouter({
   routes,
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const userStore = useUserStore()
   if (!to.meta.public && to.name !== 'login' && !userStore.isLoggedIn) {
     return { name: 'login', query: { redirect: to.fullPath } }
@@ -116,9 +116,10 @@ router.beforeEach((to) => {
   if (to.name === 'login' && userStore.isLoggedIn) {
     return { path: '/' }
   }
+  if(!to.meta.public&&userStore.isLoggedIn){try{await userStore.loadWorkspaces()}catch{return false}}
   // 角色守卫：meta.roles 不包含当前角色时回退到仪表盘
   const allowed = to.meta.roles
-  if (allowed && userStore.user && !allowed.includes(userStore.user.role)) {
+  if (allowed && userStore.user && userStore.workspaceId && !allowed.includes(userStore.role)) {
     return { path: '/dashboard' }
   }
   if (typeof to.meta.title === 'string') {

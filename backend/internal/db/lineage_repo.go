@@ -30,11 +30,11 @@ type LineageEdge struct {
 
 // LineageRepository 血缘缓存仓储
 type LineageRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewLineageRepository(pool *pgxpool.Pool) *LineageRepository {
-	return &LineageRepository{pool: pool}
+	return &LineageRepository{pool: scopedPool(pool)}
 }
 
 // Fingerprint 生成边指纹（上下游四元组+kind）

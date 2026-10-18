@@ -3,6 +3,7 @@ package target
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 type ExecuteOptions struct {
 	MaxRows          int
+	MaxBytes         int
 	LosslessNumbers  bool
 	Timeout          time.Duration
 	Args             []any
@@ -142,6 +144,7 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 		for _, field := range rows.FieldDescriptions() {
 			result.Columns = append(result.Columns, string(field.Name))
 		}
+		usedBytes := 0
 		for rows.Next() {
 			if len(result.Rows) >= opt.MaxRows {
 				result.Truncated = true
@@ -155,6 +158,16 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 				for i, value := range values {
 					field := rows.FieldDescriptions()[i]
 					values[i] = losslessPGValue(value, rows.RawValues()[i], field.DataTypeOID, field.Format)
+				}
+			}
+			if opt.MaxBytes > 0 {
+				b, e := json.Marshal(values)
+				if e != nil {
+					return nil, e
+				}
+				usedBytes += len(b) + 1
+				if usedBytes > opt.MaxBytes-4096 {
+					return nil, fmt.Errorf("查询结果超出字节预算")
 				}
 			}
 			result.Rows = append(result.Rows, values)
@@ -201,6 +214,7 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 			if err != nil {
 				return nil, err
 			}
+			usedBytes := 0
 			for rows.Next() {
 				if len(result.Rows) >= opt.MaxRows {
 					result.Truncated = true
@@ -220,6 +234,16 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 					}
 					if opt.LosslessNumbers {
 						values[i] = losslessNumber(values[i])
+					}
+				}
+				if opt.MaxBytes > 0 {
+					b, e := json.Marshal(values)
+					if e != nil {
+						return nil, e
+					}
+					usedBytes += len(b) + 1
+					if usedBytes > opt.MaxBytes-4096 {
+						return nil, fmt.Errorf("查询结果超出字节预算")
 					}
 				}
 				result.Rows = append(result.Rows, values)

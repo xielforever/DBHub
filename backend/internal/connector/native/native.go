@@ -73,7 +73,7 @@ func (s *sqlSession) Probe(ctx context.Context) (*connector.TestInfo, error) {
 func (s *sqlSession) Close(context.Context) error { s.r.Close(); return nil }
 func (s *sqlSession) Execute(ctx context.Context, q connector.ExecuteRequest) (*connector.ExecResult, error) {
 	o := q.Options
-	r, e := target.ExecuteWithOptions(ctx, s.r, q.SQL, q.ReadOnly, target.ExecuteOptions{MaxRows: o.MaxRows, LosslessNumbers: o.LosslessNumbers, Timeout: o.Timeout, Args: o.Args, AllowUnsafeWrite: o.AllowUnsafeWrite, BeforeExecute: o.BeforeExecute})
+	r, e := target.ExecuteWithOptions(ctx, s.r, q.SQL, q.ReadOnly, target.ExecuteOptions{MaxRows: o.MaxRows, MaxBytes: o.MaxBytes, LosslessNumbers: o.LosslessNumbers, Timeout: o.Timeout, Args: o.Args, AllowUnsafeWrite: o.AllowUnsafeWrite, BeforeExecute: o.BeforeExecute})
 	return r, normalize(e)
 }
 func (s *sqlSession) Databases(c context.Context) ([]connector.DatabaseItem, error) {

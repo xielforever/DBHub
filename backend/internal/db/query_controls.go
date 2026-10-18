@@ -8,9 +8,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type QueryControls struct{ pool *pgxpool.Pool }
+type QueryControls struct{ pool *ScopedPool }
 
-func NewQueryControls(pool *pgxpool.Pool) *QueryControls { return &QueryControls{pool} }
+func NewQueryControls(pool *pgxpool.Pool) *QueryControls { return &QueryControls{scopedPool(pool)} }
 
 type QuerySettings struct {
 	TimeoutMS        int  `json:"timeout_ms"`
@@ -31,7 +31,7 @@ func (r *QueryControls) Settings(ctx context.Context, uid int64) (QuerySettings,
 	return s, e
 }
 func (r *QueryControls) SaveSettings(ctx context.Context, uid int64, s QuerySettings) error {
-	_, e := r.pool.Exec(ctx, `INSERT INTO sys_query_settings(user_id,timeout_ms,max_rows,block_unsafe_write) VALUES($1,$2,$3,$4) ON CONFLICT(user_id) DO UPDATE SET timeout_ms=$2,max_rows=$3,block_unsafe_write=$4,updated_at=NOW()`, uid, s.TimeoutMS, s.MaxRows, s.BlockUnsafeWrite)
+	_, e := r.pool.Exec(ctx, `INSERT INTO sys_query_settings(user_id,timeout_ms,max_rows,block_unsafe_write) VALUES($1,$2,$3,$4) ON CONFLICT(workspace_id,user_id) DO UPDATE SET timeout_ms=$2,max_rows=$3,block_unsafe_write=$4,updated_at=NOW()`, uid, s.TimeoutMS, s.MaxRows, s.BlockUnsafeWrite)
 	return e
 }
 

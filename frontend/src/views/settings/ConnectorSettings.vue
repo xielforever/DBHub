@@ -1,7 +1,7 @@
 <template>
   <section class="glass-card p-4 sm:p-6 space-y-4" aria-labelledby="driver-settings-title">
     <header class="flex flex-wrap items-start justify-between gap-3">
-      <div><h2 id="driver-settings-title" class="font-medium">驱动管理</h2><p class="text-xs text-white/45 mt-1">个人配置引用已安装的 JDBC 驱动；管理员可以全局发布。</p></div>
+      <div><h2 id="driver-settings-title" class="font-medium">驱动管理</h2><p class="text-xs text-white/45 mt-1">个人配置引用已安装的 JDBC 驱动；管理员可以在当前工作空间发布。</p></div>
       <button class="ghost-button text-xs" :disabled="loading" @click="load">刷新</button>
     </header>
     <p v-if="serviceError" class="text-sm text-amber-200 break-words" role="alert">{{ serviceError }}</p>
@@ -14,11 +14,11 @@
       <label class="text-xs text-white/60">驱动名称<input v-model="driverName" class="glass-input mt-1" maxlength="100" placeholder="例如 PostgreSQL JDBC" /></label>
     </div>
     <p v-if="selectedArtifact" class="text-xs text-white/45 break-all">{{ selectedArtifact.class_name }} · SHA-256 {{ selectedArtifact.sha256 }}</p>
-    <label class="block text-xs text-white/60">可见范围<el-select v-model="driverScope" aria-label="驱动可见范围" class="w-full mt-1"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="全局发布" value="global" /></el-select></label>
+    <label class="block text-xs text-white/60">可见范围<el-select v-model="driverScope" aria-label="驱动可见范围" class="w-full mt-1"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="工作空间共享" value="global" /></el-select></label>
     <button class="liquid-button text-xs" :disabled="busy || !artifactId || !driverName.trim()" @click="register">{{ busy ? '处理中…' : '登记驱动' }}</button>
     <ul class="divide-y divide-white/10">
       <li v-for="d in drivers" :key="d.id" class="py-3 space-y-2">
-        <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm break-all">{{ d.name }} <span class="text-white/45">{{ d.version }} · {{ d.visibility === 'global' ? '全局' : '个人' }} · {{ d.enabled ? '已启用' : '已停用' }}</span></p>
+        <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm break-all">{{ d.name }} <span class="text-white/45">{{ d.version }} · {{ d.visibility === 'global' ? '空间共享' : '个人' }} · {{ d.enabled ? '已启用' : '已停用' }}</span></p>
           <div v-if="canManage(d)" class="flex gap-2"><button class="ghost-button text-xs" :disabled="busy" @click="setStatus('driver',d.id,!d.enabled)">{{ d.enabled ? '停用' : '启用' }}</button><button class="ghost-button text-xs text-rose-300" :disabled="busy" @click="remove('driver',d.id,d.name)">删除</button></div>
         </div><p class="text-xs text-white/40 break-all">{{ d.class_name }}</p>
       </li>
@@ -34,13 +34,13 @@
       <label class="text-xs text-white/60">产品名称<input v-model="form.product" class="glass-input mt-1" placeholder="例如 PostgreSQL" maxlength="80" /></label>
       <label class="text-xs text-white/60">驱动版本<el-select v-model="form.driver_id" aria-label="模板驱动版本" class="w-full mt-1" placeholder="选择驱动版本" @change="chooseDriver"><el-option v-for="d in drivers.filter(d=>d.enabled)" :key="d.id" :value="d.id" :label="`${d.name} ${d.version}`" /></el-select></label>
     </div>
-    <label class="block text-xs text-white/60">配置可见范围<el-select v-model="form.visibility" :disabled="!!editingId" aria-label="连接规则可见范围" class="w-full mt-1"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="全局发布" value="global" /></el-select></label>
+    <label class="block text-xs text-white/60">配置可见范围<el-select v-model="form.visibility" :disabled="!!editingId" aria-label="连接规则可见范围" class="w-full mt-1"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="工作空间共享" value="global" /></el-select></label>
     <label class="block text-xs text-white/60">JDBC URL 模板<input v-model="form.url_template" aria-label="JDBC URL 模板" aria-describedby="jdbc-url-hint" class="glass-input mt-1 font-mono text-xs" spellcheck="false" /><span id="jdbc-url-hint" class="block mt-1 text-white/40">使用所选驱动的已支持 URL 规则；用户名和密码由实例独立填写。</span></label>
     <label class="block text-xs text-white/60">SQL 能力<el-select v-model="form.dialect" aria-label="模板 SQL 能力" class="w-full mt-1"><el-option label="仅结构浏览（未启用 SQL）" value="" /><el-option v-if="driverDialect" :label="`${driverDialect==='postgres'?'PostgreSQL':'MySQL'} 方言与基础执行`" :value="driverDialect" /></el-select></label>
     <div v-if="form.fields.length" class="space-y-2"><h3 class="text-xs text-white/60">连接字段</h3><div v-for="(field, index) in form.fields" :key="index" class="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center"><input v-model="field.name" class="glass-input text-xs" :aria-label="`字段 ${index + 1} 标识`" placeholder="字段标识" /><input v-model="field.label" class="glass-input text-xs" :aria-label="`${field.name} 显示名称`" /><div class="flex gap-2"><input v-model="field.default" class="glass-input min-w-0 text-xs" :aria-label="`${field.name} 默认值`" placeholder="默认值（可选）" /><button class="ghost-button text-xs" @click="form.fields.splice(index, 1)" :aria-label="`移除字段 ${index + 1}`">移除</button></div></div></div>
     <button class="ghost-button text-xs" :disabled="form.fields.length >= 20" @click="form.fields.push({name:'',label:'',type:'string',required:true})">添加连接字段</button>
     <button class="liquid-button text-xs" :disabled="busy || !form.driver_id || !form.template_key || !form.name" @click="publish">{{ busy ? '处理中…' : editingId ? '发布新修订' : '发布模板' }}</button>
-    <ul class="divide-y divide-white/10"><li v-for="t in templates" :key="t.id" class="py-3 space-y-2"><div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm break-all">{{ t.name }} · 修订 {{ t.revision }} <span class="text-xs text-white/45">{{ t.enabled && t.driver.enabled ? '已启用' : '不可用' }}</span></p><div v-if="canManage(t)" class="flex flex-wrap gap-2"><button class="ghost-button text-xs" :disabled="busy" @click="edit(t)">新修订</button><button class="ghost-button text-xs" :disabled="busy" @click="setStatus('template',t.id,!t.enabled)">{{ t.enabled ? '停用' : '启用' }}</button><button class="ghost-button text-xs text-rose-300" :disabled="busy" @click="remove('template',t.id,t.name)">删除</button></div></div><p class="text-xs text-white/40 break-all">{{ t.visibility === 'global' ? '全局' : '个人' }} · {{ t.product }} · {{ t.driver.name }} {{ t.driver.version }} · {{ t.dialect ? 'SQL 与结构浏览' : '仅结构浏览' }}</p></li><li v-if="!templates.length && !loading" class="py-3 text-sm text-white/45">发布模板后，即可在“新建数据源 → 自定义 JDBC”中选择。</li></ul>
+    <ul class="divide-y divide-white/10"><li v-for="t in templates" :key="t.id" class="py-3 space-y-2"><div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm break-all">{{ t.name }} · 修订 {{ t.revision }} <span class="text-xs text-white/45">{{ t.enabled && t.driver.enabled ? '已启用' : '不可用' }}</span></p><div v-if="canManage(t)" class="flex flex-wrap gap-2"><button class="ghost-button text-xs" :disabled="busy" @click="edit(t)">新修订</button><button class="ghost-button text-xs" :disabled="busy" @click="setStatus('template',t.id,!t.enabled)">{{ t.enabled ? '停用' : '启用' }}</button><button class="ghost-button text-xs text-rose-300" :disabled="busy" @click="remove('template',t.id,t.name)">删除</button></div></div><p class="text-xs text-white/40 break-all">{{ t.visibility === 'global' ? '空间共享' : '个人' }} · {{ t.product }} · {{ t.driver.name }} {{ t.driver.version }} · {{ t.dialect ? 'SQL 与结构浏览' : '仅结构浏览' }}</p></li><li v-if="!templates.length && !loading" class="py-3 text-sm text-white/45">发布模板后，即可在“新建数据源 → 自定义 JDBC”中选择。</li></ul>
   </section>
 </template>
 

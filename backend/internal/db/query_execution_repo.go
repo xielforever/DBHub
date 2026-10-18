@@ -10,32 +10,40 @@ import (
 
 // QueryExecution 是持久化执行回执，不保存查询行或可以用于重新执行的 SQL。
 type QueryExecution struct {
-	RequestID     string    `json:"request_id"`
-	ConnectionID  int64     `json:"connection_id"`
-	Database      string    `json:"database"`
-	Status        string    `json:"status"`
-	Transactional bool      `json:"transactional"`
-	Kind          string    `json:"kind,omitempty"`
-	AffectedRows  int64     `json:"affected_rows"`
-	DurationMS    int64     `json:"duration_ms"`
-	Message       string    `json:"message,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	RequestHash   string    `json:"-"`
+	DashboardRefreshID *string   `json:"-"`
+	DashboardTileKey   string    `json:"-"`
+	RequestID          string    `json:"request_id"`
+	ConnectionID       int64     `json:"connection_id"`
+	Database           string    `json:"database"`
+	Status             string    `json:"status"`
+	Transactional      bool      `json:"transactional"`
+	Kind               string    `json:"kind,omitempty"`
+	AffectedRows       int64     `json:"affected_rows"`
+	DurationMS         int64     `json:"duration_ms"`
+	Message            string    `json:"message,omitempty"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+	RequestHash        string    `json:"-"`
 }
 
 // ClaimExecution 通过唯一约束在多进程间原子登记。同一编号永不重新执行。
-func (r *QueryControls) ClaimExecution(ctx context.Context, user int64, id, hash string, connection int64, database string, transactional bool) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `INSERT INTO sys_query_executions(user_id,request_id,request_hash,connection_id,database_name,transactional)
-		VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(user_id,request_id) DO NOTHING`, user, id, hash, connection, database, transactional)
+func (r *QueryControls) ClaimExecution(ctx context.Context, user int64, id, hash string, connection int64, database string, transactional bool, bindings ...*DashboardExecution) (bool, error) {
+	var refresh *string
+	tile := ""
+	if len(bindings) > 0 && bindings[0] != nil {
+		refresh = &bindings[0].RefreshID
+		tile = bindings[0].TileKey
+	}
+	tag, err := r.pool.Exec(ctx, `INSERT INTO sys_query_executions(user_id,request_id,request_hash,connection_id,database_name,transactional,dashboard_refresh_id,dashboard_tile_key)
+		VALUES($1,$2,$3,$4,$5,$6,$7::uuid,$8) ON CONFLICT(workspace_id,user_id,request_id) DO NOTHING`, user, id, hash, connection, database, transactional, refresh, tile)
 	return err == nil && tag.RowsAffected() == 1, err
 }
 
 func (r *QueryControls) Execution(ctx context.Context, user int64, id string) (*QueryExecution, error) {
 	e := &QueryExecution{}
-	err := r.pool.QueryRow(ctx, `SELECT request_id::text,connection_id,database_name,status,transactional,kind,affected_rows,duration_ms,message,created_at,updated_at,request_hash
+	err := r.pool.QueryRow(ctx, `SELECT request_id::text,connection_id,database_name,status,transactional,kind,affected_rows,duration_ms,message,created_at,updated_at,request_hash,dashboard_refresh_id::text,dashboard_tile_key
 		FROM sys_query_executions WHERE user_id=$1 AND request_id=$2`, user, id).Scan(
-		&e.RequestID, &e.ConnectionID, &e.Database, &e.Status, &e.Transactional, &e.Kind, &e.AffectedRows, &e.DurationMS, &e.Message, &e.CreatedAt, &e.UpdatedAt, &e.RequestHash)
+		&e.RequestID, &e.ConnectionID, &e.Database, &e.Status, &e.Transactional, &e.Kind, &e.AffectedRows, &e.DurationMS, &e.Message, &e.CreatedAt, &e.UpdatedAt, &e.RequestHash, &e.DashboardRefreshID, &e.DashboardTileKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -61,8 +69,11 @@ func (r *QueryControls) StartExecution(ctx context.Context, user int64, id strin
 }
 
 func (r *QueryControls) FinishExecution(ctx context.Context, user int64, e *QueryExecution) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE sys_query_executions SET status=$3,kind=$4,affected_rows=$5,duration_ms=$6,message=$7,updated_at=NOW()
-		WHERE user_id=$1 AND request_id=$2 AND status IN ('queued','running')`, user, e.RequestID, e.Status, e.Kind, e.AffectedRows, e.DurationMS, e.Message)
+	if user != ActorID(ctx) || WorkspaceID(ctx) <= 0 {
+		return ErrManagedDenied
+	}
+	tag, err := r.pool.maintenance.Exec(ctx, `UPDATE sys_query_executions SET status=$3,kind=$4,affected_rows=$5,duration_ms=$6,message=$7,updated_at=NOW()
+		WHERE user_id=$1 AND request_id=$2 AND workspace_id=$8 AND (status IN ('queued','running') OR (status='succeeded' AND $3='rejected'))`, user, e.RequestID, e.Status, e.Kind, e.AffectedRows, e.DurationMS, e.Message, WorkspaceID(ctx))
 	if err == nil && tag.RowsAffected() != 1 {
 		return ErrDuplicate
 	}

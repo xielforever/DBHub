@@ -23,15 +23,16 @@ var tokenEncoding = base64.RawURLEncoding
 
 // Claims JWT 自定义声明。
 type Claims struct {
-	Issuer    string `json:"iss"`
-	Subject   int64  `json:"sub"`
-	Username  string `json:"username"`
-	Role      string `json:"role"`
-	Type      string `json:"typ"`
-	IssuedAt  int64  `json:"iat"`
-	Expires   int64  `json:"exp"`
-	JWTID     string `json:"jti"`
-	SessionID string `json:"sid"`
+	WorkspaceID int64  `json:"-"`
+	Issuer      string `json:"iss"`
+	Subject     int64  `json:"sub"`
+	Username    string `json:"username"`
+	Role        string `json:"role"`
+	Type        string `json:"typ"`
+	IssuedAt    int64  `json:"iat"`
+	Expires     int64  `json:"exp"`
+	JWTID       string `json:"jti"`
+	SessionID   string `json:"sid"`
 }
 
 type jwtHeader struct {

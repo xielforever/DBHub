@@ -67,6 +67,7 @@ type ExecuteOptions struct {
 	// LosslessNumbers keeps exact decimal / large integer text on the JSON wire.
 	LosslessNumbers  bool
 	MaxRows          int
+	MaxBytes         int
 	Timeout          time.Duration
 	Args             []any
 	AllowUnsafeWrite bool

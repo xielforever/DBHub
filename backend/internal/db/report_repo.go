@@ -50,9 +50,11 @@ type ReportFilter struct {
 	Limit        int
 }
 
-type ReportRepository struct{ pool *pgxpool.Pool }
+type ReportRepository struct{ pool *ScopedPool }
 
-func NewReportRepository(pool *pgxpool.Pool) *ReportRepository { return &ReportRepository{pool: pool} }
+func NewReportRepository(pool *pgxpool.Pool) *ReportRepository {
+	return &ReportRepository{pool: scopedPool(pool)}
+}
 
 func (r *ReportRepository) Create(ctx context.Context, rep *Report) error {
 	// Retrying an uncertain create uses the same key AND original payload. Never
@@ -66,7 +68,7 @@ func (r *ReportRepository) Create(ctx context.Context, rep *Report) error {
 	err = r.pool.QueryRow(ctx, `INSERT INTO sys_reports
  (name,description,connection_id,definition_revision_id,database_name,sql_text,chart_type,chart_config,visibility,owner_user_id,creation_key,creation_hash)
  VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,'')::uuid,$12)
- ON CONFLICT(owner_user_id,creation_key) WHERE creation_key IS NOT NULL DO NOTHING
+ ON CONFLICT(workspace_id,owner_user_id,creation_key) WHERE creation_key IS NOT NULL DO NOTHING
  RETURNING id,created_at,updated_at,version`, rep.Name, rep.Description, rep.ConnectionID, rep.DefinitionRevisionID, rep.DatabaseName, rep.SQLText, rep.ChartType, rep.ChartConfig, rep.Visibility, ActorID(ctx), rep.CreationKey, hash).Scan(&rep.ID, &rep.CreatedAt, &rep.UpdatedAt, &rep.Version)
 	if errors.Is(err, pgx.ErrNoRows) && rep.CreationKey != "" {
 		var original string

@@ -20,10 +20,10 @@ type Snippet struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
-type SnippetRepository struct{ pool *pgxpool.Pool }
+type SnippetRepository struct{ pool *ScopedPool }
 
 func NewSnippetRepository(pool *pgxpool.Pool) *SnippetRepository {
-	return &SnippetRepository{pool: pool}
+	return &SnippetRepository{pool: scopedPool(pool)}
 }
 
 const snippetCols = `s.id,s.user_id,s.name,s.sql_text,s.database_name,s.connection_id,s.visibility,u.username,s.created_at,s.updated_at`

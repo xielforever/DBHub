@@ -64,6 +64,12 @@ func (r *ManagedReportRepository) SaveDraft(ctx context.Context, key string, id,
 	}{id, expected, d}
 	return r.command(ctx, key, "draft", input, false, true, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{}
+		if e := ValidateDataContract(d.DataContract, d.ChartType); e != nil {
+			return out, e
+		}
+		if e := ValidateContractMapping(d.DataContract, d.ChartConfig); e != nil {
+			return out, e
+		}
 		if e := managedDefinition(ctx, tx, d.DefinitionID); e != nil {
 			return out, e
 		}
@@ -139,7 +145,7 @@ func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit,
 	if e := r.pool.QueryRow(ctx, `SELECT count(*) FROM sys_report_versions WHERE report_id=$1`, id).Scan(&total); e != nil {
 		return nil, 0, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT v.id,v.report_id,v.number,v.definition,v.content_hash,v.submitted_by,v.submitter_name,v.created_at,rv.id,rv.status,rv.decider_name,rv.comment,rv.account_id,COALESCE(a.name,''),rv.manifest,EXISTS(SELECT 1 FROM sys_report_releases re WHERE re.report_id=v.report_id AND re.review_id=rv.id) FROM sys_report_versions v JOIN sys_report_reviews rv ON rv.version_id=v.id LEFT JOIN sys_report_accounts a ON a.id=rv.account_id WHERE v.report_id=$1 ORDER BY v.number DESC LIMIT $2 OFFSET $3`, id, limit, offset)
+	rows, e := r.pool.Query(ctx, `SELECT v.id,v.report_id,v.number,v.definition,v.content_hash,v.submitted_by,v.submitter_name,v.created_at,rv.id,rv.status,rv.decider_name,rv.comment,rv.account_id,COALESCE(a.name,''),rv.manifest,EXISTS(SELECT 1 FROM sys_report_releases re WHERE re.report_id=v.report_id AND re.review_id=rv.id),(SELECT to_jsonb(ac) FROM sys_report_audience_changes ac WHERE ac.review_id=rv.id) FROM sys_report_versions v JOIN sys_report_reviews rv ON rv.version_id=v.id LEFT JOIN sys_report_accounts a ON a.id=rv.account_id WHERE v.report_id=$1 ORDER BY v.number DESC LIMIT $2 OFFSET $3`, id, limit, offset)
 	if e != nil {
 		return nil, 0, e
 	}
@@ -147,9 +153,15 @@ func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit,
 	out := []ReportVersion{}
 	for rows.Next() {
 		var v ReportVersion
-		var raw, manifest []byte
-		if e = rows.Scan(&v.ID, &v.ReportID, &v.Number, &raw, &v.ContentHash, &v.SubmitterID, &v.SubmitterName, &v.CreatedAt, &v.ReviewID, &v.Status, &v.DeciderName, &v.Comment, &v.AccountID, &v.AccountName, &manifest, &v.WasPublished); e != nil {
+		var raw, manifest, change []byte
+		if e = rows.Scan(&v.ID, &v.ReportID, &v.Number, &raw, &v.ContentHash, &v.SubmitterID, &v.SubmitterName, &v.CreatedAt, &v.ReviewID, &v.Status, &v.DeciderName, &v.Comment, &v.AccountID, &v.AccountName, &manifest, &v.WasPublished, &change); e != nil {
 			return nil, 0, e
+		}
+		if len(change) > 0 {
+			v.AudienceChange = &ReportAudienceProposal{}
+			if e = json.Unmarshal(change, v.AudienceChange); e != nil {
+				return nil, 0, e
+			}
 		}
 		if e = json.Unmarshal(raw, &v.Definition); e != nil {
 			return nil, 0, e
@@ -164,8 +176,8 @@ func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit,
 	}
 	return out, total, rows.Err()
 }
-func (r *ManagedReportRepository) Decide(ctx context.Context, key string, reviewID int64, decision, validationID, comment string) (ReportCommandResult, error) {
-	return r.command(ctx, key, "review", []any{reviewID, decision, validationID, comment}, decision != "withdrawn", decision == "withdrawn", func(tx pgx.Tx) (ReportCommandResult, error) {
+func (r *ManagedReportRepository) Decide(ctx context.Context, key string, reviewID int64, decision, validationID, comment string, contractConfirmed bool) (ReportCommandResult, error) {
+	return r.command(ctx, key, "review", []any{reviewID, decision, validationID, comment, contractConfirmed}, decision != "withdrawn", decision == "withdrawn", func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{ID: reviewID}
 		var status string
 		var submitter *int64
@@ -206,6 +218,12 @@ func (r *ManagedReportRepository) Decide(ctx context.Context, key string, review
 			if e = json.Unmarshal(manifest, &m); e != nil {
 				return out, e
 			}
+			if e = r.checkAudienceChange(ctx, tx, reviewID, account, m.UserIDs, m.GroupIDs, true); e != nil {
+				return out, e
+			}
+			if m.Contract != nil && !contractConfirmed {
+				return out, fmt.Errorf("%w: 请明确确认SQL、样本和业务范围符合所声明契约", ErrManagedInput)
+			}
 			if e = audience(ctx, tx, m.UserIDs, m.GroupIDs); e != nil {
 				return out, e
 			}
@@ -213,6 +231,16 @@ func (r *ManagedReportRepository) Decide(ctx context.Context, key string, review
 			validID = &validationID
 		}
 		_, e = tx.Exec(ctx, `UPDATE sys_report_reviews SET status=$2,decided_by=$3,decider_name=(SELECT username FROM sys_users WHERE id=$3),comment=$4,account_id=$5,manifest=$6::jsonb,manifest_hash=NULLIF($7,''),validation_id=$8::uuid,decided_at=now() WHERE id=$1`, reviewID, decision, ActorID(ctx), comment, accountID, nullableJSON(manifest), hash, validID)
+		if e == nil {
+			next := "approved_pending_release"
+			if decision == "rejected" {
+				next = "rejected"
+			}
+			if decision == "withdrawn" {
+				next = "cancelled"
+			}
+			_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=$2,decision_reason=CASE WHEN $2 IN('rejected','cancelled') THEN $3 ELSE decision_reason END,version=version+1 WHERE review_id=$1 AND expires_at>now() AND status IN('processing','approved_pending_release')`, reviewID, next, comment)
+		}
 		return out, e
 	})
 }
@@ -226,7 +254,7 @@ func (r *ManagedReportRepository) Transfer(ctx context.Context, key string, id, 
 	return r.command(ctx, key, "transfer", []int64{id, expected, owner}, true, false, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{}
 		var valid bool
-		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_users u JOIN sys_roles r ON r.id=u.role_id WHERE u.id=$1 AND u.is_active AND r.code IN ('admin','developer'))`, owner).Scan(&valid); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_users u JOIN sys_roles r ON r.code=dbhub_member_role(u.id) WHERE u.id=$1 AND u.is_active AND r.code IN ('admin','developer'))`, owner).Scan(&valid); e != nil {
 			return out, e
 		}
 		if !valid {

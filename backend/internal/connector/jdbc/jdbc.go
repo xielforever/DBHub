@@ -263,6 +263,7 @@ func (s *Session) Execute(ctx context.Context, q connector.ExecuteRequest) (*con
 	p["read_only"] = q.ReadOnly
 	p["cursor"] = q.Query
 	p["max_rows"] = opt.MaxRows
+	p["max_bytes"] = opt.MaxBytes
 	p["budget_ms"] = budget(ctx, 120000)
 	var result struct {
 		Kind         string           `json:"kind"`

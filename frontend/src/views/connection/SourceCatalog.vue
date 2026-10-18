@@ -8,7 +8,7 @@
     </div>
     <div v-loading="loading" class="min-h-32 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
       <article v-for="d in filtered" :key="d.id" class="glass-card p-5 space-y-3">
-        <div class="flex justify-between items-start gap-2"><h2 class="font-medium break-words">{{ d.name }}</h2><span class="text-xs text-white/50 shrink-0">{{ d.visibility === 'global' ? (d.access_mode === 'restricted' ? '指定范围' : '全局') : '个人' }} · 修订 {{ d.revision }}</span></div>
+        <div class="flex justify-between items-start gap-2"><h2 class="font-medium break-words">{{ d.name }}</h2><span class="text-xs text-white/50 shrink-0">{{ d.visibility === 'global' ? (d.access_mode === 'restricted' ? '指定范围' : '空间共享') : '个人' }} · 修订 {{ d.revision }}</span></div>
         <p class="text-xs text-white/55 break-all">{{ endpoint(d) }}</p>
         <p class="text-xs text-white/45">{{ d.config.type === 'jdbc' ? '自定义 JDBC' : d.config.type }} · {{ d.config.environment || 'dev' }}</p>
         <p v-if="d.description" class="text-sm text-white/60 break-words">{{ d.description }}</p>
@@ -52,7 +52,7 @@
       <el-form label-position="top">
         <el-form-item label="数据源名称"><el-input v-model="revision.name" maxlength="100" /></el-form-item>
         <el-form-item label="说明"><el-input v-model="revision.description" type="textarea" maxlength="1000" /></el-form-item>
-        <el-form-item label="可见范围"><el-select v-model="revision.visibility" class="w-full"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="全局发布" value="global" /></el-select></el-form-item>
+        <el-form-item label="可见范围"><el-select v-model="revision.visibility" class="w-full"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="工作空间共享" value="global" /></el-select></el-form-item>
         <el-form-item v-if="revision.visibility === 'global' && !revisionId" label="初始发布范围"><el-select v-model="revision.access_mode" class="w-full" aria-label="初始发布范围"><el-option label="全体用户" value="global" /><el-option label="指定用户或用户组（保存后设置）" value="restricted" /></el-select></el-form-item>
         <el-form-item label="类型"><el-select v-model="revision.config.type" class="w-full" @change="resetType"><el-option label="PostgreSQL" value="postgres" /><el-option label="MySQL" value="mysql" /><el-option label="Redis" value="redis" /><el-option label="自定义 JDBC" value="jdbc" /></el-select></el-form-item>
         <template v-if="revision.config.type === 'jdbc'">

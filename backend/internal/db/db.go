@@ -61,6 +61,36 @@ func Connect(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, er
 // Migrate 执行 embed 的全部迁移脚本，按文件名排序、逐个在事务中执行，
 // 通过 schema_migrations 表记录已执行版本，支持安全重复执行。
 func Migrate(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended(current_database()||':'||current_schema()||':dbhub-migrate',0))`); err != nil {
+		_ = conn.Conn().Close(context.WithoutCancel(ctx))
+		conn.Release()
+		return nil, err
+	}
+	applied, migrationErr := migrateLocked(ctx, conn)
+	unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	_, unlockErr := conn.Exec(unlockCtx, `SELECT pg_advisory_unlock(hashtextextended(current_database()||':'||current_schema()||':dbhub-migrate',0))`)
+	if unlockErr != nil {
+		_ = conn.Conn().Close(unlockCtx)
+	}
+	cancel()
+	conn.Release()
+	if migrationErr != nil {
+		return nil, migrationErr
+	}
+	if unlockErr != nil {
+		return nil, unlockErr
+	}
+	if err = configureScopedRuntime(ctx, pool); err != nil {
+		return nil, err
+	}
+	return applied, nil
+}
+
+func migrateLocked(ctx context.Context, pool *pgxpool.Conn) ([]string, error) {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (
 			version    VARCHAR(255) PRIMARY KEY,

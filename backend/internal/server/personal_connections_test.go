@@ -306,7 +306,7 @@ func TestPersonalConnectionIsolation(t *testing.T) {
 		a.call("POST", fmt.Sprintf("/connections/%d/test", devID), a.developer, nil, 200)
 		payload := map[string]any{"name": "我的库存", "type": "jdbc", "template_revision_id": tplID, "parameters": cfg.Parameters, "username": reader, "password": readerPassword, "ssl_mode": cfg.SSLMode, "connection_timeout": cfg.ConnectionTimeout, "environment": cfg.Environment}
 		a.call("PUT", fmt.Sprintf("/connections/%d", devID), a.developer, payload, 200)
-		actor := context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 2, Role: "developer"})
+		actor := context.WithValue(db.WithWorkspace(context.Background(), 1), auth.ClaimsContextKey, &auth.Claims{Subject: 2, Role: "developer"})
 		snapshots, e := a.deps.Meta.ListSnapshots(actor, devID)
 		if e != nil || len(snapshots) != 0 {
 			t.Fatal("old metadata survived an identity change", e)

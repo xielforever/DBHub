@@ -31,12 +31,12 @@ type Proxy struct {
 const proxySelectCols = `id, user_id, name, type, host, port, COALESCE(username,''), COALESCE(password,''), COALESCE(description,''), status, created_at, updated_at`
 
 type ProxyRepository struct {
-	pool   *pgxpool.Pool
+	pool   *ScopedPool
 	cipher *crypto.Cipher
 }
 
 func NewProxyRepository(pool *pgxpool.Pool, cipher *crypto.Cipher) *ProxyRepository {
-	return &ProxyRepository{pool: pool, cipher: cipher}
+	return &ProxyRepository{pool: scopedPool(pool), cipher: cipher}
 }
 
 func (r *ProxyRepository) List(ctx context.Context, userID int64, isAdmin bool) ([]Proxy, error) {

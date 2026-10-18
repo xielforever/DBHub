@@ -280,7 +280,7 @@ func TestDemotedPublisherCannotManageThroughPrivateHistory(t *testing.T) {
 	if _, e = a.pool.Exec(a.actor(), `UPDATE sys_users SET role_id=(SELECT id FROM sys_roles WHERE code='developer') WHERE id=1`); e != nil {
 		t.Fatal(e)
 	}
-	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "developer"})
+	ctx := context.WithValue(db.WithWorkspace(context.Background(), 1), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "developer"})
 	if e = a.deps.Conns.SetDefinitionProfile(ctx, id, db.SourceProfile{Category: "bypass"}, 1); e != db.ErrNotFound {
 		t.Fatal("private predecessor bypassed published family management")
 	}

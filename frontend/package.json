@@ -8,7 +8,8 @@
     "test:query": "node --test tests/query-execution.test.ts",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test:report": "node --test tests/report.test.ts"
+    "test:report": "node --test tests/report.test.ts",
+    "test:dashboard": "node --test tests/dashboard.test.ts"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.2",

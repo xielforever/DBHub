@@ -7,6 +7,7 @@
       <p v-if="error" role="alert" class="text-sm text-rose-300">{{ error }}</p>
       <template v-if="data">
         <div class="glass-card p-3 space-y-2"><h2 class="font-medium break-words">{{ data.report.draft.name }}</h2><p class="text-xs text-white/55">责任人 {{ data.report.owner_name }} · {{ data.report.active_release_id?'已发布':'未发布' }} · 发布序号 {{ data.report.publication_no }}</p><p class="text-xs text-white/50">修改草稿不影响已发布版本，正式运行始终使用获批版本与报表执行账号。</p></div>
+<button v-if="data.report.active_release_id&&(isAdmin||data.report.owner_id===user.user?.id)" class="ghost-button text-xs" :disabled="busy" @click="audienceOpen=true">仅调整正式受众</button>
         <div class="flex flex-wrap items-center gap-2"><el-select v-model="selectedReview" aria-label="选择报表版本" class="!w-72 max-w-full" :disabled="busy"><el-option v-for="version in data.versions.items" :key="version.id" :value="version.review_id" :label="`v${version.number} · ${statusLabels[version.status]} · ${version.definition.name}`" /></el-select><button class="ghost-button text-xs" :disabled="versionPage<=1 || busy" @click="changeVersionPage(-1)">较新版本</button><span class="text-xs text-white/50">{{ versionPage }}</span><button class="ghost-button text-xs" :disabled="versionPage*10>=data.versions.total || busy" @click="changeVersionPage(1)">较早版本</button></div>
         <p v-if="!data.versions.total" class="text-sm text-white/50">尚未提交版本，请先从开发列表提交审批。</p>
         <section v-if="selected" class="space-y-3" aria-label="报表版本内容">
@@ -16,6 +17,7 @@
           <details v-if="previous" class="text-xs text-white/55 space-y-2"><summary class="cursor-pointer py-1">与 v{{ previous.number }} 对比：{{ differences.length?differences.join('、'):'内容相同' }}</summary><div class="grid grid-cols-1 sm:grid-cols-2 gap-2"><pre class="bg-black/25 p-3 rounded-lg overflow-auto max-h-56 whitespace-pre-wrap break-words">v{{ previous.number }}：{{ JSON.stringify(previous.definition,null,2) }}</pre><pre class="bg-black/25 p-3 rounded-lg overflow-auto max-h-56 whitespace-pre-wrap break-words">v{{ selected.number }}：{{ JSON.stringify(selected.definition,null,2) }}</pre></div></details>
           <p v-if="selected.comment" class="text-xs text-white/60 break-words">审批意见：{{ selected.comment }}（{{ selected.decider_name }}）</p>
           <p v-if="selected.account_name" class="text-xs text-white/55">批准执行账号：{{ selected.account_name }}；受众：{{ selected.manifest?.user_ids.length ?? 0 }} 位用户、{{ selected.manifest?.group_ids.length ?? 0 }} 个用户组</p>
+          <p v-if="selected.audience_change" class="text-xs text-violet-200">仅调整受众提案 · 基准发布 #{{selected.audience_change.base_publication_no}} · SQL、契约和执行账号由服务端复制，验证必须使用固定受众。</p>
           <p v-if="isAdmin && selected.status==='pending' && selected.submitted_by===user.user?.id" class="text-sm text-amber-200">不能审批自己提交的版本，请由其他管理员审阅。</p>
           <div v-if="canReview" class="border border-white/10 rounded-lg p-3 space-y-3">
             <p class="text-xs text-white/55">选择执行账号及受众，用该账号验证冻结的查询，确认数据范围后批准。</p>
@@ -31,7 +33,8 @@
             <p v-if="validation.state.value.status==='error'" role="alert" class="text-sm text-rose-300">{{ validation.state.value.message }}</p>
             <template v-else-if="validation.state.value.status==='success'"><p class="text-xs text-emerald-200">执行账号验证通过，15 分钟内可批准；更改账号或受众后需要重新验证。</p><ReportResult :type="selected.definition.chart_type" :config="selected.definition.chart_config" :result="validation.state.value.data.result" :title="selected.definition.name" /></template>
             <label class="block text-xs text-white/60 space-y-1">审批意见<el-input v-model="comment" aria-label="审批意见" type="textarea" maxlength="1000" :disabled="busy" placeholder="退回必须填写原因" /></label>
-            <div class="flex flex-wrap gap-2"><button class="liquid-button text-xs" :disabled="busy || validation.state.value.status!=='success'" @click="decide('approved')">批准此版本</button><button class="ghost-button text-xs" :disabled="busy || !comment.trim() || validation.state.value.status==='loading'" @click="decide('rejected')">退回修改</button></div>
+            <label v-if="selected.definition.data_contract" class="text-xs flex gap-2"><input v-model="contractConfirmed" type="checkbox">已核对 SQL、返回样本和业务范围，确认符合声明的口径、单位和时效规则</label><details v-if="selected.definition.data_contract" class="text-xs text-white/70"><summary>查看冻结的数据契约</summary><pre class="whitespace-pre-wrap">{{JSON.stringify(selected.definition.data_contract,null,2)}}</pre></details>
+            <div class="flex flex-wrap gap-2"><button class="liquid-button text-xs" :disabled="busy || (!!selected.definition.data_contract&&!contractConfirmed) || validation.state.value.status!=='success'" @click="decide('approved')">批准此版本</button><button class="ghost-button text-xs" :disabled="busy || !comment.trim() || validation.state.value.status==='loading'" @click="decide('rejected')">退回修改</button></div>
           </div>
           <div class="flex flex-wrap gap-2">
             <button v-if="selected.status==='pending' && data.report.owner_id===user.user?.id" class="ghost-button text-xs" :disabled="busy" @click="decide('withdrawn')">撤回申请</button>
@@ -41,14 +44,18 @@
           </div>
         </section>
         <section class="space-y-2 border-t border-white/10 pt-4" aria-label="报表发布历史"><h3 class="text-sm font-medium">发布历史</h3><p v-if="!data.releases.total" class="text-xs text-white/50">尚无发布记录</p><p v-for="event in data.releases.items" :key="event.id" class="text-xs text-white/55 break-words">#{{ event.number }} · {{ releaseLabels[event.kind] }}<span v-if="event.version"> v{{ event.version }}</span> · {{ event.performer_name }} · {{ formatTime(event.created_at) }}</p><div v-if="data.releases.total>10" class="flex gap-2"><button class="ghost-button text-xs" :disabled="releasePage<=1 || busy" @click="changeReleasePage(-1)">较新记录</button><button class="ghost-button text-xs" :disabled="releasePage*10>=data.releases.total || busy" @click="changeReleasePage(1)">较早记录</button></div></section>
+<details @toggle="dependenciesOpen=($event.target as HTMLDetailsElement).open"><summary class="text-xs cursor-pointer">查看当前、开发和历史仪表盘引用</summary><ReportDashboardDependencies v-if="dependenciesOpen" :id="reportId" /></details>
         <section v-if="isAdmin" class="space-y-2 border-t border-white/10 pt-4"><h3 class="text-sm font-medium">移交责任人</h3><div class="flex flex-wrap gap-2"><el-select v-model="newOwner" aria-label="报表新责任人" filterable remote :remote-method="searchUsers" class="!w-64 max-w-full" :disabled="busy"><el-option v-for="member in writers" :key="member.id" :value="member.id" :label="member.username" /></el-select><button class="ghost-button text-xs" :disabled="busy || !newOwner || newOwner===data.report.owner_id" @click="transfer">移交</button></div></section>
       </template>
     </div>
+    <ReportAudienceDialog v-if="audienceOpen" :report-id="reportId" @close="audienceOpen=false" @submitted="audienceSubmitted" />
   </el-dialog>
 </template>
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
+import ReportAudienceDialog from './ReportAudienceDialog.vue'
+import ReportDashboardDependencies from './ReportDashboardDependencies.vue'
 import { managedReportApi, type ManagedReport, type ReportVersion, type ReportRelease, type ReportAccount, type ReportPage, type ReportValidation } from '../../api/managed-report'
 import { adminApi, type UserItem, type UserGroup } from '../../api/admin'
 import { useUserStore } from '../../stores/user'
@@ -56,6 +63,8 @@ import { useReportRun } from './useReportRun'
 import { reportCommandKeys, reportDefinitionDiff } from './reportCommands'
 import ReportResult from './ReportResult.vue'
 const props=defineProps<{reportId:number}>(),emit=defineEmits<{close:[];changed:[]}>(),user=useUserStore(),isAdmin=computed(()=>user.role==='admin')
+const dependenciesOpen=ref(false),audienceOpen=ref(false)
+const contractConfirmed=ref(false)
 const detail=useReportRun<{report:ManagedReport;versions:ReportPage<ReportVersion>;releases:ReportPage<ReportRelease>}>(),validation=useReportRun<ReportValidation>(),keys=reportCommandKeys()
 const data=computed(()=>detail.state.value.status==='success'?detail.state.value.data:undefined),busy=ref(false),error=ref(''),versionPage=ref(1),releasePage=ref(1),selectedReview=ref<number>(),accountId=ref<number>(),userIds=ref<number[]>([]),groupIds=ref<number[]>([]),comment=ref(''),newOwner=ref<number>()
 const accounts=ref<ReportAccount[]>([]),users=ref<UserItem[]>([]),groups=ref<UserGroup[]>([])
@@ -70,16 +79,19 @@ async function searchGroups(keyword=''){const run=++groupGeneration;try{const re
 function close(){if(!busy.value){validation.reset();detail.reset();emit('close')}}
 function changeVersionPage(step:number){versionPage.value+=step;selectedReview.value=undefined;void load()}
 function changeReleasePage(step:number){releasePage.value+=step;void load()}
-watch(selected,version=>{validation.reset();accountId.value=undefined;userIds.value=version?.manifest?.user_ids?[...version.manifest.user_ids]:[];groupIds.value=version?.manifest?.group_ids?[...version.manifest.group_ids]:[];comment.value='';error.value=''},{flush:'sync'})
+watch(selected,version=>{contractConfirmed.value=false;validation.reset();accountId.value=version?.audience_change?.account_id;userIds.value=[...(version?.audience_change?.user_ids||version?.manifest?.user_ids||[])];groupIds.value=[...(version?.audience_change?.group_ids||version?.manifest?.group_ids||[])];comment.value='';error.value=''},{flush:'sync'})
 // Select controls may emit a new array containing the same members on blur.
 // Only an actual account/audience change invalidates an in-flight validation.
 watch(()=>JSON.stringify([accountId.value,[...userIds.value].sort((a,b)=>a-b),[...groupIds.value].sort((a,b)=>a-b)]),()=>validation.reset(),{flush:'sync'})
 async function validate(){if(!selected.value||!accountId.value)return;const id=selected.value.review_id,payload={account_id:accountId.value,user_ids:[...userIds.value],group_ids:[...groupIds.value]};await validation.run(JSON.stringify([id,payload]),signal=>managedReportApi.validate(id,payload,signal))}
 async function confirmed(text:string,title:string){try{await ElMessageBox.confirm(text,title,{confirmButtonText:'确认',cancelButtonText:'取消',type:'warning'});return true}catch{return false}}
 async function decide(decision:'approved'|'rejected'|'withdrawn'){const version=selected.value;if(!version||busy.value)return;const validated=validation.state.value.status==='success'?validation.state.value.data.validation_id:undefined;if(decision==='approved'&&!validated)return;if(!await confirmed(decision==='approved'?`批准 v${version.number}，固定当前执行账号和所选受众？`:`确认${decision==='rejected'?'退回':'撤回'} v${version.number}？`,'审批决定'))return
- const payload={decision,comment:comment.value,...(decision==='approved'?{validation_id:validated}:{})};busy.value=true;error.value='';try{await managedReportApi.decide(version.review_id,payload,keys.get(`decision:${version.review_id}`,payload));keys.clear();if(alive){await load();emit('changed')}}catch(e){if(alive)error.value=errorText(e)}finally{if(alive)busy.value=false}}
-async function release(kind:'publish'|'rollback'|'unpublish',review_id:number){if(!data.value||busy.value)return;if(!await confirmed(kind==='unpublish'?'下线后，所有查看者将无法继续查询此报表。':`${kind==='rollback'?'回滚':'发布'}所选获批版本，使用批准的执行账号并向批准的受众开放？`,'正式报表发布'))return
- const payload={kind,review_id,expected_publication_no:data.value.report.publication_no};busy.value=true;error.value='';try{await managedReportApi.release(props.reportId,payload,keys.get('release',payload));if(alive){await load();emit('changed')}}catch(e){if(alive)error.value=errorText(e)}finally{if(alive)busy.value=false}}
+ const payload={decision,comment:comment.value,contract_confirmed:decision==='approved'&&contractConfirmed.value,...(decision==='approved'?{validation_id:validated}:{})};busy.value=true;error.value='';try{await managedReportApi.decide(version.review_id,payload,keys.get(`decision:${version.review_id}`,payload));keys.clear();if(alive){await load();emit('changed')}}catch(e){if(alive)error.value=errorText(e)}finally{if(alive)busy.value=false}}
+async function release(kind:'publish'|'rollback'|'unpublish',review_id:number){if(!data.value||busy.value)return
+ let blocked=0;try{if(kind!=='unpublish'){const impact=await managedReportApi.dashboardImpact(props.reportId,review_id);blocked=impact.blocked_dashboards}}catch(e){error.value=errorText(e);return}
+ if(!await confirmed(kind==='unpublish'?'下线后，所有查看者将无法继续查询此报表。':`${kind==='rollback'?'回滚':'发布'}所选获批版本？当前将有 ${blocked} 个仪表盘因契约不兼容而阻断，需明确采纳新口径并重新审批。`,'正式报表发布'))return
+ const payload={kind,review_id,expected_publication_no:data.value.report.publication_no,expected_affected_dashboards:blocked};busy.value=true;error.value='';try{await managedReportApi.release(props.reportId,payload,keys.get('release',payload));if(alive){await load();emit('changed')}}catch(e){if(alive)error.value=errorText(e)}finally{if(alive)busy.value=false}}
+async function audienceSubmitted(id:number){audienceOpen.value=false;versionPage.value=1;await load();if(alive){selectedReview.value=id;emit('changed')}}
 async function transfer(){const report=data.value?.report,owner=newOwner.value;if(!report||!owner||busy.value)return;if(!await confirmed('移交后，新责任人可以开发草稿和提交审批；当前发布内容保持生效。','移交责任人'))return;busy.value=true;error.value='';const payload={version:report.draft_version,owner_id:owner};try{await managedReportApi.transfer(report.id,report.draft_version,owner,keys.get('transfer',payload));if(alive){newOwner.value=undefined;await load();emit('changed')}}catch(e){if(alive)error.value=errorText(e)}finally{if(alive)busy.value=false}}
 onMounted(()=>{void load();if(isAdmin.value){void searchUsers();void searchGroups()}})
 onScopeDispose(()=>{alive=false;userGeneration++;groupGeneration++;keys.clear()})

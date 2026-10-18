@@ -15,9 +15,11 @@ import (
 
 type managedRunKey struct{}
 type managedRun struct {
-	repo      *db.ManagedReportRepository
-	execution *db.ManagedExecution
-	requestID string
+	dashboard          *db.ManagedDashboardRepository
+	dashboardExecution *db.DashboardExecution
+	repo               *db.ManagedReportRepository
+	execution          *db.ManagedExecution
+	requestID          string
 }
 
 func (h *Handler) TestReportAccount(repo *db.ManagedReportRepository) http.HandlerFunc {
@@ -72,17 +74,7 @@ func managedRunOf(r *http.Request) *managedRun {
 	return value
 }
 func (h *Handler) runManaged(w http.ResponseWriter, r *http.Request, repo *db.ManagedReportRepository, x *db.ManagedExecution, requestID string) {
-	auditctx.Update(r.Context(), func(d *auditctx.Data) {
-		d.ReportMode = "managed"
-		d.ReportID = x.ReportID
-		d.ReportVersion = x.Version
-		d.ReportReviewID = x.ReviewID
-		d.ReportPublicationNo = x.PublicationNo
-		d.ReportAccountID = x.AccountID
-		d.ReportManifestHash = x.Hash
-		d.ReportAuthor, d.ReportApprover, d.ReportPublisher = x.Author, x.Approver, x.Publisher
-	})
-	ctx := context.WithValue(r.Context(), managedRunKey{}, &managedRun{repo, x, requestID})
+	ctx := context.WithValue(r.Context(), managedRunKey{}, &managedRun{repo: repo, execution: x, requestID: requestID})
 	h.execute(w, r.WithContext(ctx), true, nil)
 }
 func (h *Handler) ExecutePublished(repo *db.ManagedReportRepository) http.HandlerFunc {
@@ -140,4 +132,18 @@ func (h *Handler) ValidateReportReview(repo *db.ManagedReportRepository) http.Ha
 		}
 		h.runManaged(w, r, repo, x, in.RequestID)
 	}
+}
+
+func auditManagedExecution(ctx context.Context, x *db.ManagedExecution) {
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.ReportMode = "managed"
+		d.ReportID = x.ReportID
+		d.ReportVersion = x.Version
+		d.ReportReviewID = x.ReviewID
+		d.ReportPublicationNo = x.PublicationNo
+		d.ReportAccountID = x.AccountID
+		d.ReportAccountGeneration = x.Generation
+		d.ReportManifestHash = x.Hash
+		d.ReportAuthor, d.ReportApprover, d.ReportPublisher = x.Author, x.Approver, x.Publisher
+	})
 }

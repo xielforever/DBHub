@@ -160,7 +160,7 @@ func (r *ConnectionRepository) SetDefinitionAccess(ctx context.Context, id int64
 		return ErrSourceVersionConflict
 	}
 	var valid bool
-	if e = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active)=cardinality($1::bigint[]) AND (SELECT count(*) FROM sys_user_groups WHERE id=ANY($2::bigint[]))=cardinality($2::bigint[])`, nonNilIDs(a.UserIDs), nonNilIDs(a.GroupIDs)).Scan(&valid); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active AND dbhub_member_role(id) IS NOT NULL)=cardinality($1::bigint[]) AND (SELECT count(*) FROM sys_user_groups WHERE id=ANY($2::bigint[]))=cardinality($2::bigint[])`, nonNilIDs(a.UserIDs), nonNilIDs(a.GroupIDs)).Scan(&valid); e != nil {
 		return e
 	}
 	if !valid {

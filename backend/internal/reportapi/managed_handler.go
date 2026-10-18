@@ -79,15 +79,16 @@ func bindManaged(ctx context.Context, id, version int64) {
 }
 
 type managedDraftRequest struct {
-	RequestID    string          `json:"request_id"`
-	Version      int64           `json:"version"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	ConnectionID int64           `json:"connection_id"`
-	Database     string          `json:"database"`
-	SQL          string          `json:"sql"`
-	ChartType    string          `json:"chart_type"`
-	ChartConfig  json.RawMessage `json:"chart_config"`
+	DataContract *db.DataContract `json:"data_contract"`
+	RequestID    string           `json:"request_id"`
+	Version      int64            `json:"version"`
+	Name         string           `json:"name"`
+	Description  string           `json:"description"`
+	ConnectionID int64            `json:"connection_id"`
+	Database     string           `json:"database"`
+	SQL          string           `json:"sql"`
+	ChartType    string           `json:"chart_type"`
+	ChartConfig  json.RawMessage  `json:"chart_config"`
 }
 
 func (h *ManagedHandler) definition(r *http.Request, in managedDraftRequest) (db.ReportDefinition, error) {
@@ -114,7 +115,13 @@ func (h *ManagedHandler) definition(r *http.Request, in managedDraftRequest) (db
 	if rep.DatabaseName != source.Config.Database {
 		return db.ReportDefinition{}, httpx.BadRequest("正式报表的数据库必须与固定数据源修订一致")
 	}
-	return db.ReportDefinition{Name: rep.Name, Description: rep.Description, DefinitionID: rep.DefinitionRevisionID, Database: rep.DatabaseName, SQL: rep.SQLText, ChartType: rep.ChartType, ChartConfig: rep.ChartConfig}, nil
+	if e := db.ValidateDataContract(in.DataContract, rep.ChartType); e != nil {
+		return db.ReportDefinition{}, e
+	}
+	if e := db.ValidateContractMapping(in.DataContract, rep.ChartConfig); e != nil {
+		return db.ReportDefinition{}, e
+	}
+	return db.ReportDefinition{DataContract: in.DataContract, Name: rep.Name, Description: rep.Description, DefinitionID: rep.DefinitionRevisionID, Database: rep.DatabaseName, SQL: rep.SQLText, ChartType: rep.ChartType, ChartConfig: rep.ChartConfig}, nil
 }
 func (h *ManagedHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	var in managedDraftRequest
@@ -228,7 +235,7 @@ func (h *ManagedHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	d := draft.Draft
 	// Revalidate the submitting developer's current personal connection. No
 	// service identity can be used to develop or sneak new SQL into a submission.
-	_, e = h.definition(r, managedDraftRequest{Name: d.Name, Description: d.Description, ConnectionID: draft.ConnectionID, Database: d.Database, SQL: d.SQL, ChartType: d.ChartType, ChartConfig: d.ChartConfig})
+	_, e = h.definition(r, managedDraftRequest{Name: d.Name, Description: d.Description, ConnectionID: draft.ConnectionID, Database: d.Database, SQL: d.SQL, ChartType: d.ChartType, ChartConfig: d.ChartConfig, DataContract: d.DataContract})
 	if e != nil {
 		ManagedError(w, e)
 		return
@@ -243,10 +250,11 @@ func (h *ManagedHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		RequestID    string `json:"request_id"`
-		Decision     string `json:"decision"`
-		ValidationID string `json:"validation_id"`
-		Comment      string `json:"comment"`
+		RequestID         string `json:"request_id"`
+		Decision          string `json:"decision"`
+		ValidationID      string `json:"validation_id"`
+		ContractConfirmed bool   `json:"contract_confirmed"`
+		Comment           string `json:"comment"`
 	}
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
 		httpx.Fail(w, e)
@@ -262,7 +270,7 @@ func (h *ManagedHandler) Decide(w http.ResponseWriter, r *http.Request) {
 		d.ReportReviewID = id
 		d.ReportDecision = in.Decision
 	})
-	result, e := h.repo.Decide(r.Context(), in.RequestID, id, in.Decision, in.ValidationID, in.Comment)
+	result, e := h.repo.Decide(r.Context(), in.RequestID, id, in.Decision, in.ValidationID, in.Comment, in.ContractConfirmed)
 	commandResponse(w, result, e)
 }
 func (h *ManagedHandler) Release(w http.ResponseWriter, r *http.Request) {
@@ -271,10 +279,11 @@ func (h *ManagedHandler) Release(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		RequestID string `json:"request_id"`
-		Expected  int64  `json:"expected_publication_no"`
-		ReviewID  int64  `json:"review_id"`
-		Kind      string `json:"kind"`
+		RequestID          string `json:"request_id"`
+		Expected           int64  `json:"expected_publication_no"`
+		ExpectedDashboards int64  `json:"expected_affected_dashboards"`
+		ReviewID           int64  `json:"review_id"`
+		Kind               string `json:"kind"`
 	}
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
 		httpx.Fail(w, e)
@@ -290,7 +299,7 @@ func (h *ManagedHandler) Release(w http.ResponseWriter, r *http.Request) {
 		d.ReportPublicationNo = in.Expected + 1
 		d.ReportReleaseKind = in.Kind
 	})
-	result, e := h.repo.Release(r.Context(), in.RequestID, id, in.Expected, in.ReviewID, in.Kind)
+	result, e := h.repo.Release(r.Context(), in.RequestID, id, in.Expected, in.ReviewID, in.Kind, in.ExpectedDashboards)
 	commandResponse(w, result, e)
 }
 func (h *ManagedHandler) Releases(w http.ResponseWriter, r *http.Request) {
@@ -441,4 +450,43 @@ func (h *ManagedHandler) UpdateAccount(w http.ResponseWriter, r *http.Request) {
 	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ReportAccountID = id })
 	result, e := h.repo.UpdateAccount(r.Context(), in.RequestID, id, in.Version, in.Enabled, in.Password, in.ExpectedReports)
 	commandResponse(w, result, e)
+}
+
+func (h *ManagedHandler) DashboardImpact(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	review, e := strconv.ParseInt(r.URL.Query().Get("review_id"), 10, 64)
+	if e != nil || review < 1 {
+		httpx.Fail(w, httpx.BadRequest("请选择已批准版本"))
+		return
+	}
+	out, e := h.repo.DashboardImpact(r.Context(), id, review)
+	if e != nil {
+		ManagedError(w, e)
+		return
+	}
+	httpx.OK(w, out)
+}
+
+func (h *ManagedHandler) DashboardDependencies(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	page, size, ok := managedPage(w, r)
+	if !ok {
+		return
+	}
+	kind := r.URL.Query().Get("scope")
+	if kind == "" {
+		kind = "current"
+	}
+	out, total, e := h.repo.DashboardDependencies(r.Context(), id, kind, size, (page-1)*size)
+	if e != nil {
+		ManagedError(w, e)
+		return
+	}
+	httpx.OK(w, map[string]any{"items": out, "total": total, "page": page, "page_size": size})
 }

@@ -50,7 +50,7 @@ func setupAPI(t *testing.T) *apiTest {
 	if dsn == "" || redisURL == "" {
 		t.Skip("real integration databases not configured")
 	}
-	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
+	ctx := context.WithValue(db.WithWorkspace(context.Background(), 1), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
 	root, e := pgxpool.New(ctx, dsn)
 	if e != nil {
 		t.Fatal(e)
@@ -64,6 +64,7 @@ func setupAPI(t *testing.T) *apiTest {
 		t.Fatal(e)
 	}
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	cfg.ConnConfig.RuntimeParams["dbhub.workspace_id"] = "1"
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	pool, e := pgxpool.NewWithConfig(ctx, cfg)
 	if e != nil {
@@ -105,6 +106,7 @@ func setupAPI(t *testing.T) *apiTest {
 		a.server.Close()
 		deps.Queries.Close()
 		_ = deps.AuditJournal.Close(context.Background())
+		db.CloseScopedRuntime(pool)
 		pool.Close()
 		_, _ = root.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 		_, _ = root.Exec(ctx, "DROP TABLE IF EXISTS "+pgx.Identifier{a.table}.Sanitize())
@@ -154,7 +156,7 @@ func setupAPI(t *testing.T) *apiTest {
 			clone := *base
 			clone.ID = 0
 			clone.UserID = int64(i + 2)
-			actorCtx := context.WithValue(ctx, auth.ClaimsContextKey, &auth.Claims{Subject: clone.UserID})
+			actorCtx := context.WithValue(ctx, auth.ClaimsContextKey, &auth.Claims{Subject: clone.UserID, Role: []string{"developer", "readonly"}[i]})
 			if e = deps.Conns.Create(actorCtx, &clone); e != nil {
 				t.Fatal(e)
 			}
@@ -170,7 +172,7 @@ func setupAPI(t *testing.T) *apiTest {
 	return a
 }
 func (a *apiTest) actor() context.Context {
-	return context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
+	return context.WithValue(db.WithWorkspace(context.Background(), 1), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
 }
 func (a *apiTest) connectionFor(token string) int64 {
 	if id, ok := a.roleConnections[token]; ok {

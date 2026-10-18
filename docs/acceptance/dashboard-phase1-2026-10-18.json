@@ -1,0 +1,125 @@
+{
+  "checked_at": "2026-10-18T04:53:44.973514+00:00",
+  "scope": "Dashboard phase 1, workspace isolation, report contracts and audience changes; current workspace source build",
+  "base_commit": "935c5af9e411a184d9c2e7ab2de3f5eb75bbbccc",
+  "source_sha256": {
+    "backend_go_and_migrations": "2bd9257bd57fc0d7f636c51b171008b0e4254b95ab74b49f0bfbbd10fe4f7cfa",
+    "frontend_src_and_tests": "e9c6c3c7a761aab743d5a4be30f5afbdf82e8338e1bb0ab2405def467ee61d9f",
+    "jdbc_runner": "860c6433ef45a05e4f5a46c407ae6520139e15649bcc45c6a0ae4681dbeb5458"
+  },
+  "checks": {
+    "backend_full_suite": {
+      "result": "passed",
+      "command": "go test ./... -count=1",
+      "server_package_seconds": 140.682
+    },
+    "backend_full_race": {
+      "result": "passed",
+      "command": "go test -race ./... -count=1",
+      "server_package_seconds": 287.19
+    },
+    "final_job_redaction_race_regression": {
+      "result": "passed",
+      "tests": [
+        "TestDashboardPhase1Lifecycle",
+        "TestManagedReportLifecycle"
+      ],
+      "server_package_seconds": 13.581
+    },
+    "go_vet": "passed",
+    "frontend_query_tests": 14,
+    "frontend_report_tests": 14,
+    "frontend_dashboard_tests": 10,
+    "typescript_and_production_build": "passed",
+    "dashboard_document_links": {
+      "result": "passed",
+      "documents": 5,
+      "local_links": 23
+    },
+    "git_diff_check": "passed",
+    "jdbc_reader_byte_budget": {
+      "result": "passed",
+      "test": "TestManagedReportJDBC",
+      "real_jdbc_service": true,
+      "race": true,
+      "server_package_seconds": 6.825
+    }
+  },
+  "browser": {
+    "result": "passed",
+    "checks": [
+      "真实 PostgreSQL 五张报表与独立只读账号发布；查看者没有个人连接",
+      "浏览器开发：添加五张卡片、调整宽度、比较组和受众，冻结版本送审",
+      "浏览器审阅：冻结版本全部真实预览、验证、批准与显式发布",
+      "正式查看：真实1280.00与12，业务水位独立展示，无个人凭据或额外按钮",
+      "手机390px单列布局、无横向溢出，图表保留可读结果表",
+      "页面同时查询最多两张；单卡重查保持部分刷新，不改写最近完整查询时间",
+      "模拟503仅保留带旧时间标记的内存结果，不显示为新鲜数据",
+      "离线时不发起查询，恢复网络后要求手动刷新",
+      "计时推进31分钟：清空过期结果，期间没有自动执行查询",
+      "工作空间切换销毁旧结果，跨空间已知报表ID与数据源读取被拒绝"
+    ],
+    "page_errors": 0,
+    "runtime_readonly": true,
+    "temporary_resources_removed": true,
+    "desktop_viewport": [
+      1440,
+      1080
+    ],
+    "mobile_viewport": [
+      390,
+      844
+    ],
+    "data": "Real PostgreSQL with independent read-only account and no personal connection for the viewer",
+    "fault_simulation": "Explicit HTTP 503 transport mock; browser clock advanced 31 minutes; offline network emulation",
+    "private_report": "/workspace/dbhub-cloud/dashboard-artifacts/d98da42a31/checks.json",
+    "server_sha256": "00d09f2285f832adb72f947ad17bf6495080a35596724a6785a2e8a7b75b5577"
+  },
+  "cloud": {
+    "result": "passed",
+    "readiness_http_status": 200,
+    "login": "passed",
+    "workspace_scoped_dashboard_api_checks": 3,
+    "frontend_dashboard_route_http_status": 200,
+    "migrations": 35,
+    "latest_migration": "0035_dashboard_review_assignment_epoch.sql",
+    "backend_sha256_matches_browser": true,
+    "normal_services": 6,
+    "remaining_acceptance_containers": 0
+  },
+  "limits": {
+    "cards": 8,
+    "page_queries": 2,
+    "rows_per_card": 1000,
+    "seconds_per_card": 30,
+    "result_bytes_per_card": 2097152,
+    "refresh_context_seconds": 180,
+    "page_fresh_seconds": 300,
+    "memory_result_retention_seconds": 1800,
+    "review_validation_seconds": 900,
+    "review_expiry_days": 7,
+    "shared_leases": {
+      "user_per_workspace": 4,
+      "account_per_workspace": 4,
+      "workspace": 16,
+      "global": 64
+    }
+  },
+  "deployment_requirements": [
+    "Migration owner can create a restricted login role and grant current-schema privileges",
+    "Database authentication permits the generated runtime login",
+    "Separate owner/runtime pool budgets and persistent audit storage",
+    "Backup/restore without ephemeral role ownership or ACLs"
+  ],
+  "not_claimed": [
+    "P1/P2 dashboard features",
+    "Full multi-instance deployment, failover and production workload validation",
+    "A new full datasource version matrix or commercial GaussDB cluster validation",
+    "Full assistive-technology accessibility evaluation",
+    "Actual seven-day endurance test"
+  ],
+  "artifacts_sha256": {
+    "docs/design/images/dashboard-phase1-actual-desktop.png": "bae947cbed476f832a5eb4838dd772aab42f10d9b4e79b4633a31712ae7e0b08",
+    "docs/design/images/dashboard-phase1-actual-mobile.png": "2d9d0fb42e6f7201c98f65ade134e06b13e14c4fef1dd5b3f844640039db41b3"
+  }
+}

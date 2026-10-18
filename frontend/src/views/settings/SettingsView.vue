@@ -5,6 +5,7 @@
       <p class="text-sm text-white/45 mt-1">账号偏好与安全配置</p>
     </header>
 
+    <WorkspaceSettings v-if="userStore.role==='admin'" />
     <ConnectorSettings />
 <GroupSettings v-if="userStore.role === 'admin'" />
 
@@ -78,6 +79,7 @@
 </template>
 
 <script setup lang="ts">
+import WorkspaceSettings from './WorkspaceSettings.vue'
 import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { KeyRound } from 'lucide-vue-next'

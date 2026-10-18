@@ -36,12 +36,12 @@ type SSHTunnel struct {
 
 // TunnelRepository SSH 隧道仓储，敏感字段经 AES-GCM 加密落库。
 type TunnelRepository struct {
-	pool   *pgxpool.Pool
+	pool   *ScopedPool
 	cipher *crypto.Cipher
 }
 
 func NewTunnelRepository(pool *pgxpool.Pool, cipher *crypto.Cipher) *TunnelRepository {
-	return &TunnelRepository{pool: pool, cipher: cipher}
+	return &TunnelRepository{pool: scopedPool(pool), cipher: cipher}
 }
 
 const tunnelSelectCols = `

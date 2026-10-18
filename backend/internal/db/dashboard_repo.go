@@ -35,11 +35,11 @@ type DashboardFilter struct {
 }
 
 type DashboardRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewDashboardRepository(pool *pgxpool.Pool) *DashboardRepository {
-	return &DashboardRepository{pool: pool}
+	return &DashboardRepository{pool: scopedPool(pool)}
 }
 
 func (r *DashboardRepository) Create(ctx context.Context, d *Dashboard) error {

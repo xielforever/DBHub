@@ -114,12 +114,12 @@
 
         <!-- 全局搜索（中等屏幕以上；移动端通过搜索图标进入资产目录） -->
         <div class="flex-1 max-w-md mx-auto hidden md:block">
-          <GlobalSearch />
+          <GlobalSearch :key="userStore.workspaceId" />
         </div>
         <div class="flex-1 md:hidden" />
 
         <button
-          class="md:hidden w-9 h-9 rounded-xl flex items-center justify-center text-white/55 hover:bg-white/10 hover:text-white transition-colors shrink-0"
+          class="hidden sm:flex md:hidden w-9 h-9 rounded-xl flex items-center justify-center text-white/55 hover:bg-white/10 hover:text-white transition-colors shrink-0"
           aria-label="搜索数据目录"
           @click="router.push('/assets')"
         >
@@ -127,6 +127,7 @@
         </button>
 
         <!-- 通知中心上线前隐藏铃铛，避免无响应假入口 -->
+        <el-select :model-value="userStore.workspaceId||undefined" aria-label="当前工作空间" placeholder="选择工作空间" class="max-w-[130px] sm:max-w-[190px] !min-w-0" @change="switchWorkspace"><el-option v-for="space in userStore.workspaces" :key="space.id" :value="space.id" :label="space.name" /></el-select>
         <el-dropdown trigger="click" @command="onUserCommand">
           <button class="flex items-center gap-2.5 pl-1 pr-2 sm:pr-3 py-1.5 rounded-xl hover:bg-white/10 transition-colors">
             <span
@@ -154,7 +155,8 @@
       >
         <RouterView v-slot="{ Component }">
           <Transition name="page-fade" mode="out-in">
-            <component :is="Component" />
+            <component :is="Component" :key="`${userStore.workspaceId}:${String(route.name)}`" v-if="userStore.workspaceId" />
+            <section v-else class="glass-panel p-8"><h1 class="text-xl">选择工作空间</h1><p class="text-white/60 mt-3">请在页头选择你要进入的组织工作空间。</p></section>
           </Transition>
         </RouterView>
       </main>
@@ -215,6 +217,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
       { name: 'connections', label: pageTitles.connections, to: '/connections', icon: Database },
       { name: 'query', label: pageTitles.query, to: '/query', icon: SquareTerminal },
       { name: 'reports', label: pageTitles.reports, to: '/reports', icon: BarChart3 },
+      { name: 'dashboards', label: pageTitles.dashboards, to: '/dashboards', icon: BarChart3 },
       { name: 'proxies', label: pageTitles.proxies, to: '/proxies', icon: Waypoints },
       { name: 'tickets', label: pageTitles.tickets, to: '/tickets', icon: Ticket },
     ],
@@ -228,7 +231,7 @@ const menuGroups: { title: string; items: MenuItem[] }[] = [
   },
 ]
 const visibleMenu = computed(() => {
-  const role = userStore.user?.role ?? ''
+  const role = userStore.role
   return menuGroups
     .map((g) => ({
       ...g,
@@ -237,6 +240,7 @@ const visibleMenu = computed(() => {
     .filter((g) => g.items.length > 0)
 })
 
+function switchWorkspace(id:number){userStore.selectWorkspace(id);if(route.meta.roles&&!route.meta.roles.includes(userStore.role))router.replace('/dashboard')}
 const COLLAPSE_KEY = 'dbhub_sidebar_collapsed'
 const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
 const mobileOpen = ref(false)

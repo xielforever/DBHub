@@ -28,6 +28,7 @@
       </div>
       <p class="text-xs text-white/50">图表按 SQL 返回顺序展示，汇总和排序请在 SQL 中完成。新建图表前先运行预览，再选择维度和指标。</p>
       <ReportResult v-if="preview.state.value.status === 'success'" :type="form.chart_type" :config="chartConfig" :result="preview.state.value.data" :title="form.name || '预览'" />
+      <ReportContractEditor v-if="formal" v-model="dataContract" :columns="columns" :disabled="saving" />
       <p v-if="saveError" class="text-sm text-rose-300" role="alert">{{ saveError }}</p>
       <div class="flex justify-end gap-2 pt-3 border-t border-white/10">
         <button type="button" class="ghost-button" :disabled="saving" @click="close">取消</button>
@@ -45,6 +46,8 @@ import type { ChartConfig, ChartKind } from '../../components/business/chart/Cha
 import type { ExecResult } from '../../api/workbench'
 import { newRequestId } from '../../utils/request-id'
 import ReportResult from './ReportResult.vue'
+import ReportContractEditor from './ReportContractEditor.vue'
+import type {DataContract} from '../../api/managed-report'
 import { useReportRun } from './useReportRun'
 import { reportChart } from './reportChart'
 const props = defineProps<{ report?: ReportItem; managed?: ManagedReport; formal?: boolean }>()
@@ -60,6 +63,7 @@ const sources = ref<ConnectionItem[]>([]), loadingSources = ref(true), sourceErr
 const preview = useReportRun<ExecResult>()
 const columns = computed(() => preview.state.value.status === 'success' ? preview.state.value.data.columns ?? [] : [])
 const uniqueColumns = computed(() => columns.value.filter((name, index, all) => all.indexOf(name) === index && all.lastIndexOf(name) === index))
+const dataContract=ref<DataContract|undefined>(managed?.draft.data_contract?JSON.parse(JSON.stringify(managed.draft.data_contract)):undefined)
 const creationKey = newRequestId()
 let alive = true
 onMounted(async () => { try { const response = await connectionApi.list(); if (alive) { sources.value = response.items.filter(source => source.capabilities?.sql && source.capabilities.enforced_read_only && (!formal || source.definition?.visibility === 'global')); if(formal && !sources.value.some(source=>source.id===form.connection_id))form.connection_id=undefined } } catch (error) { if (alive) sourceError.value = error instanceof Error ? error.message : '连接列表加载失败' } finally { if (alive) loadingSources.value = false } })
@@ -85,7 +89,8 @@ async function save() {
   try {
     if (formal) {
       const { visibility: _visibility, ...definition } = payload
-      const result = await managedReportApi.save(managed?.id ?? 0, { ...definition, version: managed?.draft_version, request_id: creationKey })
+      const contract=dataContract.value?{...dataContract.value,chart_type:form.chart_type,dimensions:dimension.value?[dimension.value]:[],metrics:[...metrics.value]}:undefined
+      const result = await managedReportApi.save(managed?.id ?? 0, { ...definition,data_contract:contract, version: managed?.draft_version, request_id: creationKey })
       emit('managedSaved', await managedReportApi.get(result.id))
     } else {
       const existing = props.report

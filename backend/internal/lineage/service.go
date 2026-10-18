@@ -37,7 +37,7 @@ func (s *Service) ParseRecentHistory(ctx context.Context, limit int) (int, error
 			if e = ctx.Err(); e != nil {
 				return total, e
 			}
-			n, err := s.ParseRecentHistory(context.WithValue(ctx, auth.ClaimsContextKey, &actors[i]), limit)
+			n, err := s.ParseRecentHistory(context.WithValue(db.WithWorkspace(ctx, actors[i].WorkspaceID), auth.ClaimsContextKey, &actors[i]), limit)
 			if err != nil {
 				return total, err
 			}
@@ -183,7 +183,7 @@ func (s *Service) BackfillFK(ctx context.Context) (int, error) {
 		}
 		total := 0
 		for i := range actors {
-			n, err := s.BackfillFK(context.WithValue(ctx, auth.ClaimsContextKey, &actors[i]))
+			n, err := s.BackfillFK(context.WithValue(db.WithWorkspace(ctx, actors[i].WorkspaceID), auth.ClaimsContextKey, &actors[i]))
 			if err != nil {
 				return total, err
 			}

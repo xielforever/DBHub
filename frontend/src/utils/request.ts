@@ -4,10 +4,12 @@ import type { ApiResponse, LoginResult } from '../types/api'
 import { useUserStore } from '../stores/user'
 import { setAuthCookie } from './auth-cookie'
 import router from '../router'
+import {workspaceGeneration,workspaceSignal} from './workspace-context'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
     /** 调用方自行展示错误和恢复操作时，避免重复弹窗。 */
+    workspaceGeneration?: number
     silentError?: boolean
   }
 }
@@ -48,6 +50,14 @@ request.interceptors.request.use((config) => {
       setAuthCookie(userStore.token)
     }
   }
+  const global=/^\/(?:auth|platform)\//.test(config.url||'') || /^\/workspaces(?:$|\/\d+\/(?:members|policy)(?:$|\/))/.test(config.url||'')
+  if(!global){
+    if(config.workspaceGeneration!==undefined&&config.workspaceGeneration!==workspaceGeneration())throw new axios.CanceledError('工作空间已切换')
+    if(!userStore.workspaceId)throw new axios.CanceledError('请选择工作空间')
+    config.workspaceGeneration=workspaceGeneration()
+    config.signal=AbortSignal.any([...(config.signal?[config.signal as AbortSignal]:[]),workspaceSignal()])
+    if(!config.url?.startsWith('/workspaces/'))config.url=`/workspaces/${userStore.workspaceId}${config.url}`
+  }
   return config
 })
 
@@ -57,6 +67,7 @@ let refreshing: Promise<string | null> | null = null
 async function refreshAccessToken(): Promise<string | null> {
   const userStore = useUserStore()
   if (!userStore.refreshToken) return null
+  const refreshAtStart=userStore.refreshToken
   try {
     // 用裸 axios 发刷新请求，绕过本实例拦截器，避免 401 递归
     const resp = await axios.post<ApiResponse<LoginResult>>(
@@ -65,7 +76,7 @@ async function refreshAccessToken(): Promise<string | null> {
       { timeout: 10_000 },
     )
     const data = resp.data?.data
-    if (!data?.access_token) return null
+    if (!data?.access_token||userStore.refreshToken!==refreshAtStart) return null
     userStore.token = data.access_token
     userStore.refreshToken = data.refresh_token
     localStorage.setItem('dbhub_access_token', data.access_token)
@@ -95,6 +106,7 @@ function redirectToLogin() {
 
 request.interceptors.response.use(
   (response) => {
+    if(response.config.workspaceGeneration!==undefined&&response.config.workspaceGeneration!==workspaceGeneration())return Promise.reject(new axios.CanceledError('工作空间已切换'))
     const body = response.data as ApiResponse
     if (body.code === 0) {
       return body.data as never
@@ -103,7 +115,7 @@ request.interceptors.response.use(
     return Promise.reject(new ApiRequestError(body.message || '请求失败', response.status, body.code, body.data))
   },
   async (error: AxiosError<ApiResponse>) => {
-    if (axios.isCancel(error)) return Promise.reject(error)
+    if (axios.isCancel(error)||error.config?.workspaceGeneration!==undefined&&error.config.workspaceGeneration!==workspaceGeneration()) return Promise.reject(new axios.CanceledError('请求已取消或工作空间已切换'))
     const status = error.response?.status
     const original = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined
 

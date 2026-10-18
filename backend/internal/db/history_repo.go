@@ -28,11 +28,11 @@ type QueryHistory struct {
 
 // HistoryRepository 查询历史仓储。
 type HistoryRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewHistoryRepository(pool *pgxpool.Pool) *HistoryRepository {
-	return &HistoryRepository{pool: pool}
+	return &HistoryRepository{pool: scopedPool(pool)}
 }
 
 // Create 写入一条执行记录。
@@ -273,7 +273,7 @@ func (r *HistoryRepository) SearchBySQL(ctx context.Context, userID int64, isAdm
 
 // ActiveActors supplies explicit principals for the internal metadata-only lineage worker.
 func (r *HistoryRepository) ActiveActors(ctx context.Context) ([]auth.Claims, error) {
-	rows, e := r.pool.Query(ctx, `SELECT u.id,u.username,r.code FROM sys_users u JOIN sys_roles r ON r.id=u.role_id WHERE u.is_active ORDER BY u.id`)
+	rows, e := r.pool.maintenance.Query(ctx, `SELECT u.id,u.username,m.role_code,m.workspace_id FROM sys_users u JOIN sys_workspace_members m ON m.user_id=u.id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE u.is_active AND m.active AND w.enabled ORDER BY m.workspace_id,u.id`)
 	if e != nil {
 		return nil, e
 	}
@@ -281,7 +281,7 @@ func (r *HistoryRepository) ActiveActors(ctx context.Context) ([]auth.Claims, er
 	out := []auth.Claims{}
 	for rows.Next() {
 		var c auth.Claims
-		if e = rows.Scan(&c.Subject, &c.Username, &c.Role); e != nil {
+		if e = rows.Scan(&c.Subject, &c.Username, &c.Role, &c.WorkspaceID); e != nil {
 			return nil, e
 		}
 		out = append(out, c)

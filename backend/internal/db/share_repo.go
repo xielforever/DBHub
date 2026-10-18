@@ -24,11 +24,11 @@ type ShareToken struct {
 }
 
 type ShareRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewShareRepository(pool *pgxpool.Pool) *ShareRepository {
-	return &ShareRepository{pool: pool}
+	return &ShareRepository{pool: scopedPool(pool)}
 }
 
 func HashToken(token string) string {

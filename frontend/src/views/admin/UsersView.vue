@@ -210,9 +210,9 @@ const loading = ref(false)
 const saving = ref(false)
 
 const roleCards = computed(() => [
-  { code: 'admin', name: '管理员', desc: '全部权限：用户、数据源、SQL、审计', icon: ShieldCheck, color: '#818cf8', tint: 'rgba(129,140,248,.16)' },
-  { code: 'developer', name: '开发者', desc: '管理数据源与隧道、执行读写 SQL', icon: TerminalSquare, color: '#34d399', tint: 'rgba(52,211,153,.14)' },
-  { code: 'readonly', name: '只读用户', desc: '仅浏览数据源与执行只读查询', icon: Eye, color: '#fbbf24', tint: 'rgba(251,191,36,.14)' },
+  { code: 'admin', name: '管理员', desc: '管理本空间资源、成员与审批；数据独立授权', icon: ShieldCheck, color: '#818cf8', tint: 'rgba(129,140,248,.16)' },
+  { code: 'developer', name: '开发者', desc: '在本空间开发报表、看板与个人连接', icon: TerminalSquare, color: '#34d399', tint: 'rgba(52,211,153,.14)' },
+  { code: 'readonly', name: '只读用户', desc: '按本空间授权查看报表、看板和只读数据', icon: Eye, color: '#fbbf24', tint: 'rgba(251,191,36,.14)' },
 ])
 void Users
 

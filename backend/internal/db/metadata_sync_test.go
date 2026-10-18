@@ -29,7 +29,7 @@ func TestMetadataCommitAcknowledgementLossIsUnknown(t *testing.T) {
 	if dsn == "" {
 		t.Skip("real PostgreSQL not configured")
 	}
-	ctx := context.WithValue(context.Background(), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "admin"})
+	ctx := context.WithValue(WithWorkspace(context.Background(), 1), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "admin"})
 	root, e := pgxpool.New(ctx, dsn)
 	if e != nil {
 		t.Fatal(e)
@@ -45,11 +45,13 @@ func TestMetadataCommitAcknowledgementLossIsUnknown(t *testing.T) {
 		t.Fatal(e)
 	}
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	cfg.ConnConfig.RuntimeParams["dbhub.workspace_id"] = "1"
 	pool, e := pgxpool.NewWithConfig(ctx, cfg)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer pool.Close()
+	defer CloseScopedRuntime(pool)
 	if _, e = Migrate(ctx, pool); e != nil {
 		t.Fatal(e)
 	}

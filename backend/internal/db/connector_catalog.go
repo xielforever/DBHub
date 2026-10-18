@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"time"
 )
 
@@ -51,7 +50,7 @@ type DatasourceTemplate struct {
 	CreatedBy   int64           `json:"created_by"`
 	CreatedAt   time.Time       `json:"created_at"`
 }
-type ConnectorCatalog struct{ pool *pgxpool.Pool }
+type ConnectorCatalog struct{ pool *ScopedPool }
 
 func (r *ConnectionRepository) Catalog() *ConnectorCatalog { return &ConnectorCatalog{pool: r.pool} }
 func catalogError(e error) error {

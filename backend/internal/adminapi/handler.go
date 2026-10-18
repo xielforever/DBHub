@@ -330,6 +330,12 @@ func atoiDefault(s string, fallback int) int {
 }
 
 func mapNotFound(err error) error {
+	if errors.Is(err, db.ErrManagedDenied) {
+		return httpx.Forbidden("无权修改全局身份，请使用工作空间成员管理")
+	}
+	if errors.Is(err, db.ErrManagedInput) {
+		return httpx.BadRequest(err.Error())
+	}
 	if errors.Is(err, db.ErrUserResourcesInUse) {
 		return httpx.Conflict(err.Error())
 	}

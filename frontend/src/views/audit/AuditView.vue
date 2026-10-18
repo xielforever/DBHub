@@ -13,6 +13,7 @@
       </template>
     </div>
 
+<label v-if="isPlatform" class="text-sm flex gap-2"><input v-model="platformLog" type="checkbox" @change="page=1;reload()">查看平台身份审计（登录失败等，独立于组织数据）</label>
     <!-- 筛选栏 -->
     <div class="glass-panel p-4 flex flex-wrap items-center gap-3">
       <div class="w-full sm:w-36 shrink-0">
@@ -107,7 +108,7 @@
                 <p v-if="a.error_message" class="text-[11px] text-rose-300/70 mt-1 max-w-[200px] truncate" :title="a.error_message">
                   {{ a.error_message }}
                 </p>
-                <details class="text-xs text-white/45 mt-1"><summary class="cursor-pointer">请求详情</summary><p>{{ a.context?.route }}</p><p v-if="a.context?.http_status">HTTP {{ a.context.http_status }}</p><p v-if="a.context?.auth_failure">{{ denialLabels[a.context.auth_failure] || a.context.auth_failure }}</p><p v-if="a.context?.transaction_id" class="break-all">事务 {{ a.context.transaction_id }}</p><p v-if="a.context?.job_id" class="break-all">任务 {{ a.context.job_id }}</p><p v-if="a.context?.export_id">导出 #{{ a.context.export_id }}</p><p v-if="a.context?.report_id">报表 #{{ a.context.report_id }} · 版本 {{ a.context.report_version }}</p><p v-if="a.context?.report_publication_no">发布序号 {{ a.context.report_publication_no }} · 审批 #{{ a.context.report_review_id }} · 执行账号 #{{ a.context.report_account_id }}</p><p v-if="a.context?.report_author">作者 {{ a.context.report_author }} · 审批 {{ a.context.report_approver }} · 发布 {{ a.context.report_publisher }}</p><p v-if="a.context?.report_decision">审批决定 {{ a.context.report_decision }}</p><p v-if="a.context?.report_release_kind">发布操作 {{ a.context.report_release_kind }}</p><p v-if="a.context?.report_manifest_hash" class="break-all">批准摘要 {{ a.context.report_manifest_hash }}</p><p class="break-all">事件 {{ a.event_id || '历史记录' }}</p></details>
+                <details class="text-xs text-white/45 mt-1"><summary class="cursor-pointer">请求详情</summary><p>{{ a.context?.route }}</p><p v-if="a.context?.http_status">HTTP {{ a.context.http_status }}</p><p v-if="a.context?.auth_failure">{{ denialLabels[a.context.auth_failure] || a.context.auth_failure }}</p><p v-if="a.context?.transaction_id" class="break-all">事务 {{ a.context.transaction_id }}</p><p v-if="a.context?.job_id" class="break-all">任务 {{ a.context.job_id }}</p><p v-if="a.context?.export_id">导出 #{{ a.context.export_id }}</p><p v-if="a.context?.report_id">报表 #{{ a.context.report_id }} · 版本 {{ a.context.report_version }}</p><p v-if="a.context?.report_publication_no">发布序号 {{ a.context.report_publication_no }} · 审批 #{{ a.context.report_review_id }} · 执行账号 #{{ a.context.report_account_id }}</p><p v-if="a.context?.report_author">作者 {{ a.context.report_author }} · 审批 {{ a.context.report_approver }} · 发布 {{ a.context.report_publisher }}</p><p v-if="a.context?.report_decision">审批决定 {{ a.context.report_decision }}</p><p v-if="a.context?.report_release_kind">发布操作 {{ a.context.report_release_kind }}</p><p v-if="a.context?.report_manifest_hash" class="break-all">批准摘要 {{ a.context.report_manifest_hash }}</p><p v-if="a.context?.access_request_id">访问申请 #{{a.context.access_request_id}} · {{a.context.access_decision}}</p><p v-if="a.context?.access_request_ids?.length">关联申请 {{a.context.access_request_ids.join(', ')}} · 目标用户 {{a.context.access_target_user_ids?.join(', ')}} · 目标组 {{a.context.access_target_group_ids?.join(', ')}}</p><p v-if="a.context?.workspace_id">空间 #{{a.context.workspace_id}}</p><p v-if="a.context?.dashboard_id">看板 #{{a.context.dashboard_id}} · 发布 {{a.context.dashboard_publication_no}} · 卡片 {{a.context.tile_id}}</p><p v-if="a.context?.refresh_id" class="break-all">刷新 {{a.context.refresh_id}}</p><p v-if="a.context?.contract_hash" class="break-all">契约 {{a.context.contract_hash}}</p><p class="break-all">事件 {{ a.event_id || '历史记录' }}</p></details>
               </td>
               <td class="px-5 py-3.5 text-right text-white/45 text-xs whitespace-nowrap">{{ a.duration_ms ?? '—' }} ms</td>
             </tr>
@@ -131,6 +132,7 @@
 </template>
 
 <script setup lang="ts">
+import request from '../../utils/request'
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { RefreshCw, Search } from 'lucide-vue-next'
 import { adminApi, type AuditLog, type AuditDelivery } from '../../api/admin'
@@ -140,6 +142,7 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
+const isPlatform=ref(false),platformLog=ref(false)
 const delivery = ref<AuditDelivery>()
 const deliveryError = ref(false)
 const denialLabels: Record<string,string> = {missing_token:'缺少认证令牌',invalid_token:'认证令牌无效或过期',user_unavailable:'用户不可用',invalid_session:'会话已失效',session_unavailable:'会话服务不可用',insufficient_role:'角色权限不足'}
@@ -180,14 +183,14 @@ async function reload() {
   loading.value = true
   try {
     const [records,state] = await Promise.allSettled([adminApi.auditLogs({
-      days: filters.days,
+      platform:platformLog.value,days: filters.days,
       resource_type: filters.resource_type,
       action: filters.action,
       status: filters.status,
       username: filters.username, database_account: filters.database_account, outcome: filters.outcome,
       page: page.value,
       page_size: pageSize,
-    }), adminApi.auditDelivery()])
+    }), isPlatform.value?adminApi.auditDelivery():Promise.resolve(undefined)])
     deliveryError.value = state.status === 'rejected'
     if(state.status === 'fulfilled') delivery.value = state.value
     if(records.status === 'fulfilled') {
@@ -199,9 +202,10 @@ async function reload() {
   }
 }
 let deliveryTimer: ReturnType<typeof setInterval> | undefined
-onMounted(() => {
+onMounted(async () => {
+  try{const platform=await request.get<unknown,{is_platform_admin:boolean}>('/platform/status',{silentError:true});isPlatform.value=platform.is_platform_admin}catch{}
   void reload()
-  deliveryTimer = setInterval(() => { void adminApi.auditDelivery().then(value => {delivery.value=value; deliveryError.value=false}).catch(() => {deliveryError.value=true}) },10000)
+  if(isPlatform.value)deliveryTimer = setInterval(() => { void adminApi.auditDelivery().then(value => {delivery.value=value; deliveryError.value=false}).catch(() => {deliveryError.value=true}) },10000)
 })
 onUnmounted(() => { if(deliveryTimer) clearInterval(deliveryTimer) })
 

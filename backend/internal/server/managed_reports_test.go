@@ -216,7 +216,7 @@ func TestManagedReportLifecycle(t *testing.T) {
 		a.call("DELETE", fmt.Sprintf("/connections/%d", a.connectionFor(a.developer)), a.developer, nil, 200)
 		f.run(id, 5, 200)
 		a.call("DELETE", "/users/2", a.admin, nil, 409)
-		a.call("PATCH", "/users/2/status", a.admin, map[string]any{"is_active": false}, 200)
+		a.call("PATCH", "/users/2/status", a.admin, map[string]any{"is_active": false}, 409)
 		f.run(id, 5, 200)
 		current := a.call("GET", path, a.admin, nil, 200)
 		a.call("POST", path+"/transfer", a.admin, map[string]any{"request_id": testRequestID(), "version": current["draft_version"], "owner_id": 1}, 200)

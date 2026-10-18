@@ -200,6 +200,23 @@ func classify(method, path string) (action, resource, name string) {
 	resource, name = strings.ToUpper(firstOr(parts, 0)), firstOr(parts, 1)
 	last := firstOr(parts, len(parts)-1)
 	switch {
+	case parts[0] == "dashboard-refreshes" && method == http.MethodPost:
+		return "DASHBOARD_EXECUTE", "DASHBOARD", name
+	case parts[0] == "dashboard-reviews" && method == http.MethodPost:
+		return "DASHBOARD_REVIEW_" + strings.ToUpper(last), "DASHBOARD_REVIEW", name
+	case parts[0] == "managed-dashboards":
+		if method == http.MethodGet {
+			return "DASHBOARD_VERSION_VIEW", "DASHBOARD", name
+		}
+		return "DASHBOARD_" + strings.ToUpper(last), "DASHBOARD", name
+	case parts[0] == "access-requests" && method == http.MethodGet:
+		return "ACCESS_REQUEST_VIEW", "ACCESS_REQUEST", name
+	case parts[0] == "access-requests" && method != http.MethodGet:
+		return "ACCESS_REQUEST_" + strings.ToUpper(last), "ACCESS_REQUEST", name
+	case parts[0] == "published-dashboards" && last == "access-requests":
+		return "ACCESS_REQUEST_CREATE", "DASHBOARD", name
+	case parts[0] == "workspaces" && method != http.MethodGet:
+		return "WORKSPACE_MANAGE", "WORKSPACE", name
 	case parts[0] == "managed-reports" && method == http.MethodGet:
 		return "REPORT_VERSION_VIEW", "REPORT", name
 	case parts[0] == "published-reports" && last == "execute" && method == http.MethodPost:
@@ -210,6 +227,9 @@ func classify(method, path string) (action, resource, name string) {
 		}
 		return "REPORT_REVIEW_DECISION", "REPORT", name
 	case parts[0] == "managed-reports" && method != http.MethodGet && method != http.MethodHead:
+		if last == "audience-changes" {
+			return "REPORT_AUDIENCE_CHANGE", "REPORT", name
+		}
 		if last == "submit" {
 			return "REPORT_SUBMIT", "REPORT", name
 		}

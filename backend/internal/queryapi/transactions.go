@@ -12,10 +12,14 @@ import (
 
 	"github.com/user/dbhub/internal/auditctx"
 	target "github.com/user/dbhub/internal/connectorruntime"
+	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 )
 
 type transaction struct {
+	MemberEpoch          int64
+	WorkspaceID          int64
+	ActorRole            string
 	mu                   sync.Mutex
 	ID                   string
 	UserID, ConnectionID int64
@@ -135,7 +139,7 @@ func (h *Handler) BeginTransaction(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("开启事务失败"))
 		return
 	}
-	tx := &transaction{ID: randomID(), UserID: c.Subject, ConnectionID: in.ConnectionID, Database: handle.Conn.Database, Started: time.Now(), LastUsed: time.Now(), Handle: handle, cancel: cancel}
+	tx := &transaction{WorkspaceID: db.WorkspaceID(r.Context()), MemberEpoch: db.MemberEpoch(r.Context()), ActorRole: c.Role, ID: randomID(), UserID: c.Subject, ConnectionID: in.ConnectionID, Database: handle.Conn.Database, Started: time.Now(), LastUsed: time.Now(), Handle: handle, cancel: cancel}
 	h.txs.mu.Lock()
 	count := 0
 	for _, other := range h.txs.items {
@@ -159,7 +163,7 @@ func (h *Handler) TransactionStatus(w http.ResponseWriter, r *http.Request) {
 	c := claimsOf(r)
 	connection, _ := strconv.ParseInt(r.URL.Query().Get("connection_id"), 10, 64)
 	tx := h.txs.get(c.Subject, connection)
-	if tx == nil {
+	if tx == nil || tx.WorkspaceID != db.WorkspaceID(r.Context()) || tx.ActorRole != c.Role || tx.MemberEpoch != db.MemberEpoch(r.Context()) {
 		httpx.OK(w, map[string]any{"active": false})
 		return
 	}
@@ -182,7 +186,7 @@ func (h *Handler) FinishTransaction(commit bool) http.HandlerFunc {
 			return
 		}
 		tx := h.txs.get(c.Subject, in.ConnectionID)
-		if tx == nil || in.ID == "" || tx.ID != in.ID {
+		if tx == nil || tx.WorkspaceID != db.WorkspaceID(r.Context()) || tx.ActorRole != c.Role || tx.MemberEpoch != db.MemberEpoch(r.Context()) || in.ID == "" || tx.ID != in.ID {
 			httpx.Fail(w, httpx.NotFound("事务不存在或不属于当前用户"))
 			return
 		}

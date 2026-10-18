@@ -171,6 +171,7 @@ func main() {
 		if err := deps.AuditJournal.Close(shutdownCtx); err != nil {
 			log.Warn("审计队列尚未写完，将在下次启动后恢复")
 		}
+		db.CloseScopedRuntime(pgPool)
 		pgPool.Close()
 	}
 	log.Info("服务已安全退出")

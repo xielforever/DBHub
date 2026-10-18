@@ -57,6 +57,10 @@ func TestManagedReportJDBC(t *testing.T) {
 	if row[0] != f.username || row[1] != "on" {
 		t.Fatal("JDBC published identity or read-only mode incorrect", row)
 	}
+	// Exercise the Java reader's byte budget through the managed HTTP path.
+	oversized, _ := f.draft("SELECT repeat('x',2097152) AS oversized")
+	oversizedReview := f.submit(oversized, 1)
+	a.call("POST", fmt.Sprintf("/report-reviews/%d/validate", oversizedReview), a.admin, map[string]any{"request_id": testRequestID(), "account_id": f.account, "user_ids": []int64{3}}, 400)
 	a.call("PATCH", fmt.Sprintf("/connector-drivers/%d/status", driver), a.admin, map[string]any{"enabled": false}, 200)
 	f.run(id, 1, 403)
 }

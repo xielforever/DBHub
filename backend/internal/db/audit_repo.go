@@ -37,11 +37,11 @@ type AuditLog struct {
 
 // AuditRepository 审计日志仓储。
 type AuditRepository struct {
-	pool *pgxpool.Pool
+	pool *ScopedPool
 }
 
 func NewAuditRepository(pool *pgxpool.Pool) *AuditRepository {
-	return &AuditRepository{pool: pool}
+	return &AuditRepository{pool: scopedPool(pool)}
 }
 
 // Create inserts a stable event identity; replay after an uncertain ACK is safe.
@@ -49,15 +49,15 @@ func (r *AuditRepository) Create(ctx context.Context, a *AuditLog) error {
 	if a.EventID == "" || a.CreatedAt.IsZero() {
 		return fmt.Errorf("审计事件缺少持久化标识或时间")
 	}
-	_, err := r.pool.Exec(ctx, `
+	_, err := r.pool.maintenance.Exec(ctx, `
 		INSERT INTO sys_audit_logs
 			(user_id, connection_id, trace_id, action, resource_type, resource_name,
-			 ip_address, user_agent, status, error_message, duration_ms, params, context, event_id, created_at)
+			 ip_address, user_agent, status, error_message, duration_ms, params, context, event_id, created_at,workspace_id)
 		VALUES ($1,$2,NULLIF($3,''),$4,$5,NULLIF($6,''),
-		        NULLIF($7,'')::inet,NULLIF($8,''),$9,NULLIF($10,''),$11,$12,$13::jsonb,$14::uuid,$15)
+		        NULLIF($7,'')::inet,NULLIF($8,''),$9,NULLIF($10,''),$11,$12,$13::jsonb,$14::uuid,$15,$16)
 		ON CONFLICT (event_id, created_at) DO NOTHING`,
 		a.UserID, a.ConnectionID, a.TraceID, a.Action, a.ResourceType, a.ResourceName,
-		a.IPAddress, a.UserAgent, a.Status, a.ErrorMessage, a.DurationMS, nil, auditJSON(a.Context), a.EventID, a.CreatedAt)
+		a.IPAddress, a.UserAgent, a.Status, a.ErrorMessage, a.DurationMS, nil, auditJSON(a.Context), a.EventID, a.CreatedAt, a.Context.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("写入审计日志失败: %w", err)
 	}
@@ -146,6 +146,9 @@ func auditJSON(d auditctx.Data) string {
 	// PostgreSQL JSONB rejects U+0000. Unpersisted connection tests can carry
 	// such metadata; preserve it as explicitly quoted text instead of poisoning
 	// the durable queue. This also repairs delivery of older queued snapshots.
+	d.CommandRequestID = auditText(d.CommandRequestID)
+	d.CommandOperation = auditText(d.CommandOperation)
+	d.DashboardMode = auditText(d.DashboardMode)
 	d.ActorUsername = auditText(d.ActorUsername)
 	d.ActorRole = auditText(d.ActorRole)
 	d.SourceFamilyID = auditText(d.SourceFamilyID)

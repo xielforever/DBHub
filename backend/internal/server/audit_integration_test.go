@@ -28,9 +28,20 @@ func latestAudit(t *testing.T, a *apiTest, action string) db.AuditLog {
 	if err != nil {
 		t.Fatal(err)
 	}
+	platform, _, e := a.deps.Audit.List(db.WithPlatformAudit(a.actor()), db.AuditFilter{Action: action}, 100, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	rows = append(rows, platform...)
 	if len(rows) == 0 {
 		t.Fatalf("missing %s audit", action)
 	}
+	for i := 1; i < len(rows); i++ {
+		if rows[i].ID > rows[0].ID {
+			rows[0] = rows[i]
+		}
+	}
+
 	return rows[0]
 }
 func expectAudit(t *testing.T, a *apiTest, action, outcome string) db.AuditLog {

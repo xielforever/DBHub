@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/user/dbhub/internal/auditctx"
 	crypto "github.com/user/dbhub/pkg/crypto"
 )
 
@@ -21,7 +21,7 @@ var ErrManagedInput = errors.New("正式报表参数无效")
 var ErrManagedDenied = errors.New("没有此报表操作权限，或相关账号与数据源已停用")
 
 type ManagedReportRepository struct {
-	pool   *pgxpool.Pool
+	pool   *ScopedPool
 	cipher *crypto.Cipher
 }
 
@@ -31,6 +31,7 @@ func (r *ConnectionRepository) ManagedReports() *ManagedReportRepository {
 
 // ReportDefinition never contains personal connection IDs or authentication.
 type ReportDefinition struct {
+	DataContract *DataContract   `json:"data_contract,omitempty"`
 	Name         string          `json:"name"`
 	Description  string          `json:"description"`
 	DefinitionID int64           `json:"definition_revision_id"`
@@ -66,32 +67,34 @@ type ReportAccount struct {
 	ReportCount  int64  `json:"report_count"`
 }
 type ReportVersion struct {
-	ID            int64            `json:"id"`
-	ReportID      int64            `json:"report_id"`
-	Number        int64            `json:"number"`
-	Definition    ReportDefinition `json:"definition"`
-	ContentHash   string           `json:"content_hash"`
-	SubmitterID   *int64           `json:"submitted_by"`
-	SubmitterName string           `json:"submitter_name"`
-	CreatedAt     time.Time        `json:"created_at"`
-	ReviewID      int64            `json:"review_id"`
-	Status        string           `json:"status"`
-	DeciderName   string           `json:"decider_name"`
-	Comment       string           `json:"comment"`
-	AccountID     *int64           `json:"account_id"`
-	AccountName   string           `json:"account_name"`
-	Manifest      *ReportManifest  `json:"manifest,omitempty"`
-	WasPublished  bool             `json:"was_published"`
+	AudienceChange *ReportAudienceProposal `json:"audience_change,omitempty"`
+	ID             int64                   `json:"id"`
+	ReportID       int64                   `json:"report_id"`
+	Number         int64                   `json:"number"`
+	Definition     ReportDefinition        `json:"definition"`
+	ContentHash    string                  `json:"content_hash"`
+	SubmitterID    *int64                  `json:"submitted_by"`
+	SubmitterName  string                  `json:"submitter_name"`
+	CreatedAt      time.Time               `json:"created_at"`
+	ReviewID       int64                   `json:"review_id"`
+	Status         string                  `json:"status"`
+	DeciderName    string                  `json:"decider_name"`
+	Comment        string                  `json:"comment"`
+	AccountID      *int64                  `json:"account_id"`
+	AccountName    string                  `json:"account_name"`
+	Manifest       *ReportManifest         `json:"manifest,omitempty"`
+	WasPublished   bool                    `json:"was_published"`
 }
 type ReportManifest struct {
-	VersionID    int64   `json:"version_id"`
-	ContentHash  string  `json:"content_hash"`
-	AccountID    int64   `json:"account_id"`
-	DefinitionID int64   `json:"definition_revision_id"`
-	UserIDs      []int64 `json:"user_ids"`
-	GroupIDs     []int64 `json:"group_ids"`
-	MaxRows      int     `json:"max_rows"`
-	TimeoutMS    int     `json:"timeout_ms"`
+	Contract     *ApprovedContract `json:"data_contract,omitempty"`
+	VersionID    int64             `json:"version_id"`
+	ContentHash  string            `json:"content_hash"`
+	AccountID    int64             `json:"account_id"`
+	DefinitionID int64             `json:"definition_revision_id"`
+	UserIDs      []int64           `json:"user_ids"`
+	GroupIDs     []int64           `json:"group_ids"`
+	MaxRows      int               `json:"max_rows"`
+	TimeoutMS    int               `json:"timeout_ms"`
 }
 type ReportRelease struct {
 	ID        int64     `json:"id"`
@@ -115,6 +118,7 @@ type PublishedReport struct {
 // ManagedExecution is internal. Never serialize credentials or a frozen SQL
 // definition into a viewer response, execution receipt, or ordinary history.
 type ManagedExecution struct {
+	AdditionalCheck                                       func(context.Context) error
 	ReportID, Version, PublicationNo, ReviewID, AccountID int64
 	AccountVersion, Generation                            int64
 	Manifest                                              ReportManifest
@@ -127,8 +131,9 @@ type ManagedExecution struct {
 	Author, Approver, Publisher                           string
 }
 type ReportCommandResult struct {
-	ID      int64 `json:"id"`
-	Version int64 `json:"version,omitempty"`
+	IDs     []int64 `json:"ids,omitempty"`
+	ID      int64   `json:"id"`
+	Version int64   `json:"version,omitempty"`
 }
 
 func canonicalReportJSON(value any) []byte {
@@ -153,7 +158,7 @@ func managedError(err error) error {
 }
 func reportActor(ctx context.Context, tx pgx.Tx, admin, writer bool) error {
 	var role string
-	if e := tx.QueryRow(ctx, `SELECT r.code FROM sys_users u JOIN sys_roles r ON r.id=u.role_id WHERE u.id=$1 AND u.is_active FOR SHARE OF u`, ActorID(ctx)).Scan(&role); e != nil {
+	if e := tx.QueryRow(ctx, `SELECT role_code FROM sys_workspace_members WHERE user_id=$1 AND workspace_id=dbhub_workspace() AND active AND dbhub_scope_allowed()`, ActorID(ctx)).Scan(&role); e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrManagedDenied
 		}
@@ -172,6 +177,10 @@ func (r *ManagedReportRepository) command(ctx context.Context, key, op string, i
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	if e = reportActor(ctx, tx, admin, writer); e != nil {
+		return result, e
+	}
+	auditctx.Update(ctx, func(d *auditctx.Data) { d.CommandRequestID = key; d.CommandOperation = op })
+	if e = auditctx.Checkpoint(ctx); e != nil {
 		return result, e
 	}
 	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("report-command:%d:%s", ActorID(ctx), key)); e != nil {
@@ -210,7 +219,7 @@ func audience(ctx context.Context, tx pgx.Tx, users, groups []int64) error {
 		return fmt.Errorf("%w: 至少选择一个有效用户或用户组", ErrManagedInput)
 	}
 	var valid bool
-	e := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active)=cardinality($1::bigint[]) AND (SELECT count(*) FROM sys_user_groups WHERE id=ANY($2::bigint[]))=cardinality($2::bigint[])`, nonNilIDs(users), nonNilIDs(groups)).Scan(&valid)
+	e := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active AND dbhub_member_role(id) IS NOT NULL)=cardinality($1::bigint[]) AND (SELECT count(*) FROM sys_user_groups WHERE id=ANY($2::bigint[]))=cardinality($2::bigint[])`, nonNilIDs(users), nonNilIDs(groups)).Scan(&valid)
 	if e != nil {
 		return e
 	}

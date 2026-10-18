@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auditctx"
+	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
 )
 
 type Job struct {
+	WorkspaceID  int64      `json:"workspace_id"`
 	ID           string     `json:"id"`
 	UserID       int64      `json:"user_id"`
 	ConnectionID int64      `json:"connection_id"`
@@ -53,7 +55,7 @@ func (m *jobs) admit(ctx context.Context, user, connection int64, sql string) (c
 		return nil, nil, err
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	job := &Job{ID: randomID(), UserID: user, ConnectionID: connection, SQL: sql, Status: "pending", Created: time.Now(), cancel: cancel, audit: auditctx.Read(ctx)}
+	job := &Job{WorkspaceID: db.WorkspaceID(ctx), ID: randomID(), UserID: user, ConnectionID: connection, SQL: sql, Status: "pending", Created: time.Now(), cancel: cancel, audit: auditctx.Read(ctx)}
 	m.mu.Lock()
 	pending := 0
 	userPending := 0
@@ -207,8 +209,12 @@ func (h *Handler) Jobs(w http.ResponseWriter, r *http.Request) {
 	out := []Job{}
 	for i := len(h.jobs.items) - 1; i >= 0 && len(out) < 100; i-- {
 		j := h.jobs.items[i]
-		if j.UserID == c.Subject {
-			out = append(out, *j)
+		if j.UserID == c.Subject && j.WorkspaceID == db.WorkspaceID(r.Context()) {
+			visible := *j
+			if visible.ConnectionID < 0 {
+				visible.ConnectionID = 0
+			}
+			out = append(out, visible)
 		}
 	}
 	httpx.OK(w, map[string]any{"items": out, "max_concurrent": 2, "max_global_concurrent": 8})
@@ -218,7 +224,7 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	h.jobs.mu.Lock()
 	defer h.jobs.mu.Unlock()
 	for _, j := range h.jobs.items {
-		if j.ID == r.PathValue("id") && (j.UserID == c.Subject) {
+		if j.ID == r.PathValue("id") && (j.UserID == c.Subject) && j.WorkspaceID == db.WorkspaceID(r.Context()) {
 			auditctx.Update(r.Context(), func(d *auditctx.Data) {
 				d.JobID = j.ID
 				d.ConnectionID = j.ConnectionID

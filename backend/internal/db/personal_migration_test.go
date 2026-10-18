@@ -36,11 +36,13 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 		t.Fatal(e)
 	}
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
+	cfg.ConnConfig.RuntimeParams["dbhub.workspace_id"] = "1"
 	pool, e := pgxpool.NewWithConfig(ctx, cfg)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer pool.Close()
+	defer CloseScopedRuntime(pool)
 	if _, e = pool.Exec(ctx, `CREATE TABLE schema_migrations(version varchar(255) PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())`); e != nil {
 		t.Fatal(e)
 	}
@@ -80,7 +82,7 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 		t.Fatal(e)
 	}
 	applied, e := Migrate(ctx, pool)
-	if e != nil || len(applied) != 6 || applied[0] != "0022_personal_connections.sql" || applied[1] != "0023_definition_binding_index.sql" || applied[2] != "0024_source_audience_directory.sql" || applied[3] != "0025_reliable_audit.sql" || applied[4] != "0026_report_phase1.sql" || applied[5] != "0027_managed_reports.sql" {
+	if e != nil || len(applied) != 14 || applied[0] != "0022_personal_connections.sql" || applied[1] != "0023_definition_binding_index.sql" || applied[2] != "0024_source_audience_directory.sql" || applied[3] != "0025_reliable_audit.sql" || applied[4] != "0026_report_phase1.sql" || applied[5] != "0027_managed_reports.sql" {
 		t.Fatal("legacy upgrade failed", applied, e)
 	}
 	var invalid int
@@ -91,13 +93,13 @@ func TestLegacyConnectionsMigrateWithoutSharingSecrets(t *testing.T) {
 	if e != nil || len(again) != 0 {
 		t.Fatal("migration is not repeatable", e)
 	}
-	actor := context.WithValue(ctx, auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "admin"})
+	actor := context.WithValue(WithWorkspace(ctx, 1), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Role: "admin"})
 	repo := NewConnectionRepository(pool, cipher)
 	owned, password, e := repo.GetSecrets(actor, source)
 	if e != nil || password != secret || owned.Definition == nil || owned.Definition.Visibility != "private" {
 		t.Fatal("creator lost its personal credential", e)
 	}
-	other := context.WithValue(ctx, auth.ClaimsContextKey, &auth.Claims{Subject: 2, Role: "developer"})
+	other := context.WithValue(WithWorkspace(ctx, 1), auth.ClaimsContextKey, &auth.Claims{Subject: 2, Role: "developer"})
 	if _, _, e = repo.GetSecrets(other, source); e == nil {
 		t.Fatal("migration shared the old password")
 	}

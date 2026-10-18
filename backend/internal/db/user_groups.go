@@ -60,6 +60,16 @@ func (r *UserRepository) SaveGroup(ctx context.Context, g *UserGroup, expected i
 		return e
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
+	if g.ID > 0 && containsID(g.MemberIDs, ActorID(ctx)) {
+		var selfGrant bool
+		e = tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM sys_user_group_members WHERE group_id=$1 AND user_id=$2) AND (EXISTS(SELECT 1 FROM sys_source_grants WHERE group_id=$1) OR EXISTS(SELECT 1 FROM sys_report_reviews rv JOIN sys_report_releases re ON re.review_id=rv.id JOIN sys_managed_reports mr ON mr.active_release_id=re.id WHERE rv.manifest->'group_ids' @> jsonb_build_array($1::bigint)) OR EXISTS(SELECT 1 FROM sys_managed_dashboards d JOIN sys_dashboard_releases re ON re.id=d.active_release_id JOIN sys_dashboard_reviews rv ON rv.id=re.review_id JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE v.definition->'group_ids' @> jsonb_build_array($1::bigint)))`, g.ID, ActorID(ctx)).Scan(&selfGrant)
+		if e != nil {
+			return e
+		}
+		if selfGrant {
+			return fmt.Errorf("%w: 此组已有数据授权，请由另一位管理员添加本人", ErrSourceInput)
+		}
+	}
 	if g.ID == 0 {
 		e = tx.QueryRow(ctx, `INSERT INTO sys_user_groups(name,description,created_by)VALUES($1,$2,$3) RETURNING id,version,updated_at`, g.Name, g.Description, ActorID(ctx)).Scan(&g.ID, &g.Version, &g.UpdatedAt)
 	} else {
@@ -72,7 +82,7 @@ func (r *UserRepository) SaveGroup(ctx context.Context, g *UserGroup, expected i
 		return catalogError(e)
 	}
 	var valid bool
-	if e = tx.QueryRow(ctx, `SELECT count(*)=cardinality($1::bigint[]) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active`, nonNilIDs(g.MemberIDs)).Scan(&valid); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT count(*)=cardinality($1::bigint[]) FROM sys_users WHERE id=ANY($1::bigint[]) AND is_active AND dbhub_member_role(id) IS NOT NULL`, nonNilIDs(g.MemberIDs)).Scan(&valid); e != nil {
 		return e
 	}
 	if !valid {
@@ -95,12 +105,37 @@ func (r *UserRepository) DeleteGroup(ctx context.Context, id, expected int64) er
 	if !ActorAdmin(ctx) {
 		return ErrNotFound
 	}
-	result, e := r.pool.Exec(ctx, `DELETE FROM sys_user_groups WHERE id=$1 AND version=$2`, id, expected)
+	tx, e := r.pool.Begin(ctx)
 	if e != nil {
 		return e
 	}
-	if result.RowsAffected() != 1 {
-		return ErrSourceVersionConflict
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	var deleted int64
+	if e = tx.QueryRow(ctx, `DELETE FROM sys_user_groups WHERE id=$1 AND version=$2 RETURNING id`, id, expected).Scan(&deleted); e != nil {
+		if e == pgx.ErrNoRows {
+			return ErrSourceVersionConflict
+		}
+		return e
 	}
-	return nil
+	if _, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'cancelled' END,decision_reason='目标用户组已删除',version=version+1 WHERE target_group_id=$1 AND status IN('pending','processing','approved_pending_release')`, id); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func (r *UserRepository) AudienceGroups(ctx context.Context) ([]UserGroup, error) {
+	rows, e := r.pool.Query(ctx, `SELECT id,name,version FROM sys_user_groups ORDER BY name LIMIT 500`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []UserGroup{}
+	for rows.Next() {
+		var g UserGroup
+		if e = rows.Scan(&g.ID, &g.Name, &g.Version); e != nil {
+			return nil, e
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
 }

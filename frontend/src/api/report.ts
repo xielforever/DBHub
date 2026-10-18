@@ -30,6 +30,7 @@ export interface ReportItem {
 }
 
 export interface ReportPayload {
+  data_contract?:import('./managed-report').DataContract
   request_id?: string
   name: string
   description?: string

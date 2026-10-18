@@ -7,6 +7,6 @@ export function reportCommandKeys() {
  return { get(operation:string,payload:unknown) { const signature=operation+JSON.stringify(payload);let key=keys.get(signature);if(!key){key=newRequestId();keys.set(signature,key)}return key }, clear(){keys.clear()} }
 }
 export function reportDefinitionDiff(before:ReportDefinition,after:ReportDefinition) {
- const fields: [keyof ReportDefinition,string][]=[['name','名称'],['description','描述'],['definition_revision_id','数据源修订'],['database_name','数据库'],['sql_text','SQL'],['chart_type','展示方式'],['chart_config','图表配置']]
+ const fields: [keyof ReportDefinition,string][]=[['name','名称'],['description','描述'],['definition_revision_id','数据源修订'],['database_name','数据库'],['sql_text','SQL'],['chart_type','展示方式'],['chart_config','图表配置'],['data_contract','数据契约']]
  return fields.filter(([key])=>JSON.stringify(before[key])!==JSON.stringify(after[key])).map(([,label])=>label)
 }

@@ -10,7 +10,7 @@ import (
 
 // A viewer grant delegates only an approved query. It does not grant source
 // browsing or personal connection rights, even to another report's author.
-const reportAudience = `EXISTS(SELECT 1 FROM sys_users viewer WHERE viewer.id=$2 AND viewer.is_active) AND (
+const reportAudience = `dbhub_member_role($2) IS NOT NULL AND (
  rv.manifest->'user_ids' @> jsonb_build_array($2::bigint) OR EXISTS(
  SELECT 1 FROM jsonb_array_elements_text(rv.manifest->'group_ids') g
  JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=$2))`
@@ -51,6 +51,9 @@ func (r *ManagedReportRepository) ValidationCandidate(ctx context.Context, revie
 	if e = json.Unmarshal(raw, &out.Definition); e != nil {
 		return nil, e
 	}
+	if e = r.checkAudienceChange(ctx, tx, reviewID, accountID, users, groups, true); e != nil {
+		return nil, e
+	}
 	c, p, a, e := r.loadAccount(ctx, tx, accountID)
 	if e != nil {
 		return nil, e
@@ -59,6 +62,7 @@ func (r *ManagedReportRepository) ValidationCandidate(ctx context.Context, revie
 		return nil, fmt.Errorf("%w: 执行账号必须绑定同一数据源修订", ErrManagedInput)
 	}
 	out.Connection, out.Password, out.AccountVersion, out.Generation = c, p, a.Version, a.Generation
+	out.Manifest.Contract = approvedContract(out.Definition.DataContract, WorkspaceID(ctx), a.DefinitionID, accountID, out.Definition.Database)
 	out.Manifest.ContentHash = hash
 	out.Manifest.AccountID = accountID
 	out.Manifest.DefinitionID = a.DefinitionID
@@ -145,10 +149,13 @@ func (r *ManagedReportRepository) CheckExecution(ctx context.Context, x *Managed
 	if latest.Hash != x.Hash || latest.AccountVersion != x.AccountVersion || latest.Generation != x.Generation {
 		return ErrManagedConflict
 	}
+	if x.AdditionalCheck != nil {
+		return x.AdditionalCheck(ctx)
+	}
 	return nil
 }
-func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, expected, reviewID int64, kind string) (ReportCommandResult, error) {
-	return r.command(ctx, key, "release", []any{id, expected, reviewID, kind}, true, false, func(tx pgx.Tx) (ReportCommandResult, error) {
+func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, expected, reviewID int64, kind string, expectedDashboards int64) (ReportCommandResult, error) {
+	return r.command(ctx, key, "release", []any{id, expected, reviewID, kind, expectedDashboards}, true, false, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{}
 		var number int64
 		var active *int64
@@ -174,6 +181,20 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 			if e = json.Unmarshal(raw, &m); e != nil {
 				return out, e
 			}
+			contractHash := ""
+			if m.Contract != nil {
+				contractHash = m.Contract.Hash
+			}
+			impact, e := dashboardImpact(ctx, tx, id, contractHash)
+			if e != nil {
+				return out, e
+			}
+			if impact.Blocked != expectedDashboards {
+				return out, fmt.Errorf("%w: 请确认将因口径变化被阻断的当前仪表盘数量（%d）", ErrManagedConflict, impact.Blocked)
+			}
+			if e = r.checkAudienceChange(ctx, tx, reviewID, accountID, m.UserIDs, m.GroupIDs, false); e != nil {
+				return out, e
+			}
 			if e = audience(ctx, tx, m.UserIDs, m.GroupIDs); e != nil {
 				return out, e
 			}
@@ -183,6 +204,15 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 					return out, e
 				}
 				if !existed {
+					return out, ErrManagedConflict
+				}
+			}
+			if active == nil && kind == "publish" {
+				var previous *int64
+				if e = tx.QueryRow(ctx, `SELECT (SELECT v.number FROM sys_report_releases re JOIN sys_report_reviews rv ON rv.id=re.review_id JOIN sys_report_versions v ON v.id=rv.version_id WHERE re.report_id=$1 AND re.review_id IS NOT NULL ORDER BY re.number DESC LIMIT 1)`, id).Scan(&previous); e != nil {
+					return out, e
+				}
+				if previous != nil && targetVersion < *previous {
 					return out, ErrManagedConflict
 				}
 			}
@@ -209,6 +239,12 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 			next = &out.ID
 		}
 		_, e = tx.Exec(ctx, `UPDATE sys_managed_reports SET publication_no=$2,active_release_id=$3,updated_at=now() WHERE id=$1`, id, out.Version, next)
+		if e == nil && selected != nil {
+			_, e = tx.Exec(ctx, `UPDATE sys_access_requests ar SET status='fulfilled',actual_publication_no=$2,version=version+1 WHERE ar.review_id=$1 AND ar.status='approved_pending_release' AND ar.expires_at>now() AND (ar.target_user_id IS NULL OR dbhub_member_role(ar.target_user_id) IS NOT NULL) AND EXISTS(SELECT 1 FROM sys_report_reviews rv WHERE rv.id=$1 AND ((rv.manifest->'user_ids') @> jsonb_build_array(ar.target_user_id) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(rv.manifest->'group_ids') g JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=ar.target_user_id) OR rv.manifest->'group_ids' @> jsonb_build_array(ar.target_group_id)))`, reviewID, out.Version)
+		}
+		if e == nil && kind == "unpublish" {
+			_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'cancelled' END,decision_reason='报表已下线',version=version+1 WHERE report_id=$1 AND status IN('pending','processing','approved_pending_release')`, id)
+		}
 		return out, e
 	})
 }

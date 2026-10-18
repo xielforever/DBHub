@@ -24,7 +24,7 @@ export interface UserItem {
 
 export interface UserGroup {id: number; name: string; description: string; version: number; member_ids: number[]; updated_at: string}
 export interface AuditLog {
- context: {actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; transaction_id?: string; job_id?: string; export_id?: number; report_id?: number; report_version?: number; report_mode?: string; report_review_id?:number;report_publication_no?:number;report_account_id?:number;report_manifest_hash?:string;report_decision?:string;report_release_kind?:string;report_author?:string;report_approver?:string;report_publisher?:string;report_owner_id?:number; http_status?: number; response_failed?: boolean; auth_failure?: string; route?: string; outcome?: string}
+ context: {dashboard_review_id?:number;dashboard_draft_version?:number;dashboard_mode?:string;report_account_generation?:number;access_request_id?:number;access_request_ids?:number[];access_target_user_ids?:number[];access_target_group_ids?:number[];access_decision?:string;workspace_id?:number;dashboard_id?:number;dashboard_version?:number;dashboard_publication_no?:number;refresh_id?:string;tile_id?:string;contract_hash?:string;actor_id?: number; actor_username?: string; actor_role?: string; connection_id?: number; source_family_id?: string; definition_revision_id?: number; revision?: number; database_account?: string; driver?: string; target_opened?: boolean; execution_request_id?: string; transaction_id?: string; job_id?: string; export_id?: number; report_id?: number; report_version?: number; report_mode?: string; report_review_id?:number;report_publication_no?:number;report_account_id?:number;report_manifest_hash?:string;report_decision?:string;report_release_kind?:string;report_author?:string;report_approver?:string;report_publisher?:string;report_owner_id?:number; http_status?: number; response_failed?: boolean; auth_failure?: string; route?: string; outcome?: string}
   event_id?: string
   id: number
   user_id: number | null
@@ -92,6 +92,7 @@ export const adminApi = {
     })
   },
   auditLogs(params: {
+    platform?:boolean
     database_account?: string
     outcome?: string
     username?: string
@@ -102,6 +103,6 @@ export const adminApi = {
     page: number
     page_size: number
   }) {
-    return request.get<unknown, Paged<AuditLog>>('/audit-logs', { params })
+    return request.get<unknown, Paged<AuditLog>>(params.platform?'/platform/audit-logs':'/audit-logs', { params })
   },
 }

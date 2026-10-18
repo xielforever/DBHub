@@ -191,7 +191,7 @@ public final class DBHubJdbc {
         if(ro&&s.transaction&&!s.readOnly)throw new Problem(400,"permission","只读请求不能使用读写事务");
         if(own)begin(s,ro);
         s.operation=key;s.cancelled=false;long start=System.nanoTime();
-        int max=Math.max(1,Math.min(10000,number(q,"max_rows",1000)));boolean succeeded=false;
+        int max=Math.max(1,Math.min(10000,number(q,"max_rows",1000)));int byteBudget=number(q,"max_bytes",0);byteBudget=byteBudget<=0?8*1024*1024:Math.min(8*1024*1024,byteBudget-4096);boolean succeeded=false;
         try(PreparedStatement st=s.connection.prepareStatement(sql)){
             s.statement.set(st);st.setMaxRows(max+1);st.setFetchSize(Math.min(max+1,100));st.setQueryTimeout(Math.max(1,(number(q,"budget_ms",30000)+999)/1000));
             JsonArray args=q.has("args")?q.getAsJsonArray("args"):new JsonArray();int index=1;
@@ -204,7 +204,7 @@ public final class DBHubJdbc {
                 while(rs.next()){
                     if(rows.size()>=max){truncated=true;break;}
                     List<Object> row=new ArrayList<>();for(int i=1;i<=m.getColumnCount();i++)row.add(value(s,rs,m,i));
-                    int size=JSON.toJson(row).getBytes(StandardCharsets.UTF_8).length;if(size>8*1024*1024-bytes){truncated=true;break;}bytes+=size;rows.add(row);
+                    int size=JSON.toJson(row).getBytes(StandardCharsets.UTF_8).length;if(size>byteBudget-bytes){throw new Problem(413,"resource_exhausted","查询结果超出字节预算");}bytes+=size;rows.add(row);
                 }
             }else affected=Math.max(0,st.getLargeUpdateCount());
             succeeded=true;return obj("kind",query?"query":"write","columns",columns,"rows",rows,"column_types",types,"affected_rows",affected,"duration_ms",TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-start),"truncated",truncated);

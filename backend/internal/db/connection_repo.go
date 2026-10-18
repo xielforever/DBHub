@@ -52,12 +52,12 @@ type Connection struct {
 
 // ConnectionRepository 连接仓储，口令 AES-GCM 加密落库。
 type ConnectionRepository struct {
-	pool   *pgxpool.Pool
+	pool   *ScopedPool
 	cipher *crypto.Cipher
 }
 
 func NewConnectionRepository(pool *pgxpool.Pool, cipher *crypto.Cipher) *ConnectionRepository {
-	return &ConnectionRepository{pool: pool, cipher: cipher}
+	return &ConnectionRepository{pool: scopedPool(pool), cipher: cipher}
 }
 
 // defaultEnv 环境字段兜底，非法/空值一律按开发环境处理。
@@ -177,7 +177,7 @@ func (r *ConnectionRepository) GetSecrets(ctx context.Context, id int64) (*Conne
 		return nil, "", err
 	}
 	if c.ProxyID != nil {
-		c.Proxy, err = NewProxyRepository(r.pool, r.cipher).GetSecrets(ctx, *c.ProxyID)
+		c.Proxy, err = NewProxyRepository(r.pool.maintenance, r.cipher).GetSecrets(ctx, *c.ProxyID)
 		if err != nil {
 			return nil, "", err
 		}

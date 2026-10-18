@@ -38,7 +38,7 @@ python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.
 ./scripts/cloud/dev.sh stop
 ```
 
-查询队列和活动目标事务属于单个后端进程，重启后活动事务由数据库连接关闭回滚；已经提交的自动提交写入不因此回滚。跨实例部署需要会话路由或共享调度器。SQL 执行编号与回执保存在 PostgreSQL，独立处理器使用同一元数据库时也能防止相同编号重复执行；该能力不提供跨实例并发总量限制。在线心跳和认证会话使用 Redis，业务表数据和任意 SQL 查询结果不进入 Redis 缓存。完整接口与支持边界见 [补齐验收契约](../../docs/开发指南/云端后端补齐验收.md) 和 [执行可靠性](../../docs/开发指南/SQL工作台执行可靠性.md)。
+查询队列和活动目标事务属于单个后端进程，重启后活动事务由数据库连接关闭回滚；已经提交的自动提交写入不因此回滚。跨实例部署需要会话路由或共享调度器。SQL 执行编号与回执保存在 PostgreSQL，独立处理器使用同一元数据库时也能防止相同编号重复执行；普通工作台仍不提供跨实例并发总量限制；本期受管报表及仪表盘另使用 PostgreSQL 共享租约，覆盖用户、账号、工作空间和全局配额，跨连接池已验证，完整多实例运行仍需验收。在线心跳和认证会话使用 Redis，业务表数据和任意 SQL 查询结果不进入 Redis 缓存。完整接口与支持边界见 [补齐验收契约](../../docs/开发指南/云端后端补齐验收.md) 和 [执行可靠性](../../docs/开发指南/SQL工作台执行可靠性.md)。
 
 可选浏览器验收：先启动服务，再运行 `./scripts/cloud/browser.sh`。浏览器依赖安装在临时容器中，截图和验收结果保存到私有状态目录 `browser-artifacts`，本轮文件以 `phase1-` 开头。检查真实 PostgreSQL/MySQL 查询、格式化、选中执行、单请求与真实取消、错误、截断、虚拟滚动和手机首屏；还验证刷新后恢复待确认编号、丢失写入响应后只查询回执而不重跑，并断言工作台不请求已暂缓的高级功能。脚本仅向本地 Cloud 开发数据库写入 `dbhub_cloud_demo` 验证表。
 
@@ -75,3 +75,16 @@ JDBC 生产镜像的隔离验收：先按连接器指南提供公共 CA bundle �
 本地 openGauss 演示使用 `python3 scripts/cloud/opengauss-demo-check.py`，仅串行启动一个固定摘要的社区 6.0.0 PG 模式单节点，限制 1.5 GiB 内存和 2 核 CPU，完成后清理容器、临时数据、凭据和本轮新增镜像。脚本不启动商业 GaussDB，也不替代主备／分布式及 TLS 验收；它要求既有 Cloud 后端和当前 JDBC 服务已启动。不要在其他 Go 测试执行期间重建 backend/JDBC。完整接口和边界见[数据源授权、目录与 openGauss 验收](../../docs/开发指南/数据源授权目录与openGauss验收.md)。
 
 审计采用执行前持久化和数据库幂等补写。Cloud 队列保存在状态目录的 `audit/`，替换容器时保留该目录；生产 Compose 使用 UID 65532 可写的 `backend-audit` 命名卷。队列满或本地存储故障会暂停新的审计操作，`/api/ready` 返回 503；管理员页面可查看积压。覆盖、故障恢复和独立浏览器验收见[审计覆盖与可靠写入](../../docs/开发指南/审计覆盖与可靠写入.md)。
+
+
+仪表盘第一阶段会在启动时运行 0028–0035 迁移，并为元数据库创建独立受限运行身份。启动数据库用户需拥有迁移对象、具备 `CREATEROLE` 和当前 Schema 授权能力；认证配置必须允许生成的登录角色连接。正常停止时回收本进程角色；备份到新环境建议使用 `--no-owner --no-acl`，不要搬运临时角色授权。具体升级规则见[仪表盘实施与验收](../../docs/开发指南/仪表盘第一阶段实施与验收.md)。
+
+仪表盘独立浏览器验收复用现有生产运行镜像 `dbhub-backend:managed-reports` / `dbhub-frontend:managed-reports`，将当前构建只读挂载；无需重新构建大镜像层。宿主需已有 Python Playwright 与 `/usr/bin/chromium`。先构建，再执行：
+
+```sh
+./scripts/cloud/dev.sh exec -T backend go build -o /runtime/dbhub-dashboard-server ./cmd/server
+./scripts/cloud/dev.sh exec -T frontend sh -ec 'npm run test:query; npm run test:report; npm run test:dashboard; npm run build'
+python3 scripts/cloud/dashboard_acceptance.py
+```
+
+脚本不会向开发工作空间注入演示看板。每次创建随机私有元数据/业务 Schema、独立只读目标身份和两只受资源限制的临时运行容器，测试五张真实报表从开发到发布，再检查普通查看者、手机布局、页面并发、部分刷新、传输故障、过期清除、离线和切空间。结束后删除本轮容器、网络、卷、数据库对象与凭据文件；截图、`checks.json` 和后端日志保存在私有状态目录 `dashboard-artifacts/<随机编号>/`。不要把 `runtime.env` 或目标密码提交到仓库。

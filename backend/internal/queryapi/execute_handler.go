@@ -16,6 +16,7 @@ import (
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/reportapi"
 	"github.com/user/dbhub/internal/sqlparse"
 )
 
@@ -51,7 +52,8 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	managed := managedRunOf(r)
 	if managed != nil {
 		x := managed.execution
-		in = executeRequest{RequestID: managed.requestID, ConnectionID: x.Connection.ID, SQL: x.Definition.SQL, Database: x.Definition.Database}
+		auditManagedExecution(r.Context(), x)
+		in = executeRequest{RequestID: managed.requestID, ConnectionID: x.Connection.ID, SQL: x.Definition.SQL, Database: x.Definition.Database, MaxRows: x.Manifest.MaxRows, TimeoutMS: x.Manifest.TimeoutMS}
 		reportID, reportVersion = x.ReportID, x.Version
 	} else if reportMode {
 		in, reportID, reportVersion, decodeErr = h.reportRequest(w, r, reports)
@@ -156,7 +158,17 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	if managed != nil {
 		receiptDatabase = ""
 	}
-	claimed, e := h.controls.ClaimExecution(r.Context(), c.Subject, in.RequestID, requestHash, conn.ID, receiptDatabase, in.TransactionID != "")
+	if managed != nil {
+		if e := managed.repo.CheckExecution(r.Context(), managed.execution); e != nil {
+			reportapi.ManagedError(w, e)
+			return
+		}
+	}
+	var dashboardBinding *db.DashboardExecution
+	if managed != nil {
+		dashboardBinding = managed.dashboardExecution
+	}
+	claimed, e := h.controls.ClaimExecution(r.Context(), c.Subject, in.RequestID, requestHash, conn.ID, receiptDatabase, in.TransactionID != "", dashboardBinding)
 	if e != nil {
 		h.log.Error("登记执行请求失败，未发送用户 SQL", "error", e)
 		reason = e
@@ -173,11 +185,18 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			httpx.Fail(w, httpx.Conflict("同一 request_id 不能用于不同的 SQL、参数、执行选项或角色"))
 		} else {
 			outcome = "duplicate"
+			if managed != nil {
+				receipt.ConnectionID = 0
+				receipt.Database = ""
+			}
 			httpx.JSON(w, 409, httpx.Envelope{Code: 40901, Message: "该请求已登记，不会重复执行，请查看执行回执。", Data: receipt})
 		}
 		return
 	}
 	receipt := &db.QueryExecution{RequestID: in.RequestID, ConnectionID: conn.ID, Database: receiptDatabase, Transactional: in.TransactionID != ""}
+	if managed != nil {
+		receipt.ConnectionID = 0
+	}
 	respond := func(status int, message string, data any) {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
 		defer cancel()
@@ -193,8 +212,14 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		outcome = receipt.Status
 		// Receipt persistence may take time. Recheck immediately before exposing
 		// rows, so a revocation during that write cannot deliver stale authority.
-		if managed != nil && status == 200 {
-			if err := managed.repo.CheckExecution(r.Context(), managed.execution); err != nil {
+		if status == 200 {
+			var currentErr error
+			if managed != nil {
+				currentErr = managed.repo.CheckExecution(r.Context(), managed.execution)
+			} else {
+				currentErr = h.conns.ValidateCurrent(r.Context(), conn)
+			}
+			if err := currentErr; err != nil {
 				receipt.Status, receipt.Message = "rejected", "报表授权、发布版本或执行账号已变化，结果未交付。"
 				outcome = "rejected"
 				if err = h.controls.FinishExecution(cleanup, c.Subject, receipt); err != nil {
@@ -210,6 +235,15 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		} else {
 			httpx.JSON(w, status, httpx.Envelope{Code: status * 100, Message: message, Data: receipt})
 		}
+	}
+	if managed != nil {
+		release, e := managed.repo.AcquireExecutionLease(r.Context(), managed.execution)
+		if e != nil {
+			receipt.Status, receipt.Message = "rejected", "报表查询并发已满，请稍后重新查询"
+			respond(429, receipt.Message, nil)
+			return
+		}
+		defer release()
 	}
 	jobSQL := in.SQL
 	if managed != nil {
@@ -270,6 +304,9 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		in.MaxRows = settings.MaxRows
 	}
 	opt := target.ExecuteOptions{LosslessNumbers: reportMode, Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, ExecutionKey: fmt.Sprintf("query:%d:%s", c.Subject, in.RequestID), AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
+	if managed != nil {
+		opt.MaxBytes = 2 << 20
+	}
 	sent := false
 	var executionStarted time.Time
 	opt.BeforeExecute = func() error {
@@ -325,7 +362,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	} else {
 		tx.mu.Lock()
 		auditctx.Update(r.Context(), func(d *auditctx.Data) { d.TransactionID = tx.ID })
-		if h.txs.get(c.Subject, conn.ID) != tx {
+		if h.txs.get(c.Subject, conn.ID) != tx || tx.WorkspaceID != db.WorkspaceID(ctx) || tx.ActorRole != c.Role || tx.MemberEpoch != db.MemberEpoch(ctx) {
 			execErr = fmt.Errorf("事务不存在或已过期")
 		} else if in.Database != "" && tx.Database != in.Database {
 			execErr = fmt.Errorf("事务内不能切换数据库")
@@ -371,6 +408,11 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			respond(409, receipt.Message, nil)
 			return
 		}
+		if _, execErr = db.ValidateContractResult(managed.execution.Manifest.Contract, result, time.Now()); execErr != nil {
+			receipt.Status, receipt.Message = "failed", "查询结果未通过报表契约校验"
+			respond(409, receipt.Message, nil)
+			return
+		}
 		if managed.execution.Validation {
 			if execErr = managed.repo.RegisterValidation(ctx, in.RequestID, managed.execution); execErr != nil {
 				receipt.Status, receipt.Message = "failed", "验证记录未能保存，请刷新审批状态后重新验证。"
@@ -382,6 +424,24 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	receipt.Status, receipt.Kind = "succeeded", result.Kind
 	receipt.AffectedRows, receipt.DurationMS = result.AffectedRows, result.DurationMS
 	var response any = result
+	if managed != nil && managed.dashboard != nil {
+		quality, e := managed.dashboard.CompleteTile(ctx, managed.dashboardExecution, result)
+		if e != nil {
+			receipt.Status, receipt.Message = "rejected", "看板或报表状态已变化，请重新刷新"
+			respond(409, receipt.Message, nil)
+			return
+		}
+		dx := managed.dashboardExecution
+		response = map[string]any{"result": result, "quality": quality, "report_id": managed.execution.ReportID, "report_publication_no": managed.execution.PublicationNo, "execution_id": managed.requestID, "dashboard_id": dx.DashboardID, "dashboard_version": dx.DashboardVersion, "dashboard_publication_no": dx.DashboardPublicationNo, "lifecycle_epoch": dx.Epoch, "refresh_id": dx.RefreshID, "tile_key": dx.TileKey}
+	}
+	if managed != nil {
+		raw, e := json.Marshal(response)
+		if e != nil || len(raw) > 2<<20 {
+			receipt.Status, receipt.Message = "failed", "报表结果超过2MiB，请缩小查询范围"
+			respond(413, receipt.Message, nil)
+			return
+		}
+	}
 	if managed != nil && managed.execution.Validation {
 		response = map[string]any{"result": result, "validation_id": in.RequestID, "manifest_hash": managed.execution.Hash}
 	}
@@ -413,6 +473,16 @@ func (h *Handler) Execution(w http.ResponseWriter, r *http.Request) {
 			httpx.Fail(w, httpx.Internal("读取执行回执失败", err))
 		}
 		return
+	}
+	if receipt.DashboardRefreshID != nil {
+		if _, e := h.conns.ManagedDashboards().ResolveTile(r.Context(), *receipt.DashboardRefreshID, receipt.DashboardTileKey); e != nil {
+			reportapi.ManagedError(w, e)
+			return
+		}
+	}
+	if receipt.ConnectionID < 0 {
+		receipt.ConnectionID = 0
+		receipt.Database = ""
 	}
 	httpx.OK(w, receipt)
 }
