@@ -106,7 +106,7 @@ helm upgrade --install dbhub deploy/helm/dbhub --namespace dbhub \
 
 ## 源码 / systemd
 
-适用于 Linux + systemd。构建主机需 Go 1.25.5、C 编译器/开发头文件、Node 24.12.0、npm；Go SQL 解析器启用 CGO。运行主机需匹配的 libc、CA、时区数据和受维护的 Nginx。可选 JDBC 需 JDK 17 构建、JRE 17 运行及 Python 3 下载/核验锁定驱动；备份需与元库版本匹配的 PostgreSQL 客户端、`flock`、`timeout`、`sha256sum`。
+适用于 Linux + systemd。构建主机需 Go 1.26.9、C 编译器/开发头文件、Node 24.12.0、npm；Go SQL 解析器启用 CGO。运行主机需匹配的 libc、CA、时区数据和受维护的 Nginx。可选 JDBC 需 JDK 17 构建、JRE 17 运行及 Python 3 下载/核验锁定驱动；备份需与元库版本匹配的 PostgreSQL 客户端、`flock`、`timeout`、`sha256sum`。
 
 ```sh
 export DBHUB_RELEASE=$(git rev-parse --short=12 HEAD)

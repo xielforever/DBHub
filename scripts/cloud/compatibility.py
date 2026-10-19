@@ -136,6 +136,9 @@ def exercise(kind, branch, image, out, base, fingerprint, migration_hash, keep_i
                 time.sleep(1)
             test_env = dict(os.environ)
             test_env.update({key:base[key] for key in ('TEST_POSTGRES_DSN','TEST_MYSQL_DSN','TEST_REDIS_URL')})
+            # Keep the application metadata on its supported PostgreSQL 16
+            # instance while exercising each independent business datasource.
+            test_env['TEST_METADATA_DSN'] = base['TEST_POSTGRES_DSN']
             encoded = quote(password, safe='')
             if kind == 'postgres':
                 test_env['TEST_POSTGRES_DSN'] = f'postgres://dbhub:{encoded}@{name}:5432/dbhub?sslmode=disable'
@@ -145,7 +148,7 @@ def exercise(kind, branch, image, out, base, fingerprint, migration_hash, keep_i
                 test_env['TEST_REDIS_URL'] = f'redis://:{encoded}@{name}:6379/15'
             test_env.update(DBHUB_MATRIX_ENGINE=kind, DBHUB_MATRIX_BRANCH=branch)
             exec_args = [WRAPPER,'exec','-T']
-            for key in ('TEST_POSTGRES_DSN','TEST_MYSQL_DSN','TEST_REDIS_URL','DBHUB_MATRIX_ENGINE','DBHUB_MATRIX_BRANCH'):
+            for key in ('TEST_POSTGRES_DSN','TEST_METADATA_DSN','TEST_MYSQL_DSN','TEST_REDIS_URL','DBHUB_MATRIX_ENGINE','DBHUB_MATRIX_BRANCH'):
                 exec_args += ['-e', key]
             exec_args += ['backend','go','test','-race','-count=1','-json']
             print(f'验证 {kind} {branch}：真实目标操作和 HTTP 契约', flush=True)
@@ -210,7 +213,7 @@ def main():
     out.mkdir(parents=True, mode=0o700, exist_ok=False)
     fingerprint = source_fingerprint()
     migration_hash = migration_fingerprint()
-    report = {'started_at':datetime.now(timezone.utc).isoformat(), 'source_revision':capture(['git','-C',ROOT,'rev-parse','HEAD']), 'source_dirty':bool(capture(['git','-C',ROOT,'status','--porcelain'])), 'backend_go_sha256':fingerprint, 'backend_migrations_sha256':migration_hash, 'targets':[]}
+    report = {'started_at':datetime.now(timezone.utc).isoformat(), 'source_revision':capture(['git','-C',ROOT,'rev-parse','HEAD']), 'source_dirty':bool(capture(['git','-C',ROOT,'status','--porcelain'])), 'backend_go_sha256':fingerprint, 'backend_migrations_sha256':migration_hash, 'runner_go_version':capture([WRAPPER,'exec','-T','backend','go','version']), 'metadata_postgres_version':capture([WRAPPER,'exec','-T','postgres','sh','-ec','psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SHOW server_version"']), 'targets':[]}
     if previous:
         report['resumed_from'] = opts.resume_from.parent.name+'/'+opts.resume_from.name
         report['previous_report_sha256'] = hashlib.sha256(opts.resume_from.read_bytes()).hexdigest()

@@ -21,6 +21,9 @@ AI 暂不需要配置。以后通过云环境变量设置 `DBHUB_AI_BASE_URL`、
 ./scripts/cloud/dev.sh run --rm --no-deps backend go test -race -p=4 ./...
 ./scripts/cloud/dev.sh run --rm --no-deps backend go vet -p=4 ./...
 
+# Go 已导入包漏洞门禁（固定 govulncheck 版本，需要访问 vuln.go.dev）
+./scripts/cloud/dev.sh run --rm --no-deps backend sh scripts/vulncheck.sh
+
 # 第一阶段工作台的执行状态回归测试与前端构建
 ./scripts/cloud/dev.sh run --rm --no-deps frontend sh -ec 'npm run test:query; npm run build'
 
@@ -40,7 +43,9 @@ python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.
 ./scripts/cloud/dev.sh stop
 ```
 
-统一回归入口：`python3 scripts/cloud/regression.py --profile smoke` 检查关键业务链路，`--profile full` 执行后端全量竞态、静态检查和前端审计/回归/构建；`--profile release --soak-seconds 1800` 再构建当前提交的生产镜像，执行浏览器、故障恢复、完整备份恢复及真实时钟持续负载。使用 `--plan` 可预览命令。业务用例、人工验收模板、未执行项与生产准入条件见[生产上线评估与回归测试](../../docs/开发指南/生产上线评估与回归测试.md)。结果在私有状态目录 `regression-artifacts/<本次运行>/summary.json`；原始日志保留在同目录，仅共享汇总记录。
+统一回归入口：`python3 scripts/cloud/regression.py --profile smoke` 检查关键业务链路，`--profile full` 执行后端全量竞态、静态检查、Go 已导入包漏洞门禁和前端审计/回归/构建；`--profile release --soak-seconds 1800` 再构建当前提交的生产镜像，执行浏览器、故障恢复、完整备份恢复及真实时钟持续负载。使用 `--plan` 可预览命令。业务用例、人工验收模板、未执行项与生产准入条件见[生产上线评估与回归测试](../../docs/开发指南/生产上线评估与回归测试.md)。结果在私有状态目录 `regression-artifacts/<本次运行>/summary.json`；原始日志保留在同目录，仅共享汇总记录。
+
+Go 门禁使用官方模块名与固定的 Go 1.26.9 / govulncheck v1.9.0，拒绝模块路径替换；已导入包存在公告、工具失败或漏洞库访问失败都会导致回归失败。仅模块存在但未导入的包会保留告警，不计作已使用的漏洞包。不要把 JSON 模式的退出码 0 当作没有漏洞。需要通过云环境网络设置允许 `vuln.go.dev` 并等待运行策略生效；沿用平台代理和 CA。修复与剩余告警说明见[Go 依赖安全修复与验收](../../docs/开发指南/Go依赖安全修复与验收.md)。
 
 查询队列和活动目标事务属于单个后端进程，重启后活动事务由数据库连接关闭回滚；已经提交的自动提交写入不因此回滚。跨实例部署需要会话路由或共享调度器。SQL 执行编号与回执保存在 PostgreSQL，独立处理器使用同一元数据库时也能防止相同编号重复执行；普通工作台仍不提供跨实例并发总量限制；本期受管报表及仪表盘另使用 PostgreSQL 共享租约，覆盖用户、账号、工作空间和全局配额，跨连接池已验证，完整多实例运行仍需验收。在线心跳和认证会话使用 Redis，业务表数据和任意 SQL 查询结果不进入 Redis 缓存。完整接口与支持边界见 [补齐验收契约](../../docs/开发指南/云端后端补齐验收.md) 和 [执行可靠性](../../docs/开发指南/SQL工作台执行可靠性.md)。
 
@@ -57,6 +62,8 @@ python3 scripts/cloud/compatibility.py --resume-from /私有报告路径/matrix.
 生产 Compose 为根目录 `docker-compose.prod.yaml`；Cloud 额外合并 `release.compose.yaml` 提供本地依赖。验收状态保存在 `/workspace/dbhub-release-check`，数据库临时文件保存在 `${DBHUB_BUILD_ROOT:-/tmp/dbhub-cloud-build}/release-data`，不能用作生产持久化路径。浏览器经 Nginx 访问真实 production 后端，额外覆盖角色权限、会话撤销、生产目标写入确认、62 秒长查询与超时原因指标。构建、后端替换核实、备份和回滚步骤见 [部署运维指南](../../docs/部署运维/部署运维指南.md)。
 
 版本矩阵会使用当前开发后端容器执行 Go 竞态测试，基础 PostgreSQL/MySQL/Redis 必须已启动。目标版本逐个拉取、启动并清理，数据放在容器临时内存文件系统；默认删除本轮新拉取的镜像，保留运行前已有镜像，`--keep-images` 可保留本轮镜像。不要并行运行矩阵或重建后端；VFS 环境也应避免同时执行其他大量磁盘写入的构建。
+
+元数据库保持使用基础 PostgreSQL 16；HTTP 夹具通过 `TEST_METADATA_DSN` 读取元库，而 `TEST_POSTGRES_DSN` 指向待测业务目标。目标表、采集故障和锁在业务实例上准备及清理，不把 PostgreSQL 14 业务库当作应用元库来执行迁移。矩阵报告同时保存实际工具链和元库版本。
 
 报告在私有 `compatibility-artifacts/<UTC时间>/matrix.json`，记录真实补丁号、镜像摘要、测试名称、跳过与清理状态，以及后端 Go 实现和迁移 SQL 的独立指纹。PostgreSQL 各分支额外执行数据源检查、并发编辑、采集失败/互斥/取消的可靠性测试。完整有效报告可通过 `python3 scripts/cloud/compatibility.py --record-from /私有报告路径/matrix.json` 更新内嵌版本记录；部分报告、失败或任一实现/迁移指纹变化时拒绝更新。恢复运行会记录原报告摘要和复用项来源，不会掩盖原运行的失败。`.github/workflows/datasource-compatibility.yml` 提供手动触发的完整 CI 验证，不上传凭据文件。具体范围见 [数据源版本兼容](../../docs/开发指南/数据源版本兼容.md)。
 

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # libpg_query uses CGO; vendored headers allow an offline build after pulling images.
-ARG IMAGE_VERSION=golang:1.25.5-bookworm@sha256:d9132cce84391efab786495288756d60e1da215b1f94e87860aeefc3d4c45b6d
+ARG IMAGE_VERSION=golang:1.26.9-bookworm@sha256:d9c68c2c51161e12fd77e4c6320687c9cd86e1af1e3ad6e6cd63ff970641453c
 FROM ${IMAGE_VERSION} AS builder
 WORKDIR /src
 ENV CGO_ENABLED=1 GOTOOLCHAIN=local GOFLAGS=-mod=vendor

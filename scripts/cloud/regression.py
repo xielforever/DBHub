@@ -51,7 +51,7 @@ OUTSIDE_SCOPE = [
     'Off-site backups, application key/driver/audit volume recovery and agreed RPO/RTO',
     'Real business workload capacity, alert delivery and multi-instance failover',
     'Full datasource version matrix and commercial GaussDB topology/TLS acceptance',
-    'Complete Go, JDBC/JRE and operating-system vulnerability scans with current advisory databases',
+    'JDBC/JRE and operating-system vulnerability scans with current advisory databases',
 ]
 
 
@@ -132,6 +132,7 @@ def commands(profile, suffix, soak_seconds, clients):
              ('backend', [DEV, 'run', '--rm', '--no-deps', 'backend', *test])]
     if profile != 'smoke':
         steps.append(('vet', [DEV, 'run', '--rm', '--no-deps', 'backend', 'go', 'vet', '-p=4', './...']))
+        steps.append(('go-vulnerabilities', [DEV, 'run', '--rm', '--no-deps', 'backend', 'sh', 'scripts/vulncheck.sh']))
     frontend = 'npm ci --no-audit --no-fund; '
     if profile != 'smoke':
         frontend += 'npm audit --audit-level=low; '
@@ -195,7 +196,8 @@ def main():
         report = dict(schema_version=1, source_commit=commit, source_changed=dirty, source_sha256=source_fingerprint(),
                       profile=args.profile, completed=False, production_approval='not_evaluated', steps=[],
                       sustained_load=dict(executed=False, requested_seconds=args.soak_seconds), outside_scope=OUTSIDE_SCOPE,
-                      not_executed=['Production-image browser/fault/backup acceptance'] if args.profile != 'release' else [])
+                      not_executed=(['Production-image browser/fault/backup acceptance'] if args.profile != 'release' else []) +
+                                   (['Go dependency vulnerability scan'] if args.profile == 'smoke' else []))
         summary = run / 'summary.json'
 
         def save():
@@ -227,6 +229,9 @@ def main():
                     raise RuntimeError(name + ' failed; inspect private log ' + str(log))
                 if name == 'frontend':
                     item['tests_passed'] = frontend_results(log)
+                elif name == 'go-vulnerabilities':
+                    item.update(scanner='govulncheck v1.9.0', scan_level='package',
+                                unimported_module_advisories='Reported in the log; not evidence that the affected package is used')
                 elif name in ('dashboard', 'security-browser', 'production', 'automation'):
                     item.update(acceptance_result(sorted(set(folder.glob('*/checks.json')) - previous)))
                     if name == 'production':

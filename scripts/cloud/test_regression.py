@@ -105,6 +105,7 @@ class RegressionEvidenceTests(unittest.TestCase):
             self.assertIn('-race', command)
             self.assertEqual('-run' in command, profile == 'smoke')
             self.assertEqual('vet' in names, profile != 'smoke')
+            self.assertEqual('go-vulnerabilities' in names, profile != 'smoke')
             self.assertEqual('production' in names, profile == 'release')
             self.assertEqual('security-browser' in names, profile == 'release')
             if profile == 'release':

@@ -40,7 +40,7 @@ jobs:
         run: ./scripts/cloud/dev.sh up -d --wait --wait-timeout 240 postgres mysql redis jdbc
       - name: 校验工作流语法和上下文
         run: ./scripts/cloud/dev.sh run --rm --no-deps -w /tmp -e GOFLAGS=-mod=mod backend go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 /app/.github/workflows/production-readiness.yml /app/.github/workflows/datasource-compatibility.yml
-      - name: 后端全量竞态、静态检查及前端审计、回归与构建
+      - name: 后端全量竞态、静态检查、Go 漏洞扫描及前端审计、回归与构建
         run: python scripts/cloud/regression.py --profile full
       - name: 构建实际生产镜像
         run: |

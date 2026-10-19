@@ -3,7 +3,7 @@
 **DBHub** 是一个定位于高端、安全、且极度高效的专业数据管理平台。它采用苹果（Apple）风格的**液态玻璃 (Liquid Glass)** 视觉体系，旨在为数据从业者提供极致的使用体验。
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
-![Go](https://img.shields.io/badge/Backend-Go%201.25-00ADD8.svg)
+![Go](https://img.shields.io/badge/Backend-Go%201.26.9-00ADD8.svg)
 ![Vue](https://img.shields.io/badge/Frontend-Vue%203-4FC08D.svg)
 
 ## ✨ 核心特性
@@ -29,7 +29,7 @@
 | **前端工程** | Vue Router 4, Pinia 3, Axios | 路由、状态管理、请求封装 |
 | **可视化** | ECharts 6 | 数据图表渲染 |
 | **动画** | GSAP, CSS Transitions | 微交互 |
-| **后端** | Go 1.25（pgx / MySQL / Redis 驱动，libpg_query AST） | 高性能 API 服务 |
+| **后端** | Go 1.26.9（pgx / MySQL / Redis 驱动，libpg_query AST） | 高性能 API 服务 |
 | **数据库** | PostgreSQL 16 (元数据), Redis 7 (缓存) | 自身存储 |
 | **部署** | Docker Compose、Docker CLI、Helm/Kubernetes、源码/systemd | 四种部署入口及统一生产配置 |
 
@@ -58,7 +58,7 @@ docker compose up -d
 
 ### 本地裸机开发（可选）
 
-不使用 Docker 时，需自行准备 Go 1.25.5、C 编译工具、Node 24.12.0、PostgreSQL 与 Redis：
+不使用 Docker 时，需自行准备 Go 1.26.9、C 编译工具、Node 24.12.0、PostgreSQL 与 Redis：
 
 ```bash
 # 后端（热重载）

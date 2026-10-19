@@ -199,10 +199,10 @@ func TestMetadataSyncReliability(t *testing.T) {
 	name := "sync_" + strings.ReplaceAll(testRequestID(), "-", "")
 	schemas := []string{name + "_a", name + "_b"}
 	for _, schema := range schemas {
-		if _, err := a.pool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()+"; CREATE TABLE "+pgx.Identifier{schema, "same"}.Sanitize()+"(id int)"); err != nil {
+		if _, err := a.targetPool.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()+"; CREATE TABLE "+pgx.Identifier{schema, "same"}.Sanitize()+"(id int)"); err != nil {
 			t.Fatal(err)
 		}
-		defer a.pool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		defer a.targetPool.Exec(ctx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 	}
 	snapshot := func(schema, comment string) *db.MetaSnapshot {
 		return &db.MetaSnapshot{ConnectionID: a.connID, DatabaseName: conn.Database, SchemaName: schema, TableName: "same", TableType: "table", TableComment: comment}
@@ -305,20 +305,20 @@ func TestMetadataSyncReliability(t *testing.T) {
 		a.t = t
 		role := name + "_role"
 		roleSQL := pgx.Identifier{role}.Sanitize()
-		if _, err := a.pool.Exec(ctx, "CREATE ROLE "+roleSQL+" LOGIN PASSWORD 'SyncProbePassword!9'; ALTER ROLE "+roleSQL+" SET statement_timeout='200ms'"); err != nil {
+		if _, err := a.targetPool.Exec(ctx, "CREATE ROLE "+roleSQL+" LOGIN PASSWORD 'SyncProbePassword!9'; ALTER ROLE "+roleSQL+" SET statement_timeout='200ms'"); err != nil {
 			t.Fatal(err)
 		}
-		defer a.pool.Exec(ctx, "DROP ROLE "+roleSQL)
+		defer a.targetPool.Exec(ctx, "DROP ROLE "+roleSQL)
 		// Give this timeout/lock fixture its own target database. Collecting
 		// the shared metadata database could otherwise hit another test's
 		// migration locks and fail the initial, intentionally healthy scan.
 		targetName := name + "_partial"
 		targetSQL := pgx.Identifier{targetName}.Sanitize()
-		if _, err := a.pool.Exec(ctx, "CREATE DATABASE "+targetSQL); err != nil {
+		if _, err := a.targetPool.Exec(ctx, "CREATE DATABASE "+targetSQL); err != nil {
 			t.Fatal(err)
 		}
-		defer a.pool.Exec(ctx, "DROP DATABASE "+targetSQL+" WITH (FORCE)")
-		cfg := a.pool.Config().Copy()
+		defer a.targetPool.Exec(ctx, "DROP DATABASE "+targetSQL+" WITH (FORCE)")
+		cfg := a.targetPool.Config().Copy()
 		cfg.ConnConfig.Database = targetName
 		cfg.ConnConfig.RuntimeParams["search_path"] = "public"
 		targetPool, err := pgxpool.NewWithConfig(ctx, cfg)
@@ -387,7 +387,7 @@ func TestMetadataSyncReliability(t *testing.T) {
 		client := &http.Client{Timeout: 15 * time.Second}
 		body := map[string]any{"connection_id": a.connID}
 		for _, cancelled := range []bool{false, true} {
-			lock, err := a.pool.Begin(ctx)
+			lock, err := a.targetPool.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

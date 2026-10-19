@@ -34,6 +34,7 @@ type apiTest struct {
 	t                          *testing.T
 	server                     *httptest.Server
 	pool                       *pgxpool.Pool
+	targetPool                 *pgxpool.Pool
 	deps                       *Deps
 	admin, developer, readonly string
 	connID, redisID            int64
@@ -46,12 +47,16 @@ type apiTest struct {
 func setupAPI(t *testing.T) *apiTest {
 	t.Helper()
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	metadataDSN := os.Getenv("TEST_METADATA_DSN")
+	if metadataDSN == "" {
+		metadataDSN = dsn
+	}
 	redisURL := os.Getenv("TEST_REDIS_URL")
 	if dsn == "" || redisURL == "" {
 		t.Skip("real integration databases not configured")
 	}
 	ctx := context.WithValue(db.WithWorkspace(context.Background(), 1), auth.ClaimsContextKey, &auth.Claims{Subject: 1, Username: "admin", Role: "admin"})
-	root, e := pgxpool.New(ctx, dsn)
+	root, e := pgxpool.New(ctx, metadataDSN)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -59,7 +64,7 @@ func setupAPI(t *testing.T) *apiTest {
 	if _, e = root.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); e != nil {
 		t.Fatal(e)
 	}
-	cfg, e := pgxpool.ParseConfig(dsn)
+	cfg, e := pgxpool.ParseConfig(metadataDSN)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -100,7 +105,14 @@ func setupAPI(t *testing.T) *apiTest {
 	if e != nil {
 		t.Fatal(e)
 	}
-	a := &apiTest{t: t, pool: pool, deps: deps, table: fmt.Sprintf("dbhub_http_%d", time.Now().UnixNano()), auditDir: appCfg.AuditDir}
+	targetPool := root
+	if metadataDSN != dsn {
+		targetPool, e = pgxpool.New(ctx, dsn)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	a := &apiTest{t: t, pool: pool, targetPool: targetPool, deps: deps, table: fmt.Sprintf("dbhub_http_%d", time.Now().UnixNano()), auditDir: appCfg.AuditDir}
 	a.server = httptest.NewServer(NewRouter(appCfg, slog.New(slog.NewTextHandler(io.Discard, nil)), users, deps))
 	t.Cleanup(func() {
 		a.server.Close()
@@ -109,7 +121,10 @@ func setupAPI(t *testing.T) *apiTest {
 		db.CloseScopedRuntime(pool)
 		pool.Close()
 		_, _ = root.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
-		_, _ = root.Exec(ctx, "DROP TABLE IF EXISTS "+pgx.Identifier{a.table}.Sanitize())
+		_, _ = targetPool.Exec(ctx, "DROP TABLE IF EXISTS "+pgx.Identifier{a.table}.Sanitize())
+		if targetPool != root {
+			targetPool.Close()
+		}
 		root.Close()
 		rc.Close()
 	})
