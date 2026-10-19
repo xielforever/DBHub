@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+# Explicit opt-in is validated before any Docker or state mutation.
+python3 scripts/cloud/https-jdbc/config.py
+if [ "${DBHUB_HTTPS_JDBC_ENABLED:-0}" = 1 ]; then
+ exec sh "scripts/cloud/https-jdbc/start.sh" "$@"
+fi
 scripts/cloud/dev.sh up -d --wait --wait-timeout 240 jdbc
 export DBHUB_BACKUP_EXPECTED_HOURS=${DBHUB_BACKUP_EXPECTED_HOURS:-24}
 scripts/cloud/dev.sh up -d backend frontend

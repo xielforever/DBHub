@@ -1,0 +1,32 @@
+services:
+  backend:
+    environment:
+      DBHUB_JDBC_URL: http://jdbc-router:8091
+      NO_PROXY: ${DBHUB_NO_PROXY},jdbc-router
+      DBHUB_TARGET_ALLOWLIST: ${DBHUB_ROUTER_TARGET_ALLOWLIST}
+  jdbc-router:
+    build:
+      context: ${DBHUB_REPO_DIR}/scripts/cloud/https-jdbc
+    image: dbhub-https-jdbc-router:v1
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    mem_limit: 128m
+    environment:
+      DBHUB_ROUTER_CREDENTIALS_FILE: /run/jdbc-router-credentials.json
+      HTTP_PROXY: ${HTTP_PROXY}
+      HTTPS_PROXY: ${HTTPS_PROXY}
+      NO_PROXY: localhost,127.0.0.1,jdbc
+      SSL_CERT_FILE: /run/cloud-ca.pem
+    extra_hosts: ["${DBHUB_PROXY_HOST}:${DBHUB_PROXY_IP}"]
+    volumes:
+      - ${DBHUB_STATE_DIR}/https-jdbc-router.credentials.json:/run/jdbc-router-credentials.json:ro
+      - ${DBHUB_CA_FILE}:/run/cloud-ca.pem:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,os,urllib.request; c=json.load(open(os.environ['DBHUB_ROUTER_CREDENTIALS_FILE'])); r=urllib.request.Request('http://127.0.0.1:8091/v1/artifacts',data=b'{}',headers={'Content-Type':'application/json','Authorization':'Bearer '+c['service_token']}); urllib.request.urlopen(r,timeout=5).close()"]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+    restart: unless-stopped
