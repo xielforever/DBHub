@@ -11,3 +11,4 @@ sh "$here/run-python.sh" health.py
 sh "$here/run-python.sh" register.py
 # Keep the latest main's managed backup startup contract.
 sh "$here/../backup.sh"
+printf '%s\n' 'DBHub services ready'

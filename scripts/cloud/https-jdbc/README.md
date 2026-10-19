@@ -33,7 +33,9 @@ Dockerfile/router.py enter its build context. Start validates configuration befo
 any mutation, creates private state outside the checkout, starts existing default
 infrastructure by container ID, builds the router, starts only router/backend/
 frontend with --no-deps, waits for readiness and reconciles personal API resources.
-The latest main's managed metadata backup startup is retained.
+The latest main's managed metadata backup startup is retained. Only after health,
+registration and backup all succeed does startup print the exact caller contract
+`DBHub services ready`; an earlier failure never prints this marker.
 
 ## Boundaries and credentials
 
