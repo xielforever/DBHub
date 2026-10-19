@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      DBHUB_TARGET_ALLOWLIST: ${DBHUB_ORIGINAL_TARGET_ALLOWLIST}

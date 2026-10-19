@@ -2,6 +2,11 @@
 # Install, build and test entirely in Docker, using the cloud proxy and CA.
 set -eu
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+# Explicit opt-in is validated before any Docker or state mutation.
+python3 scripts/cloud/https-jdbc/config.py
+if [ "${DBHUB_HTTPS_JDBC_ENABLED:-0}" = 1 ]; then
+ exec sh "scripts/cloud/https-jdbc/setup.sh" "$@"
+fi
 command -v docker >/dev/null
 docker compose version >/dev/null
 scripts/cloud/dev.sh stop backend frontend

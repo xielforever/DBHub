@@ -114,3 +114,14 @@ python3 scripts/cloud/production_acceptance.py --duration 1800 --clients 4
 ```
 
 两个脚本复用宿主 Playwright/Chromium；浏览器路径可通过 `DBHUB_CHROMIUM_PATH` 指定。生产验收脚本创建独立元库、业务库、Redis、容器与卷，结束清理全部临时资源及凭据；`production-acceptance/<随机编号>/checks.json` 留作证据。CI 在 PR/main/手动触发时执行较短的完整故障恢复流程，30分钟负载在发布阶段单独执行。
+
+## 可选：本机 PostgreSQL 的固定 HTTPS JDBC 接入
+
+正式云环境将 `DBHUB_HTTPS_JDBC_ENABLED=1`、
+`DBHUB_HTTPS_JDBC_ENDPOINT=https://dbhub-demo-wsl.tail1184b4.ts.net` 配置为非秘密变量，
+并绑定受限直接变量 `DBHUB_DEMO_PG_PASSWORD`。沿用本节原有 setup/start 命令，
+会自动准备仓库外 0600 状态、启用固定 JSON 路由并通过普通 API 幂等注册个人驱动、
+模板和只读连接；不再需要导入部署包或手动 bootstrap。未启用时原路径不变。
+平台仍需发布已审查的精确 HTTP 主机规则和此分支提交；本次代码不会自动修改所有环境。
+凭据漂移、同名冲突或原资源消失均停止，不覆盖。默认 JDBC/native 能力和资源保留。
+完整边界、验证、停用与恢复见 [HTTPS JDBC 部署说明](https-jdbc/README.md)。
