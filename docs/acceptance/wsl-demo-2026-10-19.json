@@ -1,0 +1,33 @@
+{
+  "date": "2026-10-19",
+  "environment": "Linux Docker 28.4.0 / Compose 2.40.3",
+  "default_profile_passed": true,
+  "full_profile_passed": true,
+  "permission_verification_passed": true,
+  "services": {
+    "postgres": {
+      "health": "healthy",
+      "cold_restart_count": 0,
+      "loopback_only": true,
+      "host_protocol_probe": true,
+      "version": "16.15"
+    },
+    "mysql": {
+      "health": "healthy",
+      "cold_restart_count": 0,
+      "loopback_only": true,
+      "host_protocol_probe": true,
+      "version": "8.4.11"
+    },
+    "redis": {
+      "health": "healthy",
+      "cold_restart_count": 0,
+      "loopback_only": true,
+      "host_protocol_probe": true,
+      "version": "7.4.11"
+    }
+  },
+  "windows_wsl_tailscale_e2e": "not_run",
+  "data_preserving_recreation_passed": true,
+  "temporary_resources_removed": true
+}

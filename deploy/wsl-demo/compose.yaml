@@ -1,0 +1,72 @@
+name: dbhub-wsl-demo
+
+services:
+  postgres:
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    restart: unless-stopped
+    mem_limit: 384m
+    cpus: 0.5
+    environment:
+      POSTGRES_USER: demo_admin
+      POSTGRES_DB: dbhub_demo
+      POSTGRES_PASSWORD: ${DEMO_PG_ADMIN_PASSWORD:?先运行 bash prepare.sh}
+      DEMO_READER_PASSWORD: ${DEMO_PG_READER_PASSWORD:?先运行 bash prepare.sh}
+      DEMO_WRITER_PASSWORD: ${DEMO_PG_WRITER_PASSWORD:?先运行 bash prepare.sh}
+    ports:
+      - "127.0.0.1:${DEMO_PG_PORT:-15432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/10-demo.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "PGPASSWORD=\"$$DEMO_READER_PASSWORD\" psql -X -h127.0.0.1 -Udemo_reader -ddbhub_demo -vON_ERROR_STOP=1 -tAc 'SELECT COUNT(*) FROM inventory' >/dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  mysql:
+    profiles: ["mysql"]
+    image: mysql:8.4@sha256:24989179f58856db763f418010c1169fecc944e3ec1ea7e921572d83eb070f70
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DEMO_MYSQL_ROOT_PASSWORD:?先运行 bash prepare.sh}
+      MYSQL_DATABASE: dbhub_demo
+      DEMO_READER_PASSWORD: ${DEMO_MYSQL_READER_PASSWORD:?先运行 bash prepare.sh}
+      DEMO_WRITER_PASSWORD: ${DEMO_MYSQL_WRITER_PASSWORD:?先运行 bash prepare.sh}
+    ports:
+      - "127.0.0.1:${DEMO_MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init.sh:/docker-entrypoint-initdb.d/10-demo.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$DEMO_READER_PASSWORD\" mysql --protocol=TCP -h127.0.0.1 -udemo_reader -Ddbhub_demo -Nse 'SELECT COUNT(*) FROM inventory' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+    stop_grace_period: 45s
+
+  redis:
+    profiles: ["redis"]
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.25
+    environment:
+      DEMO_REDIS_PASSWORD: ${DEMO_REDIS_PASSWORD:?先运行 bash prepare.sh}
+    command: ["sh", "/demo/redis-start.sh"]
+    ports:
+      - "127.0.0.1:${DEMO_REDIS_PORT:-16379}:6379"
+    volumes:
+      - redis-data:/data
+      - ./redis-start.sh:/demo/redis-start.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$DEMO_REDIS_PASSWORD\" redis-cli --user demo ping | grep -qx PONG"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres-data:
+  mysql-data:
+  redis-data:

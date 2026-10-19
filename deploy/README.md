@@ -1,5 +1,7 @@
 # 部署方式
 
+本机 WSL 演示数据库及云端 Tailscale 接入见 [WSL 与 Tailscale 演示数据库部署](../docs/开发指南/WSL与Tailscale演示数据库部署.md)，可运行配置位于 [`wsl-demo/`](wsl-demo/)。该入口用于准备被 DBHub 接入的演示数据源。
+
 DBHub 提供四种部署入口，使用同一后端、静态前端与生产环境变量。PostgreSQL 与 Redis 由运维准备；JDBC、定时备份按需启用。镜像需要自行构建或从已发布的内部仓库获取，示例仓库地址须替换。
 
 | 方式 | 入口 | 适用情况 |

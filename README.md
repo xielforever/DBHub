@@ -98,6 +98,7 @@ cd frontend && npm install && npm run dev
 - [数据库模型设计](./docs/数据库设计/数据库模型设计.md)
 - [UI 设计规范](./docs/界面设计/UI设计规范.md)
 - [环境搭建指南](./docs/开发指南/环境搭建指南.md)
+- [WSL 与 Tailscale 演示数据库部署](./docs/开发指南/WSL与Tailscale演示数据库部署.md)
 - [编码规范](./docs/开发指南/编码规范.md)
 - [Git 工作流规范](./docs/开发指南/Git工作流规范.md)
 - [部署运维指南](./docs/部署运维/部署运维指南.md)
