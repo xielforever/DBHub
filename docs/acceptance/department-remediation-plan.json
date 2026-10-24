@@ -1,0 +1,173 @@
+{
+  "objective": "修复角色评估中的问题，然后验证",
+  "baseline_commit": "8496a227462d930ee9f2a9908c2fe9bc83cbc1db",
+  "scope": "保留全部评估项；分批实施不等于缩减完成范围。仅有代码、测试通过或配置记录不能代替真实使用流程验证。",
+  "design": {
+    "analysis": "部门经营监控、趋势比较、异常定位和明细追踪",
+    "rendering": "沿用 Vue 与 ECharts，每个仪表盘最多 8 个图表，表格提供完整数据回退，不增加新的图表运行时",
+    "parameters": "类型化定义随报表不可变版本审批；运行值严格校验并通过驱动参数绑定，不能改变 SQL、数据源、身份或受众权限",
+    "interaction": "查询参数由 URL 保存；应用筛选时取消旧查询并清空不同条件的旧结果；移动端控件折叠，操作具有可访问名称",
+    "refresh": "查询按需执行；定时刷新设下限、页面隐藏或离线时暂停；结果仍显示时效、截断和局部失败",
+    "verification": "纯逻辑边界测试、真实 PostgreSQL 接口验证、独立部门账号越权拒绝、审批发布及桌面和移动浏览器流程"
+  },
+  "requirements": [
+    {
+      "id": "R01",
+      "requirement": "部门用户组、BI 开发者和独立审批人；各部门受限执行账号、正式报表与仪表盘；验证部门隔离、撤权和移交",
+      "status": "verified",
+      "evidence": [
+        ".dbhub/simulation/departments-verification.json",
+        ".dbhub/audits/department-remediation/department-boundaries-verification.json",
+        ".dbhub/audits/department-remediation/browser-verification.json"
+      ]
+    },
+    {
+      "id": "R02",
+      "requirement": "报表类型化参数、默认值与校验、仪表盘统一筛选、可分享 URL 状态、兼容旧报表",
+      "status": "verified",
+      "evidence": [
+        "backend/internal/server/report_parameters_test.go",
+        ".dbhub/local/report-parameters-integration.log",
+        ".dbhub/audits/department-remediation/browser-verification.json"
+      ]
+    },
+    {
+      "id": "R03",
+      "requirement": "图表联动、明细下钻和商城订单至 WMS 出库及 TMS 运输的授权追踪",
+      "status": "verified",
+      "evidence": [
+        "frontend/tests/report-analysis.test.ts",
+        ".dbhub/audits/department-remediation/analysis-browser-verification.json",
+        ".dbhub/audits/department-remediation/sales-chart-drillthrough.png"
+      ]
+    },
+    {
+      "id": "R04",
+      "requirement": "面向业务员的首页、无 SQL 的订单和会员搜索以及部门常用入口",
+      "status": "verified",
+      "evidence": [
+        "frontend/src/views/business/BusinessHome.vue",
+        ".dbhub/audits/department-remediation/browser-verification.json"
+      ]
+    },
+    {
+      "id": "R05",
+      "requirement": "三库统一履约分析数据集、集中复用指标和维度定义、期间及同比环比口径",
+      "status": "verified",
+      "evidence": [
+        "scripts/demo/analytics.sql",
+        "scripts/demo/metrics.mjs",
+        "backend/internal/server/metric_catalog_test.go",
+        ".dbhub/simulation/analytics-verification.json",
+        ".dbhub/audits/department-remediation/period-v2-migration.json",
+        ".dbhub/audits/department-remediation/metrics-browser-verification.json"
+      ]
+    },
+    {
+      "id": "R06",
+      "requirement": "正式报表受控全量导出、CSV/JSON/Excel、完整性边界和可追溯结果快照",
+      "status": "verified",
+      "evidence": [
+        "backend/internal/server/report_exports_test.go",
+        ".dbhub/audits/department-remediation/exports-verification.json",
+        ".dbhub/audits/department-remediation/export-files-verification.json",
+        ".dbhub/audits/department-remediation/jdbc-exports-verification.json",
+        ".dbhub/audits/department-remediation/analysis-browser-verification.json"
+      ]
+    },
+    {
+      "id": "R07",
+      "requirement": "定时报表订阅、业务指标阈值告警、异常处理跟踪、站内交付及可配置外部投递接口",
+      "status": "verified",
+      "evidence": [
+        "backend/internal/server/report_subscriptions_test.go",
+        "backend/internal/server/report_subscription_webhook_test.go",
+        ".dbhub/local/all-remediation-integration.log",
+        ".dbhub/audits/department-remediation/subscriptions-browser-verification.json",
+        ".dbhub/audits/department-remediation/operations-browser-verification.json"
+      ],
+      "verification_scope": "真实后台计划、私有快照、阈值事件、接手、恢复和关闭已通过桌面/移动浏览器及真实PG验证；外部接口在本地HTTP接收端验证，未配置真实外部目的地。"
+    },
+    {
+      "id": "R08",
+      "requirement": "带类型化参数、业务校验、预览、审批和一次性执行回执的受控操作模板",
+      "status": "verified",
+      "evidence": [
+        "backend/internal/businessops/protocol.sql",
+        "backend/internal/server/business_operations_test.go",
+        "scripts/demo/controlled-operations.mjs",
+        ".dbhub/local/all-remediation-integration.log",
+        ".dbhub/audits/department-remediation/operations-browser-verification.json",
+        ".dbhub/audits/department-remediation/operation-history-browser-verification.json"
+      ],
+      "verification_scope": "四个固定模板在独立演示表验证；PG EXECUTE专用账号、本人范围、冻结预览、独立审批、版本检查、重复执行、回包丢失后的只读核实及职责撤销均有证据。原业务/分析表内容摘要保持一致。"
+    },
+    {
+      "id": "R09",
+      "requirement": "部门及个人数据范围治理、细分审批/数据源/审计职责、SSO 与 MFA 支持及验证",
+      "status": "verified",
+      "evidence": [
+        ".dbhub/audits/department-remediation/department-boundaries-verification.json",
+        ".dbhub/audits/department-remediation/query-controls-browser-verification.json",
+        ".dbhub/audits/department-remediation/capabilities-browser-verification.json",
+        ".dbhub/simulation/personal-scopes-verification.json",
+        ".dbhub/audits/department-remediation/personal-browser-verification.json",
+        ".dbhub/audits/department-remediation/mfa-browser-verification.json",
+        ".dbhub/audits/department-remediation/sso-browser-verification.json",
+        ".dbhub/local/all-remediation-integration.log",
+        ".dbhub/local/identity-vulnerability-scan.log"
+      ],
+      "verification_scope": "个人范围采用按人建立的PG视图、账号、正式报表和看板；开发与指定审批身份另有明确验证授权。SSO在隔离本地OIDC模拟提供方验证，未接入企业租户；MFA在独立测试用户验证。"
+    },
+    {
+      "id": "R10",
+      "requirement": "本机自动备份、明确留存配置、元数据及业务 PG 恢复演练、密钥和待写审计保留验证",
+      "status": "verified",
+      "evidence": [
+        "scripts/ops/backup-local-bundle.sh",
+        "scripts/ops/restore-local-drill.mjs",
+        "scripts/ops/test-local-retention.sh",
+        ".dbhub/audits/department-remediation/restore-drill-verification.json",
+        ".dbhub/audits/department-remediation/backup-verification.json"
+      ],
+      "verification_scope": "最新备份含5个数据库、角色、应用密钥、匹配二进制及待写审计；隔离恢复13项检查通过，包括新增操作回执、签名只读预览、订阅快照及身份权限数据。临时容器、卷和网络已清理。"
+    },
+    {
+      "id": "R11",
+      "requirement": "指标回归校验、字段变化影响提示和开发到正式环境的报表迁移流程",
+      "status": "verified",
+      "evidence": [
+        "backend/internal/db/report_checks_test.go",
+        "backend/internal/server/report_quality_test.go",
+        ".dbhub/local/integration-TestReportQualityAndPromotionRealDatabase.log",
+        ".dbhub/audits/department-remediation/report-quality-browser-verification.json"
+      ],
+      "verification_scope": "同一本机PG上的两个逻辑环境；未连接外部生产环境。迁移只创建草稿，审批和发布已由独立身份在浏览器中验证。"
+    },
+    {
+      "id": "R12",
+      "requirement": "按业务场景补充透视表、堆叠图和双轴图，保持精度、空值和截断边界",
+      "status": "verified",
+      "evidence": [
+        "frontend/tests/report-analysis.test.ts",
+        "backend/internal/db/report_chart_test.go",
+        ".dbhub/audits/department-remediation/analysis-browser-verification.json"
+      ]
+    },
+    {
+      "id": "R13",
+      "requirement": "接通必要的高级能力入口并修正模拟数据说明与当前页面不一致的描述",
+      "status": "verified",
+      "evidence": [
+        "frontend/vite.config.ts",
+        "frontend/src/views/query/SqlWorkspace.vue",
+        ".dbhub/audits/department-remediation/query-controls-browser-verification.json",
+        "backend/internal/lineage/parser_test.go",
+        "docs/开发指南/部门业务模拟与角色验收.md",
+        ".dbhub/simulation/README.md",
+        "scripts/cloud/connector_browser_test.py"
+      ]
+    }
+  ],
+  "completion_rule": "每项均须有与要求范围相匹配的当前证据；未实施、未配置、依赖外部系统或未实测的项不得标记完成。"
+}

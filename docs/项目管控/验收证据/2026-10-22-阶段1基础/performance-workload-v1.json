@@ -1,0 +1,64 @@
+{
+  "format": "dbhub-iam-read-workload-v1",
+  "registered_on": "2026-10-22",
+  "status": "REGISTERED_NOT_EXECUTED",
+  "seed": 20261022,
+  "baseline_source": "C:/dev/backups/DBHub/phase1-20261022-094458/restored-working-copy",
+  "baseline_commit": "8496a227462d930ee9f2a9908c2fe9bc83cbc1db",
+  "baseline_is_working_copy": true,
+  "environment": {
+    "compose": "deploy/local/iam-test.compose.yaml",
+    "postgres_major": 16,
+    "go_max_procs": 4,
+    "application_pool_max_connections": 8,
+    "external_network": false,
+    "background_tests_during_measurement": false
+  },
+  "logical_fixture": {
+    "workspaces": 5,
+    "users": 1000,
+    "memberships_per_user": 2,
+    "shared_sources_per_workspace": 10,
+    "personal_connections_per_user": 2,
+    "query_policies_per_workspace": 1000,
+    "published_reports_per_workspace": 100,
+    "published_dashboards_per_workspace": 30,
+    "historical_tasks_per_workspace": 2000,
+    "audit_records_per_workspace": 10000
+  },
+  "legacy_actor_profiles": [
+    {"role": "admin", "capabilities": []},
+    {"role": "developer", "capabilities": []},
+    {"role": "readonly", "capabilities": []},
+    {"role": "readonly", "capabilities": ["report_review"]},
+    {"role": "readonly", "capabilities": ["datasource_manage"]},
+    {"role": "readonly", "capabilities": ["audit_view"]},
+    {"role": "readonly", "capabilities": ["operation_review"]}
+  ],
+  "paths": [
+    "/api/v1/workspaces",
+    "/api/v1/workspaces/{original_workspace}/connections",
+    "/api/v1/workspaces/{original_workspace}/published-reports",
+    "/api/v1/workspaces/{original_workspace}/published-dashboards",
+    "/api/v1/workspaces/{original_workspace}/inbox/todos",
+    "/api/v1/workspaces/{original_workspace}/audit-logs"
+  ],
+  "measurement": {
+    "concurrency": 8,
+    "warmup_requests_per_profile_path": 30,
+    "measured_requests_per_profile_path": 1000,
+    "repetitions": 3,
+    "cache_profiles": ["cold_process", "warm_process"],
+    "compare_per_profile_path_and_cache_profile": true,
+    "p95_max_ratio": 1.2,
+    "successful_and_expected_denial_paths_separate": true,
+    "baseline_and_candidate_use_identical_logical_data": true
+  },
+  "rules": [
+    "Fix IDs and independently expected actor/object outcomes before generating fixtures.",
+    "Record exact image, binary, source, schema and fixture fingerprints with results.",
+    "New snapshot endpoints without an old counterpart are measured separately, not used to replace old paths.",
+    "Preserve failed samples; do not remove outliers or reduce the workload after seeing results.",
+    "No A52 pass claim until both versions and all repetitions execute under the same conditions."
+  ]
+}

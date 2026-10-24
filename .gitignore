@@ -45,3 +45,16 @@ logs/
 .dbhub/
 # Python acceptance-run caches
 __pycache__/
+
+# 必要本地过程资料；正式规范与可复用输入不放入此目录
+/.local-docs/
+# 兼容现有工具的生成路径，保留固定输入与空白模板
+/docs/acceptance/*
+!/docs/acceptance/department-remediation-plan.json
+!/docs/acceptance/regression-uat-template.csv
+/docs/benchmarks/
+/docs/design/
+/docs/项目管控/验收证据/*
+!/docs/项目管控/验收证据/2026-10-22-阶段1基础/
+/docs/项目管控/验收证据/2026-10-22-阶段1基础/*
+!/docs/项目管控/验收证据/2026-10-22-阶段1基础/performance-workload-v1.json

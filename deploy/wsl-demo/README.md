@@ -1,6 +1,6 @@
 # WSL 演示数据库
 
-完整操作步骤见 [WSL 与 Tailscale 演示数据库部署](../../docs/开发指南/WSL与Tailscale演示数据库部署.md)。默认只启动 PostgreSQL；MySQL、Redis 为可选 profile。本目录不部署 DBHub 应用。
+本目录提供WSL演示数据源配置，环境与运行约定见[开发指南](../../docs/开发指南.md)。默认只启动PostgreSQL；MySQL、Redis为可选profile。本目录不部署DBHub应用。
 
 以下在 WSL Bash 的本目录执行：
 

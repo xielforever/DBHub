@@ -1,6 +1,6 @@
 # 部署方式
 
-本机 WSL 演示数据库及云端 Tailscale 接入见 [WSL 与 Tailscale 演示数据库部署](../docs/开发指南/WSL与Tailscale演示数据库部署.md)，可运行配置位于 [`wsl-demo/`](wsl-demo/)。该入口用于准备被 DBHub 接入的演示数据源。
+本机WSL演示数据源的可运行配置见[wsl-demo](wsl-demo/)。使用现有环境前核对配置、网络和凭据，不将机器运行记录作为正式部署规范。
 
 DBHub 提供四种部署入口，使用同一后端、静态前端与生产环境变量。PostgreSQL 与 Redis 由运维准备；JDBC、定时备份按需启用。镜像需要自行构建或从已发布的内部仓库获取，示例仓库地址须替换。
 
@@ -11,7 +11,7 @@ DBHub 提供四种部署入口，使用同一后端、静态前端与生产环�
 | Helm / Kubernetes | `deploy/helm/dbhub` | 已有集群、Ingress、StorageClass 与 Secret 管理 |
 | 源码 / systemd | `sh deploy/source/build.sh`、`deploy/source/*.service` | Linux 主机、本地编译、企业主机运维 |
 
-第一版均以**单后端实例**为支持范围。工作台活动事务仍在进程内，Helm 禁止后端多副本，更新使用 Recreate；前端可独立扩容。部署入口可用不等于生产准入完成，见[生产上线评估](../docs/开发指南/生产上线评估与回归测试.md)及[运维指南](../docs/部署运维/部署运维指南.md)。
+第一版均以**单后端实例**为支持范围。工作台活动事务仍在进程内，Helm 禁止后端多副本，更新使用 Recreate；前端可独立扩容。部署入口可用不等于生产准入完成，生产要求、升级和恢复见[部署运维指南](../docs/部署运维/部署运维指南.md)。
 
 ## 通用准备
 
@@ -155,4 +155,4 @@ python3 scripts/deploy/check.py --schema
 
 模板/Schema 验证和 Docker 中的 Pod 权限模拟不等于真实集群安装验收；具体 CSI、Ingress、Secret 管理、网络及生产容量须在目标集群验收。
 
-本批实际结果、制品指纹与未验范围见[部署方式验收记录](../docs/acceptance/deployment-modes-2026-10-18.json)。
+发布需记录实际镜像摘要、源码提交及未验范围；当前产品验收与启用状态见[路线图](../docs/项目管控/开发路线图与当前任务.md)。

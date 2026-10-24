@@ -1,56 +1,39 @@
-# UI 设计规范 (Design Tokens)
+# UI 设计规范
 
-DBHub 采用 **Liquid Glass (液态玻璃)** 设计语言。以下是核心设计令牌（Design Tokens），它们已在 Tailwind CSS v4 的 `style.css` 中定义。
+本文维护当前视觉、交互和组件约定。模块与启用状态见[功能模块总览](../项目管控/功能模块总览与实现验收状态.md)，操作及角色交接见[核心流程图](../项目管控/核心业务流程与状态图.md)。功能和数据权限由业务契约决定，不从界面存在、可见或禁用状态推断验收完成。
 
-多数据源功能名称、操作文案与 JDBC 自定义配置流程按[功能命名与自定义数据源规划](../项目管控/功能命名与自定义数据源规划.md)推进。该文为设计提案，运行界面仍以已实现功能为准；新名称不代表已交付新的数据源能力。
+## 1 视觉来源
 
-## 1. 色彩体系 (Colors)
+保留液态玻璃风格，复用[style.css](../../frontend/src/style.css)中的Tailwind令牌和现有组件。权限界面的明暗主题覆盖见[iam-theme.css](../../frontend/src/iam-theme.css)，由实际启用范围使用；本文不把该覆盖宣称为所有旧页面已完成主题验收。
 
-### 1.1 核心背景 (`bg-*`)
-- `bg-premium-dark`: `#0f172a` (深邃蓝黑，主背景)
-- `bg-premium-glass`: `rgba(255, 255, 255, 0.1)` (玻璃卡片背景)
+| 当前令牌 | 源文件中的值及用途 |
+| --- | --- |
+| --color-premium-dark / --color-premium-darker | #0f172a / #0a0f1f，暗色背景 |
+| --color-premium-glass / --color-premium-glass-strong | rgba(255,255,255,0.08) / rgba(255,255,255,0.14)，玻璃层次 |
+| --color-premium-border | rgba(255,255,255,0.16)，暗色描边 |
+| --image-liquid-gradient | linear-gradient(135deg,#667eea 0%,#764ba2 100%)，主按钮和强调 |
+| --image-glass-gradient | 透明白色渐变，面板高光 |
+| --shadow-glass | 0 8px 32px 0 rgba(31,38,135,0.37)，玻璃阴影 |
 
-### 1.2 边框 (`border-*`)
-- `border-premium-border`: `rgba(255, 255, 255, 0.2)` (微弱的白色描边)
+令牌值修改时以源文件为准并同步本表。明色主题使用已有覆盖，不把暗色白字和低透明度直接套入明色界面；业务行、错误、受限和状态提示保持可辨识对比。
 
-### 1.3 渐变 (Gradients)
-- **Liquid Gradient**: `linear-gradient(135deg, #667eea 0%, #764ba2 100%)`
-  - 用途：主按钮、品牌标识
-- **Glass Gradient**: `linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05))`
-  - 用途：卡片高光
+## 2 组件与布局
 
-## 2. 效果 (Effects)
+- 复用glass-card、glass-panel、glass-input、liquid-button、ghost-button及已有Element Plus/EChart/ChartCard组件；业务表格和复杂表单按现有模式维护。
+- 圆角沿用rounded-xl、rounded-2xl、rounded-3xl及组件实际定义，不在文档另设像素副本。模糊和阴影按层次使用，不能以“所有卡片必须模糊24px”替代可读性。
+- 字体沿用现有系统字体栈和字重。图标、标题、数值及单位保持层级；精确金额、NULL、截断、未知时效和受限结果不得被视觉格式化改成其他含义。
+- 现有路由、Store、API类型和业务组件优先复用，不为统一外观新增框架、状态管理层或强制动画依赖。
 
-### 2.1 阴影 (Shadows)
-- **Glass Shadow**: `0 8px 32px 0 rgba(31, 38, 135, 0.37)`
-  - 用途：卡片浮起效果
+## 3 状态与上下文
 
-### 2.2 模糊 (Blur)
-- **Backdrop Blur**: `backdrop-blur-xl` (24px)
-  - 用途：所有玻璃卡片背景，确保通透感
+加载、空数据、失败、无权限、未配置、待复核和未启用分别表达。旧结果不能在失败后继续显示为最新；未知数据不显示成0。表单按本次功能说明输入、校验、Props、Emits及Store依赖。
 
-### 2.3 圆角 (Radius)
-- `rounded-xl`: 1rem (按钮)
-- `rounded-2xl`: 1.5rem (图标容器)
-- `rounded-3xl`: 2.5rem (主要卡片)
+页面、菜单及按钮显示不能代替后端授权。保留有权直达、无空间/无菜单时的本人安全及获准平台入口；旧链接继续绑定原空间和原对象。切空间、换人或权限代次变化后清理旧结果、弹窗、选择和请求，迟到响应不覆盖新上下文。
 
-## 3. 字体 (Typography)
-- **Font Family**: System UI (San Francisco, Inter, Segoe UI)
-- **Weight**:
-  - Regular (400): 正文
-  - Medium (500): 按钮文本
-  - Bold (700): 标题
+## 4 响应式与无障碍
 
-## 4. CSS 变量参考
+关键任务按[路线图A51](../项目管控/开发路线图与当前任务.md#阶段1验收标准)的1024/736/390/320宽度及明暗主题验收。表格可局部滚动，重要操作不能因整页溢出而不可达；图表和流程图可横向查看，不能强缩到文字不可读。
 
-```css
-@theme {
-  --color-premium-dark: #0f172a;
-  --color-premium-glass: rgba(255, 255, 255, 0.1);
-  --color-premium-border: rgba(255, 255, 255, 0.2);
-  
-  --image-liquid-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  
-  --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-}
-```
+保留语义HTML、标签、键盘操作及可见焦点。权限界面现有控件最小高度44px、focus-visible和prefers-reduced-motion支持见iam-theme.css；新改动复用这些机制，不强迫所有控件悬停位移。实际可访问性仍须在对应页面验收，静态样式存在不等于通过。
+
+公开分享当前停用，不为其另列公开页面或SEO交付要求。
