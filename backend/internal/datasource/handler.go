@@ -20,12 +20,16 @@ import (
 
 // Handler 数据源模块处理器。
 type Handler struct {
-	conns   *db.ConnectionRepository
-	tunnels *db.TunnelRepository
-	log     *slog.Logger
-	proxies *db.ProxyRepository
-	drivers *target.Runtime
+	conns               *db.ConnectionRepository
+	tunnels             *db.TunnelRepository
+	log                 *slog.Logger
+	proxies             *db.ProxyRepository
+	drivers             *target.Runtime
+	checkPersistTimeout time.Duration
 }
+
+// SetCheckPersistTimeout 配置连接检查回执的持久化时限，不改变目标连接超时。
+func (h *Handler) SetCheckPersistTimeout(timeout time.Duration) { h.checkPersistTimeout = timeout }
 
 // NewHandler 创建处理器。
 func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, log *slog.Logger, proxies *db.ProxyRepository, runtimes ...*target.Runtime) *Handler {
@@ -136,7 +140,7 @@ func claimsOf(r *http.Request) *auth.Claims {
 	return c
 }
 
-func isAdmin(c *auth.Claims) bool { return c.Role == "admin" }
+func isAdmin(c *auth.Claims) bool { return auth.HasCapability(c, "datasource_manage") }
 
 func idFromPath(r *http.Request) (int64, error) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -467,7 +471,11 @@ func (h *Handler) runTest(w http.ResponseWriter, r *http.Request, conn *db.Conne
 	}
 	recorded := false
 	if conn.ID > 0 {
-		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
+		persistTimeout := h.checkPersistTimeout
+		if persistTimeout <= 0 {
+			persistTimeout = 3 * time.Second
+		}
+		persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(r.Context()), persistTimeout)
 		defer persistCancel()
 		var saveErr error
 		recorded, saveErr = h.conns.SaveCheck(persistCtx, conn.ID, conn.UpdatedAt, &result)

@@ -187,7 +187,7 @@ func TestAuditOperationCoverage(t *testing.T) {
 		for _, tc := range []struct {
 			token, reason string
 			status        int
-		}{{"", "missing_token", 401}, {"malformed-secret-token", "invalid_token", 401}, {a.readonly, "insufficient_role", 403}} {
+		}{{"", "missing_token", 401}, {"malformed-secret-token", "invalid_token", 401}, {a.readonly, "insufficient_capability", 403}} {
 			a.call("GET", "/users", tc.token, nil, tc.status)
 			row := expectAudit(t, a, "AUTH_DENIED", "rejected")
 			if row.Context.AuthFailure != tc.reason || row.Context.HTTPStatus != tc.status {

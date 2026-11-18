@@ -36,6 +36,10 @@ data:
         proxy_ignore_client_abort off;
         proxy_next_upstream off;
       }
+      # 数据目录页面与构建资源共用前缀，页面走 HTML 的缓存和安全头规则。
+      location ~ ^/assets/?$ {
+        rewrite ^ /index.html last;
+      }
       location /assets/ {
         try_files $uri =404;
         add_header Cache-Control "public, max-age=31536000, immutable";

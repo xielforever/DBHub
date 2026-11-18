@@ -14,6 +14,7 @@ import (
 
 	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/connector"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
@@ -37,14 +38,16 @@ func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, hi
 }
 
 type executeRequest struct {
-	RequestID     string         `json:"request_id"`
-	ConnectionID  int64          `json:"connection_id"`
-	Database      string         `json:"database"`
-	SQL           string         `json:"sql"`
-	TransactionID string         `json:"transaction_id"`
-	TimeoutMS     int            `json:"timeout_ms"`
-	MaxRows       int            `json:"max_rows"`
-	Params        map[string]any `json:"params"`
+	previewContract  *db.DataContract
+	reportParameters []db.ReportParameter
+	RequestID        string         `json:"request_id"`
+	ConnectionID     int64          `json:"connection_id"`
+	Database         string         `json:"database"`
+	SQL              string         `json:"sql"`
+	TransactionID    string         `json:"transaction_id"`
+	TimeoutMS        int            `json:"timeout_ms"`
+	MaxRows          int            `json:"max_rows"`
+	Params           map[string]any `json:"params"`
 }
 
 func claimsOf(r *http.Request) *auth.Claims {
@@ -330,6 +333,11 @@ func (h *Handler) RedisValue(w http.ResponseWriter, r *http.Request) {
 	defer closeFn()
 	val, err := target.InspectKey(r.Context(), handle, key)
 	if err != nil {
+		var connectorErr *connector.Error
+		if errors.As(err, &connectorErr) && connectorErr.Kind == "not_found" {
+			httpx.Fail(w, httpx.New(httpx.CodeRedisKeyNotFound, "Redis 键已不存在", err))
+			return
+		}
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
 	}

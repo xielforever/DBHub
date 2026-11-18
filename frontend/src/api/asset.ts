@@ -245,22 +245,23 @@ export const assetApi = {
       { timeout: 250_000 },
     )
   },
-  overview() {
-    return request.get<unknown, OverviewCounts>('/assets/overview')
+  overview(options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, OverviewCounts>('/assets/overview', options)
   },
-  tree(connectionId?: number) {
+  tree(connectionId?: number, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, { items: TreeConnection[] }>('/assets/tree', {
       params: connectionId ? { connection_id: connectionId } : {},
+      ...options,
     })
   },
-  tables(params: TableListParams) {
+  tables(params: TableListParams, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, { items: TableAssetRow[]; total: number; page: number; page_size: number }>(
       '/assets/tables',
-      { params },
+      { params, ...options },
     )
   },
-  table(loc: { connection_id: number; database: string; schema: string; table: string }) {
-    return request.get<unknown, TableDetail>('/assets/table', { params: loc })
+  table(loc: { connection_id: number; database: string; schema: string; table: string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, TableDetail>('/assets/table', { params: loc, ...options })
   },
   putAnnotation(payload: AnnotationPayload) {
     return request.put<unknown, { ok: boolean }>('/assets/annotations', payload)
@@ -274,8 +275,8 @@ export const assetApi = {
   briefUsers() {
     return request.get<unknown, { items: BriefUser[] }>('/users/brief')
   },
-  lineage(params: { connection_id: number; database: string; schema: string; table: string; depth?: number | string }) {
-    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number>; cached?:boolean; parser?:string }>('/assets/lineage', { params })
+  lineage(params: { connection_id: number; database: string; schema: string; table: string; depth?: number | string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number>; cached?:boolean; parser?:string }>('/assets/lineage', { params, ...options })
   },
   lineageRefresh() {
     return request.post<unknown, { parsed_edges:number; fk_edges:number; total:number }>('/assets/lineage/refresh')

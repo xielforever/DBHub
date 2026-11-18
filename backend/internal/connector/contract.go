@@ -64,6 +64,8 @@ type ObjectRef struct {
 	Name, Kind string
 }
 type ExecuteOptions struct {
+	// LargeResult is set only by the approved report-export path, never a SQL request.
+	LargeResult bool
 	// LosslessNumbers keeps exact decimal / large integer text on the JSON wire.
 	LosslessNumbers  bool
 	MaxRows          int

@@ -109,7 +109,8 @@ func (s *MetadataSync) Publish(ctx context.Context, snapshots []*MetaSnapshot) e
 				tables++
 			}
 		}
-		_, err = s.tx.Exec(ctx, `UPDATE sys_source_tasks SET status='succeeded',phase='结构快照已完整发布',progress=100,result=jsonb_build_object('tables',$3::int,'views',$4::int),finished_at=now() WHERE id=$1::uuid AND worker_token=$2::uuid AND status='running'`, taskScope.ID, taskScope.Token, tables, views)
+		// The publication transaction can wait for locks after it starts.
+		_, err = s.tx.Exec(ctx, `UPDATE sys_source_tasks SET status='succeeded',phase='结构快照已完整发布',progress=100,result=jsonb_build_object('tables',$3::int,'views',$4::int),finished_at=clock_timestamp() WHERE id=$1::uuid AND worker_token=$2::uuid AND status='running'`, taskScope.ID, taskScope.Token, tables, views)
 		if err != nil {
 			return err
 		}

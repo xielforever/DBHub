@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/user/dbhub/internal/auditctx"
+	"github.com/user/dbhub/internal/auth"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
@@ -45,7 +46,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	}()
 	w.Header().Set("Cache-Control", "no-store")
 	c := claimsOf(r)
-	readOnly := reportMode || c.Role == "readonly"
+	readOnly := reportMode || c.Role == "readonly" || (c.IAM != nil && c.IAM.Target && !auth.HasAction(c, "query.write"))
 	var in executeRequest
 	var reportID, reportVersion int64
 	var decodeErr error
@@ -53,7 +54,11 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	if managed != nil {
 		x := managed.execution
 		auditManagedExecution(r.Context(), x)
-		in = executeRequest{RequestID: managed.requestID, ConnectionID: x.Connection.ID, SQL: x.Definition.SQL, Database: x.Definition.Database, MaxRows: x.Manifest.MaxRows, TimeoutMS: x.Manifest.TimeoutMS}
+		if err := managed.repo.PrepareBusinessReport(r.Context(), x); err != nil {
+			reportapi.ManagedError(w, err)
+			return
+		}
+		in = executeRequest{reportParameters: x.Definition.Parameters, Params: managed.params, RequestID: managed.requestID, ConnectionID: x.Connection.ID, SQL: x.Definition.SQL, Database: x.Definition.Database, MaxRows: x.Manifest.MaxRows, TimeoutMS: x.Manifest.TimeoutMS}
 		reportID, reportVersion = x.ReportID, x.Version
 	} else if reportMode {
 		in, reportID, reportVersion, decodeErr = h.reportRequest(w, r, reports)
@@ -96,21 +101,43 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		httpx.Fail(w, httpx.BadRequest("Redis 不支持 SQL"))
 		return
 	}
+	var governedArgs []any
 	if reportMode {
+		rowLimit := 1000
+		if managed != nil && managed.export != nil {
+			if e := db.ValidateReportExportPolicy(managed.execution.Definition.ExportPolicy); e != nil || managed.execution.Definition.ExportPolicy == nil {
+				httpx.Fail(w, httpx.Forbidden("报表导出策略无效"))
+				return
+			}
+			rowLimit = managed.execution.Definition.ExportPolicy.MaxRows
+			in.MaxRows = rowLimit
+		}
 		caps := h.drivers.Capabilities(conn)
 		if !caps.SQL || !caps.EnforcedReadOnly {
 			httpx.Fail(w, httpx.BadRequest("此连接不支持报表所需的只读 SQL"))
 			return
 		}
-		if e := sqlparse.ValidateReport(in.SQL, conn.SQLDialect()); e != nil {
+		if e := db.ValidateReportSQL(in.SQL, conn.SQLDialect(), in.reportParameters); e != nil {
 			httpx.Fail(w, httpx.BadRequest(e.Error()))
 			return
+		}
+		in.Params, e = db.ResolveReportParameters(in.reportParameters, in.Params, time.Now())
+		if e != nil {
+			httpx.Fail(w, httpx.BadRequest(e.Error()))
+			return
+		}
+		if managed != nil && managed.execution.BusinessPlan != nil {
+			governedArgs, e = managed.execution.BusinessPlan.BindReportParameters(in.Params)
+			if e != nil {
+				httpx.Fail(w, httpx.BadRequest(e.Error()))
+				return
+			}
 		}
 		if in.TimeoutMS <= 0 || in.TimeoutMS > 30000 {
 			in.TimeoutMS = 30000
 		}
-		if in.MaxRows <= 0 || in.MaxRows > 1000 {
-			in.MaxRows = 1000
+		if in.MaxRows <= 0 || in.MaxRows > rowLimit {
+			in.MaxRows = rowLimit
 		}
 	}
 	if in.Database != "" {
@@ -121,9 +148,22 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return
 	}
-	if _, e = sqlparse.Parse(query, conn.SQLDialect()); e != nil {
+	statement, parseErr := sqlparse.Parse(query, conn.SQLDialect())
+	if parseErr != nil {
+		e = parseErr
 		httpx.Fail(w, httpx.BadRequest(e.Error()))
 		return
+	}
+	if !reportMode && c.IAM != nil {
+		action := "query.write"
+		if statement.ReadOnly {
+			action = "query.read"
+		}
+		if (c.IAM.Target || len(c.IAM.DeniedActions) > 0) && !auth.HasAction(c, action) {
+			httpx.Fail(w, httpx.Forbidden("当前权限不允许此类查询操作"))
+			return
+		}
+		c.CurrentAction = action
 	}
 	// Keep the existing workbench signature stable across this upgrade. Report
 	// receipts additionally bind the execution mode and immutable definition.
@@ -146,6 +186,18 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			PublicationNo   int64
 			Validation      bool
 		}{signature, "managed-report", managed.execution.Hash, managed.execution.PublicationNo, managed.execution.Validation}
+		if managed.export != nil {
+			signature = struct {
+				Execution any
+				Export    reportExportRequest
+			}{signature, *managed.export}
+		}
+		if stamp := managed.execution.BusinessPolicyStamp(); stamp != "" {
+			signature = struct {
+				Execution any
+				Policy    string
+			}{signature, stamp}
+		}
 	}
 	raw, e := json.Marshal(signature)
 	if e != nil {
@@ -198,6 +250,8 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		receipt.ConnectionID = 0
 	}
 	respond := func(status int, message string, data any) {
+		// A canceled transport is not evidence of a definite execution outcome.
+		receipt.CancellationConfirmed = (receipt.Status == "failed" || receipt.Status == "rejected") && errors.Is(reason, context.Canceled)
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
 		defer cancel()
 		if err := h.controls.FinishExecution(cleanup, c.Subject, receipt); err != nil {
@@ -205,6 +259,7 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			outcome = "unknown"
 			h.log.Error("保存执行回执失败", "request_id", in.RequestID, "error", err)
 			receipt.Status = "unknown"
+			receipt.CancellationConfirmed = false
 			receipt.Message = "执行回执暂不可用，请核实目标数据库；不要直接重跑写操作。"
 			httpx.JSON(w, 503, httpx.Envelope{Code: 50301, Message: receipt.Message, Data: receipt})
 			return
@@ -220,6 +275,10 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 				currentErr = h.conns.ValidateCurrent(r.Context(), conn)
 			}
 			if err := currentErr; err != nil {
+				if managed == nil {
+					httpx.Fail(w, httpx.New(httpx.CodeQueryDeliveryBlocked, "权限或连接状态已变化，执行结果停止返回。请保留原请求编号核实。", nil))
+					return
+				}
 				receipt.Status, receipt.Message = "rejected", "报表授权、发布版本或执行账号已变化，结果未交付。"
 				outcome = "rejected"
 				if err = h.controls.FinishExecution(cleanup, c.Subject, receipt); err != nil {
@@ -265,6 +324,17 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			finish(execErr)
 		}
 	}()
+	if c.IAM != nil && r.Pattern == "POST /api/v1/query/execute" {
+		release, err := h.controls.IAMExecutionLease(ctx)
+		if err != nil {
+			execErr = err
+			reason = err
+			receipt.Status, receipt.Message = "rejected", "排队期间权限已变化或请求已取消，未发送 SQL。"
+			respond(409, receipt.Message, nil)
+			return
+		}
+		defer release()
+	}
 	validate := func() error {
 		if managed != nil {
 			return managed.repo.CheckExecution(ctx, managed.execution)
@@ -300,12 +370,24 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	if in.TimeoutMS <= 0 || in.TimeoutMS > settings.TimeoutMS {
 		in.TimeoutMS = settings.TimeoutMS
 	}
-	if in.MaxRows <= 0 || in.MaxRows > settings.MaxRows {
+	if (managed == nil || managed.export == nil) && (in.MaxRows <= 0 || in.MaxRows > settings.MaxRows) {
 		in.MaxRows = settings.MaxRows
+	}
+	if managed != nil && managed.execution.BusinessPlan != nil {
+		in.MaxRows = min(in.MaxRows, managed.execution.Manifest.MaxRows, settings.MaxRows, db.BusinessReportMaxRows)
+	}
+	if managed != nil && managed.export != nil && managed.export.generate && in.MaxRows != managed.export.frozenRows {
+		receipt.Status, receipt.Message = "rejected", "导出行数上限已变化，请重新申请"
+		respond(409, receipt.Message, nil)
+		return
 	}
 	opt := target.ExecuteOptions{LosslessNumbers: reportMode, Timeout: time.Duration(in.TimeoutMS) * time.Millisecond, MaxRows: in.MaxRows, Args: args, ExecutionKey: fmt.Sprintf("query:%d:%s", c.Subject, in.RequestID), AllowUnsafeWrite: c.Role == "admin" && !settings.BlockUnsafeWrite}
 	if managed != nil {
 		opt.MaxBytes = 2 << 20
+		if managed.export != nil {
+			opt.LargeResult = true
+			opt.MaxBytes = 16 << 20
+		}
 	}
 	sent := false
 	var executionStarted time.Time
@@ -345,6 +427,19 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			if e != nil {
 				return nil, e
 			}
+		} else if plan := managed.execution.BusinessPlan; plan != nil {
+			if err := handle.Begin(ctx, true); err != nil {
+				return nil, err
+			}
+			defer func() {
+				cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				defer stop()
+				_ = handle.Rollback(cleanup)
+			}()
+			if err := target.VerifyBusinessReportView(ctx, handle, plan.ReportTarget, conn.Username); err != nil {
+				return nil, err
+			}
+			rewritten, values = plan.Statement, governedArgs
 		}
 		opt.Args = values
 		return target.ExecuteWithOptions(ctx, handle, rewritten, readOnly, opt)
@@ -390,6 +485,9 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			receipt.Status, receipt.Message = "rejected", "执行前检查未通过，未发送 SQL。"
 		} else if readOnly || definiteStatementError(execErr) {
 			receipt.Status, receipt.Message = "failed", "数据库已返回执行错误。"
+			if errors.Is(execErr, context.Canceled) {
+				receipt.Message = "服务端已确认本次执行因取消而未完成。"
+			}
 		}
 		message := "执行失败: " + safeErr(execErr)
 		if managed != nil && !managed.execution.Validation {
@@ -408,6 +506,12 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 			respond(409, receipt.Message, nil)
 			return
 		}
+		if managed.export != nil && result.Truncated {
+			receipt.Status = "failed"
+			receipt.Message = "导出超过批准行数或16MiB，未保存部分结果，请缩小筛选范围"
+			respond(413, receipt.Message, nil)
+			return
+		}
 		if _, execErr = db.ValidateContractResult(managed.execution.Manifest.Contract, result, time.Now()); execErr != nil {
 			receipt.Status, receipt.Message = "failed", "查询结果未通过报表契约校验"
 			respond(409, receipt.Message, nil)
@@ -422,12 +526,51 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 		}
 	}
 	receipt.Status, receipt.Kind = "succeeded", result.Kind
+	if managed != nil && managed.export != nil && !managed.export.generate {
+		if result.Truncated {
+			receipt.Status = "failed"
+			receipt.Message = "导出超过批准行数或16MiB，未保存部分结果，请缩小筛选范围"
+			respond(413, receipt.Message, nil)
+			return
+		}
+		exported, err := managed.repo.CreateExport(ctx, managed.execution, in.RequestID, managed.export.Format, managed.export.Reason, in.Params, in.MaxRows, result)
+		if err != nil {
+			execErr = err
+			h.log.Error("生成报表导出快照失败", "request_id", in.RequestID, "error", err)
+			receipt.Status = "failed"
+			receipt.Message = "导出快照未能保存，请核对导出记录"
+			status := 503
+			if errors.Is(err, db.ErrManagedInput) {
+				status = 400
+				receipt.Message = err.Error()
+			} else if errors.Is(err, db.ErrManagedDenied) {
+				status = 403
+			} else if errors.Is(err, db.ErrManagedConflict) {
+				status = 409
+			}
+			respond(status, receipt.Message, nil)
+			return
+		}
+		receipt.Kind = "export"
+		respond(200, "", exported)
+		return
+	}
 	receipt.AffectedRows, receipt.DurationMS = result.AffectedRows, result.DurationMS
 	var response any = result
+	if in.previewContract != nil {
+		diagnostics := db.InspectContractResult(in.previewContract, result)
+		response = struct {
+			*target.ExecResult
+			ContractCheck db.ContractDiagnostics `json:"contract_check"`
+		}{result, diagnostics}
+	}
 	if managed != nil && managed.dashboard != nil {
 		quality, e := managed.dashboard.CompleteTile(ctx, managed.dashboardExecution, result)
 		if e != nil {
 			receipt.Status, receipt.Message = "rejected", "看板或报表状态已变化，请重新刷新"
+			if errors.Is(e, db.ErrDashboardUnknownFreshness) {
+				receipt.Message = "卡片结果缺少业务水位，此仪表盘未获准展示未知时效的数据"
+			}
 			respond(409, receipt.Message, nil)
 			return
 		}
@@ -436,8 +579,15 @@ func (h *Handler) execute(w http.ResponseWriter, r *http.Request, reportMode boo
 	}
 	if managed != nil {
 		raw, e := json.Marshal(response)
-		if e != nil || len(raw) > 2<<20 {
+		maxBytes := 2 << 20
+		if managed.export != nil && managed.export.generate {
+			maxBytes = 16 << 20
+		}
+		if e != nil || len(raw) > maxBytes {
 			receipt.Status, receipt.Message = "failed", "报表结果超过2MiB，请缩小查询范围"
+			if maxBytes == 16<<20 {
+				receipt.Message = "导出结果超过16MiB，请缩小查询范围"
+			}
 			respond(413, receipt.Message, nil)
 			return
 		}

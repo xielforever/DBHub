@@ -55,6 +55,20 @@ func TestDashboardPhase1Lifecycle(t *testing.T) {
 	a.call("POST", rpath+"/decision", a.admin, map[string]any{"request_id": testRequestID(), "decision": "approved"}, 200)
 	a.call("POST", path+"/releases", a.admin, map[string]any{"request_id": testRequestID(), "expected_publication_no": 0, "review_id": review, "kind": "publish"}, 200)
 	viewer := a.call("GET", fmt.Sprintf("/published-dashboards/%d", did), a.readonly, nil, 200)
+	listing := a.call("GET", "/published-dashboards", a.readonly, nil, 200)
+	cards := listing["items"].([]any)
+	if listing["total"] != float64(1) || len(cards) != 1 || cards[0].(map[string]any)["id"] != float64(did) {
+		t.Fatal("approved audience lost its dashboard card", listing)
+	}
+	if other := a.call("GET", "/published-dashboards", a.developer, nil, 200); other["total"] != float64(0) || len(other["items"].([]any)) != 0 {
+		t.Fatal("dashboard author inherited published audience", other)
+	}
+	cardJSON, _ := json.Marshal(cards)
+	for _, secret := range []string{"sql_text", "execution_boundary", "report_account_id", "user_ids", "group_ids", f.username} {
+		if strings.Contains(string(cardJSON), secret) {
+			t.Fatal("dashboard card disclosed internal definition", secret)
+		}
+	}
 	raw, _ := json.Marshal(viewer)
 	for _, secret := range []string{"sql_text", "execution_boundary", "report_account_id", f.username} {
 		if strings.Contains(string(raw), secret) {
@@ -72,6 +86,9 @@ func TestDashboardPhase1Lifecycle(t *testing.T) {
 		}
 	}
 	a.call("POST", path+"/archive", a.developer, map[string]any{"request_id": testRequestID(), "version": 1}, 200)
+	if hidden := a.call("GET", "/published-dashboards", a.readonly, nil, 200); hidden["total"] != float64(0) || len(hidden["items"].([]any)) != 0 {
+		t.Fatal("archived dashboard retained a published card", hidden)
+	}
 	a.call("POST", "/dashboard-refreshes/"+rid+"/tiles/stock/execute", a.readonly, map[string]any{}, 409)
 	a.call("POST", path+"/restore", a.developer, map[string]any{"request_id": testRequestID(), "version": 2}, 200)
 	a.call("POST", path+"/releases", a.admin, map[string]any{"request_id": testRequestID(), "expected_publication_no": 2, "review_id": review, "kind": "publish"}, 409)
@@ -174,6 +191,15 @@ func TestDashboardAccessRequestReleaseLoop(t *testing.T) {
 	change := map[string]any{"request_id": testRequestID(), "base_publication_no": 1, "user_ids": []int64{1, 2, 3}, "group_ids": []int64{}, "request_ids": []int64{requestID}}
 	proposal := a.call("POST", fmt.Sprintf("/managed-reports/%d/audience-changes", optional), a.admin, change, 200)
 	review := int64(proposal["id"].(float64))
+	linked := fmt.Sprintf("/managed-reports/%d/versions?review_id=%d", optional, review)
+	versions := a.call("GET", linked, reviewer, nil, 200)
+	items := versions["items"].([]any)
+	if versions["total"] != float64(1) || len(items) != 1 || items[0].(map[string]any)["review_id"] != float64(review) {
+		t.Fatal("linked review must return exactly the requested frozen version", versions)
+	}
+	a.call("GET", fmt.Sprintf("/managed-reports/%d/versions?review_id=%d", required, review), reviewer, nil, 404)
+	a.call("GET", fmt.Sprintf("/managed-reports/%d/versions?review_id=0", optional), reviewer, nil, 400)
+	a.call("GET", linked+"&page=2", reviewer, nil, 400)
 	a.call("POST", fmt.Sprintf("/report-reviews/%d/validate", review), a.admin, map[string]any{"request_id": testRequestID(), "account_id": f.account, "user_ids": []int64{1, 2, 3}}, 400)
 	a.call("POST", fmt.Sprintf("/report-reviews/%d/validate", review), reviewer, map[string]any{"request_id": testRequestID(), "account_id": f.account, "user_ids": []int64{1, 2, 3, 4}}, 409)
 	validation := testRequestID()

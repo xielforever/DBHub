@@ -1,95 +1,3 @@
-<template>
-  <div class="column-stats flex flex-col h-full min-h-0">
-    <div class="flex items-center gap-2 px-4 py-2 border-b border-white/10 bg-white/[0.02] shrink-0">
-      <span class="text-xs text-white/60">列统计与分布</span>
-      <span class="text-[11px] text-white/30">{{ columns.length }} 列 · {{ rows.length }} 行</span>
-      <div class="flex-1" />
-      <button class="ghost-button !py-1 !px-2 text-[11px]" @click="refresh">刷新</button>
-    </div>
-
-    <div v-if="!columns.length" class="flex-1 flex items-center justify-center text-sm text-white/35">
-      执行 SQL 后可在此查看列统计
-    </div>
-
-    <div v-else class="flex-1 overflow-auto p-3 space-y-3">
-      <!-- 概览 -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        <div class="rounded-xl bg-white/5 border border-white/10 p-2.5">
-          <p class="text-[10px] text-white/40">总行数</p>
-          <p class="text-sm font-semibold mt-1">{{ rows.length }}</p>
-        </div>
-        <div class="rounded-xl bg-white/5 border border-white/10 p-2.5">
-          <p class="text-[10px] text-white/40">NULL 总数</p>
-          <p class="text-sm font-semibold mt-1">{{ totalNulls }}</p>
-        </div>
-        <div class="rounded-xl bg-white/5 border border-white/10 p-2.5">
-          <p class="text-[10px] text-white/40">数值列</p>
-          <p class="text-sm font-semibold mt-1">{{ numericColumns.length }}</p>
-        </div>
-        <div class="rounded-xl bg-white/5 border border-white/10 p-2.5">
-          <p class="text-[10px] text-white/40">文本列</p>
-          <p class="text-sm font-semibold mt-1">{{ columns.length - numericColumns.length }}</p>
-        </div>
-      </div>
-
-      <!-- 每列卡片 -->
-      <div v-for="stat in columnStats" :key="stat.name" class="rounded-xl bg-black/30 border border-white/10 overflow-hidden">
-        <div class="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-white/5">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-mono font-medium text-white/80">{{ stat.name }}</span>
-            <span class="px-1.5 py-0.5 rounded-full text-[10px]" :class="stat.isNumeric ? 'bg-emerald-400/15 text-emerald-300' : 'bg-indigo-400/15 text-indigo-300'">{{ stat.isNumeric ? '数值' : '文本' }}</span>
-            <span v-if="stat.nullCount" class="px-1.5 py-0.5 rounded-full text-[10px] bg-amber-400/15 text-amber-300">{{ stat.nullCount }} NULL</span>
-          </div>
-          <span class="text-[11px] text-white/30">去重 {{ stat.distinctCount }}</span>
-        </div>
-
-        <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
-          <template v-if="stat.isNumeric">
-            <div><span class="text-white/40">最小</span><p class="font-mono text-white/70 mt-0.5">{{ stat.min }}</p></div>
-            <div><span class="text-white/40">最大</span><p class="font-mono text-white/70 mt-0.5">{{ stat.max }}</p></div>
-            <div><span class="text-white/40">均值</span><p class="font-mono text-white/70 mt-0.5">{{ stat.avg?.toFixed(2) }}</p></div>
-            <div><span class="text-white/40">求和</span><p class="font-mono text-white/70 mt-0.5">{{ stat.sum?.toLocaleString() }}</p></div>
-            <div><span class="text-white/40">中位数</span><p class="font-mono text-white/70 mt-0.5">{{ stat.median }}</p></div>
-            <div><span class="text-white/40">标准差</span><p class="font-mono text-white/70 mt-0.5">{{ stat.stddev?.toFixed(2) }}</p></div>
-          </template>
-          <template v-else>
-            <div><span class="text-white/40">最短长度</span><p class="font-mono text-white/70 mt-0.5">{{ stat.minLen }}</p></div>
-            <div><span class="text-white/40">最长长度</span><p class="font-mono text-white/70 mt-0.5">{{ stat.maxLen }}</p></div>
-            <div><span class="text-white/40">平均长度</span><p class="font-mono text-white/70 mt-0.5">{{ stat.avgLen?.toFixed(1) }}</p></div>
-            <div><span class="text-white/40">空字符串</span><p class="font-mono text-white/70 mt-0.5">{{ stat.emptyCount }}</p></div>
-          </template>
-        </div>
-
-        <!-- 直方图 -->
-        <div v-if="stat.histogram.length" class="px-3 pb-3">
-          <p class="text-[10px] text-white/40 mb-1.5">分布直方图 · Top {{ stat.histogram.length }}</p>
-          <div class="space-y-1">
-            <div v-for="bin in stat.histogram" :key="String(bin.value)" class="flex items-center gap-2">
-              <span class="w-20 truncate text-[11px] font-mono text-white/50 text-right" :title="String(bin.value)">{{ bin.label }}</span>
-              <div class="flex-1 h-2 rounded-full bg-white/10 overflow-hidden">
-                <div class="h-full rounded-full transition-all" :class="stat.isNumeric ? 'bg-emerald-400/70' : 'bg-indigo-400/70'" :style="{ width: (bin.count / (stat.maxBin || 1) * 100) + '%' }" />
-              </div>
-              <span class="w-10 text-[10px] text-white/40 text-right">{{ bin.count }}</span>
-              <span class="w-8 text-[10px] text-white/25 text-right">{{ ((bin.count / rows.length) * 100).toFixed(0) }}%</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Top 值 -->
-        <div v-if="stat.topValues.length" class="px-3 pb-3">
-          <p class="text-[10px] text-white/40 mb-1.5">高频值</p>
-          <div class="flex flex-wrap gap-1">
-            <span v-for="tv in stat.topValues" :key="String(tv.value)" class="px-2 py-0.5 rounded-full bg-white/10 text-[11px] font-mono text-white/60 flex items-center gap-1">
-              <span class="truncate max-w-[120px]">{{ tv.value === null ? 'NULL' : String(tv.value).slice(0,30) }}</span>
-              <span class="text-[10px] text-white/30">{{ tv.count }}</span>
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 
@@ -214,3 +122,95 @@ const columnStats = computed<ColStat[]>(() => {
   return stats
 })
 </script>
+
+<template>
+  <div class="column-stats flex flex-col h-full min-h-0">
+    <div class="flex items-center gap-2 px-4 py-2 border-b border-stroke bg-surface-muted shrink-0">
+      <span class="text-xs text-muted">列统计与分布</span>
+      <span class="text-xs text-subtle">{{ columns.length }} 列 · {{ rows.length }} 行</span>
+      <div class="flex-1" />
+      <button class="ghost-button !py-1 !px-2 text-xs ui-control-target" @click="refresh">刷新</button>
+    </div>
+
+    <div v-if="!columns.length" class="flex-1 flex items-center justify-center text-sm text-subtle">
+      执行 SQL 后可在此查看列统计
+    </div>
+
+    <div v-else class="flex-1 overflow-auto p-3 space-y-3">
+      <!-- 概览 -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div class="ui-inset-card rounded-xl bg-surface-muted border border-stroke p-2.5">
+          <p class="text-xs text-subtle">总行数</p>
+          <p class="text-sm font-semibold mt-1">{{ rows.length }}</p>
+        </div>
+        <div class="ui-inset-card rounded-xl bg-surface-muted border border-stroke p-2.5">
+          <p class="text-xs text-subtle">NULL 总数</p>
+          <p class="text-sm font-semibold mt-1">{{ totalNulls }}</p>
+        </div>
+        <div class="ui-inset-card rounded-xl bg-surface-muted border border-stroke p-2.5">
+          <p class="text-xs text-subtle">数值列</p>
+          <p class="text-sm font-semibold mt-1">{{ numericColumns.length }}</p>
+        </div>
+        <div class="ui-inset-card rounded-xl bg-surface-muted border border-stroke p-2.5">
+          <p class="text-xs text-subtle">文本列</p>
+          <p class="text-sm font-semibold mt-1">{{ columns.length - numericColumns.length }}</p>
+        </div>
+      </div>
+
+      <!-- 每列卡片 -->
+      <div v-for="stat in columnStats" :key="stat.name" class="ui-inset-card rounded-xl bg-surface-inset border border-stroke overflow-hidden">
+        <div class="flex items-center justify-between px-3 py-2 border-b border-stroke bg-surface-muted">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-mono font-medium text-content">{{ stat.name }}</span>
+            <span class="px-1.5 py-0.5 rounded-full text-xs" :class="stat.isNumeric ? 'bg-success-soft text-success' : 'bg-accent-soft text-accent'">{{ stat.isNumeric ? '数值' : '文本' }}</span>
+            <span v-if="stat.nullCount" class="px-1.5 py-0.5 rounded-full text-xs bg-warning-soft text-warning">{{ stat.nullCount }} NULL</span>
+          </div>
+          <span class="text-xs text-subtle">去重 {{ stat.distinctCount }}</span>
+        </div>
+
+        <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <template v-if="stat.isNumeric">
+            <div><span class="text-subtle">最小</span><p class="font-mono text-muted mt-0.5">{{ stat.min }}</p></div>
+            <div><span class="text-subtle">最大</span><p class="font-mono text-muted mt-0.5">{{ stat.max }}</p></div>
+            <div><span class="text-subtle">均值</span><p class="font-mono text-muted mt-0.5">{{ stat.avg?.toFixed(2) }}</p></div>
+            <div><span class="text-subtle">求和</span><p class="font-mono text-muted mt-0.5">{{ stat.sum?.toLocaleString() }}</p></div>
+            <div><span class="text-subtle">中位数</span><p class="font-mono text-muted mt-0.5">{{ stat.median }}</p></div>
+            <div><span class="text-subtle">标准差</span><p class="font-mono text-muted mt-0.5">{{ stat.stddev?.toFixed(2) }}</p></div>
+          </template>
+          <template v-else>
+            <div><span class="text-subtle">最短长度</span><p class="font-mono text-muted mt-0.5">{{ stat.minLen }}</p></div>
+            <div><span class="text-subtle">最长长度</span><p class="font-mono text-muted mt-0.5">{{ stat.maxLen }}</p></div>
+            <div><span class="text-subtle">平均长度</span><p class="font-mono text-muted mt-0.5">{{ stat.avgLen?.toFixed(1) }}</p></div>
+            <div><span class="text-subtle">空字符串</span><p class="font-mono text-muted mt-0.5">{{ stat.emptyCount }}</p></div>
+          </template>
+        </div>
+
+        <!-- 直方图 -->
+        <div v-if="stat.histogram.length" class="px-3 pb-3">
+          <p class="text-xs text-subtle mb-1.5">分布直方图 · Top {{ stat.histogram.length }}</p>
+          <div class="space-y-1">
+            <div v-for="bin in stat.histogram" :key="String(bin.value)" class="flex items-center gap-2">
+              <span class="w-20 truncate text-xs font-mono text-muted text-right" :title="String(bin.value)">{{ bin.label }}</span>
+              <div class="flex-1 h-2 rounded-full bg-surface-muted overflow-hidden">
+                <div class="h-full rounded-full transition-all" :class="stat.isNumeric ? 'bg-success' : 'bg-accent'" :style="{ width: (bin.count / (stat.maxBin || 1) * 100) + '%' }" />
+              </div>
+              <span class="w-10 text-xs text-subtle text-right">{{ bin.count }}</span>
+              <span class="w-8 text-xs text-subtle text-right">{{ ((bin.count / rows.length) * 100).toFixed(0) }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Top 值 -->
+        <div v-if="stat.topValues.length" class="px-3 pb-3">
+          <p class="text-xs text-subtle mb-1.5">高频值</p>
+          <div class="flex flex-wrap gap-1">
+            <span v-for="tv in stat.topValues" :key="String(tv.value)" class="px-2 py-0.5 rounded-full bg-surface-muted text-xs font-mono text-muted flex items-center gap-1">
+              <span class="truncate max-w-[120px]">{{ tv.value === null ? 'NULL' : String(tv.value).slice(0,30) }}</span>
+              <span class="text-xs text-subtle">{{ tv.count }}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>

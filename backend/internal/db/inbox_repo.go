@@ -21,14 +21,15 @@ func NewAutomationRepository(users *UserRepository) *AutomationRepository {
 }
 
 type Notification struct {
-	ID           int64      `json:"id"`
-	Kind         string     `json:"kind"`
-	Title        string     `json:"title"`
-	Message      string     `json:"message"`
-	ResourceType string     `json:"resource_type"`
-	ResourceID   int64      `json:"resource_id"`
-	CreatedAt    time.Time  `json:"created_at"`
-	ReadAt       *time.Time `json:"read_at"`
+	ID            int64      `json:"id"`
+	Kind          string     `json:"kind"`
+	Title         string     `json:"title"`
+	Message       string     `json:"message"`
+	ResourceType  string     `json:"resource_type"`
+	ResourceID    int64      `json:"resource_id"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ReadAt        *time.Time `json:"read_at"`
+	LinkExpiresAt *time.Time `json:"link_expires_at,omitempty"`
 }
 
 type Inbox struct {
@@ -50,13 +51,15 @@ func (r *AutomationRepository) Inbox(ctx context.Context, unread bool, limit, of
 	if e != nil {
 		return nil, e
 	}
-	rows, e := tx.Query(ctx, `SELECT id,kind,title,message,resource_type,resource_id,created_at,read_at FROM sys_notifications WHERE recipient_id=$1 AND (NOT $2 OR read_at IS NULL) ORDER BY id DESC LIMIT $3 OFFSET $4`, ActorID(ctx), unread, limit, offset)
+	rows, e := tx.Query(ctx, `SELECT id,kind,title,message,resource_type,
+		CASE WHEN link_expires_at<=statement_timestamp() THEN 0 ELSE resource_id END,created_at,read_at,link_expires_at
+		FROM sys_notifications WHERE recipient_id=$1 AND (NOT $2 OR read_at IS NULL) ORDER BY id DESC LIMIT $3 OFFSET $4`, ActorID(ctx), unread, limit, offset)
 	if e != nil {
 		return nil, e
 	}
 	for rows.Next() {
 		var item Notification
-		if e = rows.Scan(&item.ID, &item.Kind, &item.Title, &item.Message, &item.ResourceType, &item.ResourceID, &item.CreatedAt, &item.ReadAt); e != nil {
+		if e = rows.Scan(&item.ID, &item.Kind, &item.Title, &item.Message, &item.ResourceType, &item.ResourceID, &item.CreatedAt, &item.ReadAt, &item.LinkExpiresAt); e != nil {
 			rows.Close()
 			return nil, e
 		}
@@ -66,7 +69,7 @@ func (r *AutomationRepository) Inbox(ctx context.Context, unread bool, limit, of
 	if e = rows.Err(); e != nil {
 		return nil, e
 	}
-	if e = tx.QueryRow(ctx, `SELECT count(*) FROM (`+todoSQL+`) todos`, ActorID(ctx), ActorAdmin(ctx)).Scan(&out.TodoCount); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM dbhub_inbox_todos($1,$2)`, ActorID(ctx), ActorReportReviewer(ctx)).Scan(&out.TodoCount); e != nil {
 		return nil, e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -75,21 +78,36 @@ func (r *AutomationRepository) Inbox(ctx context.Context, unread bool, limit, of
 	return out, nil
 }
 
-// Pending work is derived from current domain state. Reading a notice does not
-// decide a review, and stale notifications never keep completed work pending.
-const todoSQL = `
- SELECT 'report_review'::text AS kind,rv.id,r.id AS resource_id,'报表待审批'::text AS title,v.created_at AS created_at,NULL::timestamptz AS expires_at
- FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id AND v.workspace_id=rv.workspace_id
- JOIN sys_managed_reports r ON r.id=v.report_id AND r.workspace_id=v.workspace_id
- WHERE $2 AND rv.status='pending'
- UNION ALL
- SELECT 'dashboard_review',rv.id,rv.dashboard_id,'仪表盘待审阅',v.created_at,rv.expires_at
- FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id AND v.workspace_id=rv.workspace_id
- JOIN sys_managed_dashboards d ON d.id=rv.dashboard_id AND d.workspace_id=rv.workspace_id
- WHERE rv.reviewer_id=$1 AND rv.status='pending' AND rv.expires_at>now() AND d.lifecycle='active' AND d.lifecycle_epoch=rv.lifecycle_epoch
- UNION ALL
- SELECT 'access_request',a.id,COALESCE(a.dashboard_id,a.report_id),'报表权限申请',a.created_at,a.expires_at
- FROM sys_access_requests a WHERE $2 AND (a.status='pending' OR (a.status='processing' AND a.assigned_to=$1)) AND a.expires_at>now()`
+type NotificationDelivery struct {
+	ResourceType string  `json:"resource_type"`
+	ResourceID   int64   `json:"resource_id"`
+	DeliveryID   *string `json:"delivery_id,omitempty"`
+}
+
+func (r *AutomationRepository) NotificationDelivery(ctx context.Context, id int64) (NotificationDelivery, error) {
+	var out NotificationDelivery
+	err := r.pool.QueryRow(ctx, `SELECT n.resource_type,n.resource_id,d.id::text FROM sys_notifications n
+		LEFT JOIN sys_report_team_deliveries d ON n.resource_type='team_report_delivery' AND d.workspace_id=n.workspace_id
+		AND d.period_id=n.resource_id AND d.user_id=n.recipient_id AND d.status='succeeded' AND d.expires_at>statement_timestamp()
+		WHERE n.id=$1 AND n.recipient_id=dbhub_actor() AND n.workspace_id=dbhub_workspace()
+		AND n.link_expires_at>statement_timestamp() AND (
+		(n.resource_type='team_report_delivery' AND d.id IS NOT NULL) OR
+		(n.resource_type='dashboard_delivery' AND EXISTS(SELECT 1 FROM sys_dashboard_deliveries b
+			JOIN sys_dashboard_delivery_plans p ON p.workspace_id=b.workspace_id AND p.id=b.plan_id
+			WHERE b.workspace_id=n.workspace_id AND b.id=n.resource_id AND b.user_id=n.recipient_id
+			AND b.status='succeeded' AND b.expires_at>statement_timestamp() AND b.payload<>''
+			AND b.member_version=dbhub_member_epoch() AND dbhub_dashboard_delivery_open(p.id,b.user_id,'recipient')
+			AND (p.kind<>'team' OR EXISTS(SELECT 1 FROM sys_dashboard_recipient_access a
+				WHERE a.workspace_id=b.workspace_id AND a.plan_id=b.plan_id AND a.user_id=b.user_id
+				AND a.enabled AND a.version=b.grant_version AND a.member_version=b.member_version)))) OR
+		(n.resource_type='formal_export_delivery' AND EXISTS(SELECT 1 FROM sys_report_export_files f
+			WHERE f.workspace_id=n.workspace_id AND f.export_id=n.resource_id AND f.expires_at>statement_timestamp())) OR
+		(n.resource_type='report_delivery' AND EXISTS(SELECT 1 FROM sys_report_subscription_runs s
+			WHERE s.workspace_id=n.workspace_id AND s.user_id=n.recipient_id AND s.delivery_id=n.resource_id
+			AND s.status='succeeded' AND s.expires_at>statement_timestamp() AND s.encrypted_snapshot<>'')))`, id).
+		Scan(&out.ResourceType, &out.ResourceID, &out.DeliveryID)
+	return out, managedError(err)
+}
 
 type Todo struct {
 	ID         int64      `json:"id"`
@@ -107,10 +125,10 @@ func (r *AutomationRepository) Todos(ctx context.Context, limit, offset int) ([]
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
 	var total int64
-	if e = tx.QueryRow(ctx, `SELECT count(*) FROM (`+todoSQL+`) todos`, ActorID(ctx), ActorAdmin(ctx)).Scan(&total); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM dbhub_inbox_todos($1,$2)`, ActorID(ctx), ActorReportReviewer(ctx)).Scan(&total); e != nil {
 		return nil, 0, e
 	}
-	rows, e := tx.Query(ctx, `SELECT kind,id,resource_id,title,created_at,expires_at FROM (`+todoSQL+`) todos ORDER BY created_at,id LIMIT $3 OFFSET $4`, ActorID(ctx), ActorAdmin(ctx), limit, offset)
+	rows, e := tx.Query(ctx, `SELECT kind,id,resource_id,title,created_at,expires_at FROM dbhub_inbox_todos($1,$2) ORDER BY created_at,id LIMIT $3 OFFSET $4`, ActorID(ctx), ActorReportReviewer(ctx), limit, offset)
 	if e != nil {
 		return nil, 0, e
 	}

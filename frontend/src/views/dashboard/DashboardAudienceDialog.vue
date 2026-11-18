@@ -1,3 +1,76 @@
+<script setup lang="ts">
+import { useReadActivity } from '../../composables/useReadActivity'
+const { busy: readPending, run: trackRead } = useReadActivity()
+import { computed, onMounted, onScopeDispose, ref } from 'vue'
+import { useUserStore } from '../../stores/user'
+import request from '../../utils/request'
+import { managedDashboardApi as api } from '../../api/managed-dashboard'
+import { reportCommandKeys } from '../report/reportCommands'
+const props = defineProps<{ id: number }>(),
+  emit = defineEmits<{ close: []; submitted: [] }>(),
+  user = useUserStore(),
+  keys = reportCommandKeys()
+const base = ref(0),
+  userIds = ref<number[]>([]),
+  groupIds = ref<number[]>([]),
+  users = ref<{ id: number; username: string; role: string }[]>([]),
+  groups = ref<{ id: number; name: string }[]>([]),
+  reviewer = ref<number>(),
+  busy = ref(false),
+  error = ref('')
+let alive = true
+const admins = computed(() =>
+    users.value.filter((u) => u.role === 'admin' && u.id !== user.user?.id),
+  ),
+  message = (e: unknown) =>
+    e instanceof Error ? e.message : '操作失败，请核对状态'
+onMounted(async () => {
+return trackRead(async () => {
+  try {
+    const [current, u, g] = await Promise.all([
+      api.dashboardAudience(props.id),
+      request.get<unknown, { items: typeof users.value }>('/users/brief'),
+      request.get<unknown, { items: typeof groups.value }>('/audience-groups'),
+    ])
+    if (alive) {
+      base.value = current.base_publication_no
+      userIds.value = current.user_ids
+      groupIds.value = current.group_ids
+      users.value = u.items
+      groups.value = g.items
+    }
+  } catch (e) {
+    if (alive) error.value = message(e)
+  }
+
+})
+})
+onScopeDispose(() => {
+  alive = false
+})
+async function submit() {
+  busy.value = true
+  const payload = {
+    base_publication_no: base.value,
+    user_ids: userIds.value,
+    group_ids: groupIds.value,
+    reviewer_id: reviewer.value,
+  }
+  try {
+    await api.changeDashboardAudience(
+      props.id,
+      payload,
+      keys.get('audience', payload),
+    )
+    if (alive) emit('submitted')
+  } catch (e) {
+    if (alive) error.value = message(e)
+  } finally {
+    if (alive) busy.value = false
+  }
+}
+</script>
+
 <template>
   <el-dialog
     :model-value="true"
@@ -7,8 +80,8 @@
     :show-close="!busy"
     @close="emit('close')"
   >
-    <form class="space-y-4" @submit.prevent="submit">
-      <p class="text-sm text-white/65">
+    <div v-data-loading="readPending" data-loading-label="正在加载报表与受众选项…" class="space-y-4"><form class="space-y-4" @submit.prevent="submit">
+      <p class="text-sm text-muted">
         复制当前正式发布 #{{
           base
         }}
@@ -55,80 +128,13 @@
             :value="u.id"
             :label="u.username" /></el-select
       ></label>
-      <p class="text-xs text-amber-200">
+      <p class="text-xs text-warning">
         每张必需报表须独立覆盖全部目标受众；此提案不会自动授予子报表权限。并发发布后必须基于最新版本重新提案。
       </p>
-      <p v-if="error" role="alert" class="text-sm text-rose-200">{{ error }}</p>
-      <button class="liquid-button" :disabled="busy || !base || !reviewer">
+      <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
+      <button class="liquid-button ui-control-target" :disabled="busy || !base || !reviewer">
         提交新版本审阅
       </button>
-    </form>
+    </form></div>
   </el-dialog>
 </template>
-<script setup lang="ts">
-import { computed, onMounted, onScopeDispose, ref } from 'vue'
-import { useUserStore } from '../../stores/user'
-import request from '../../utils/request'
-import { managedDashboardApi as api } from '../../api/managed-dashboard'
-import { reportCommandKeys } from '../report/reportCommands'
-const props = defineProps<{ id: number }>(),
-  emit = defineEmits<{ close: []; submitted: [] }>(),
-  user = useUserStore(),
-  keys = reportCommandKeys()
-const base = ref(0),
-  userIds = ref<number[]>([]),
-  groupIds = ref<number[]>([]),
-  users = ref<{ id: number; username: string; role: string }[]>([]),
-  groups = ref<{ id: number; name: string }[]>([]),
-  reviewer = ref<number>(),
-  busy = ref(false),
-  error = ref('')
-let alive = true
-const admins = computed(() =>
-    users.value.filter((u) => u.role === 'admin' && u.id !== user.user?.id),
-  ),
-  message = (e: unknown) =>
-    e instanceof Error ? e.message : '操作失败，请核对状态'
-onMounted(async () => {
-  try {
-    const [current, u, g] = await Promise.all([
-      api.dashboardAudience(props.id),
-      request.get<unknown, { items: typeof users.value }>('/users/brief'),
-      request.get<unknown, { items: typeof groups.value }>('/audience-groups'),
-    ])
-    if (alive) {
-      base.value = current.base_publication_no
-      userIds.value = current.user_ids
-      groupIds.value = current.group_ids
-      users.value = u.items
-      groups.value = g.items
-    }
-  } catch (e) {
-    if (alive) error.value = message(e)
-  }
-})
-onScopeDispose(() => {
-  alive = false
-})
-async function submit() {
-  busy.value = true
-  const payload = {
-    base_publication_no: base.value,
-    user_ids: userIds.value,
-    group_ids: groupIds.value,
-    reviewer_id: reviewer.value,
-  }
-  try {
-    await api.changeDashboardAudience(
-      props.id,
-      payload,
-      keys.get('audience', payload),
-    )
-    if (alive) emit('submitted')
-  } catch (e) {
-    if (alive) error.value = message(e)
-  } finally {
-    if (alive) busy.value = false
-  }
-}
-</script>

@@ -49,7 +49,7 @@ def login(page, name, password):
         page.locator('button[type=submit]').click()
     assert response.value.status == 200
     data = response.value.json()['data']; tokens.append(data['access_token'])
-    page.wait_for_url('**/dashboard')
+    page.wait_for_url('**/home')
     return data['access_token']
 
 def assert_no_overflow(page):
@@ -73,18 +73,21 @@ try:
         page.goto(frontend+'/settings', wait_until='networkidle')
         if existing is None:
             section = page.get_by_role('region', name='驱动管理')
+            section.get_by_role('button', name='登记驱动', exact=True).click()
             choose(page, section.get_by_role('combobox', name='可用驱动制品'), 'postgresql '+artifact['version'])
             section.get_by_label('驱动名称', exact=True).fill(prefix+' PG')
-            choose(page, section.get_by_role('combobox', name='驱动可见范围'), '全局发布')
+            choose(page, section.get_by_role('combobox', name='驱动可见范围'), '工作空间共享')
             with page.expect_response(lambda r: r.url.endswith('/connector-drivers') and r.request.method == 'POST') as response:
-                section.get_by_role('button', name='登记驱动', exact=True).click()
+                section.get_by_role('button', name='确认登记', exact=True).click()
             assert response.value.status == 201; existing = response.value.json()['data']
         passed('administrator uses an installed and verified globally published JDBC driver')
+        page.get_by_role('tab', name='数据源模板', exact=True).click()
         section = page.get_by_role('region', name='数据源模板')
+        section.get_by_role('button', name='新建模板', exact=True).click()
         section.get_by_label('模板标识', exact=True).fill(prefix+'_pg')
         section.get_by_label('模板名称', exact=True).fill(prefix+' PG 规则')
         choose(page, section.get_by_role('combobox', name='模板驱动版本'), existing['name']+' '+existing['version'])
-        choose(page, section.get_by_role('combobox', name='连接规则可见范围'), '全局发布')
+        choose(page, section.get_by_role('combobox', name='连接规则可见范围'), '工作空间共享')
         choose(page, section.get_by_role('combobox', name='模板 SQL 能力'), 'PostgreSQL 方言与基础执行')
         with page.expect_response(lambda r: r.url.endswith('/datasource-templates') and r.request.method == 'POST') as response:
             section.get_by_role('button', name='发布模板', exact=True).click()
@@ -182,10 +185,11 @@ try:
 
         test.goto(frontend+'/settings', wait_until='networkidle')
         section = test.get_by_role('region', name='驱动管理')
+        section.get_by_role('button', name='登记驱动', exact=True).click()
         choose(test, section.get_by_role('combobox', name='可用驱动制品'), 'postgresql '+artifact['version'])
         section.get_by_label('驱动名称', exact=True).fill(prefix+' 私有 PG')
         with test.expect_response(lambda r: r.url.endswith('/connector-drivers') and r.request.method == 'POST') as response:
-            section.get_by_role('button', name='登记驱动', exact=True).click()
+            section.get_by_role('button', name='确认登记', exact=True).click()
         assert response.value.status == 201; private_driver = response.value.json()['data']
         assert private_driver['visibility'] == 'private'
         assert all(d['id'] != private_driver['id'] for d in api('GET', '/connector-drivers')['items'])

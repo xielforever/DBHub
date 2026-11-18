@@ -22,6 +22,10 @@ export interface LoginResult {
   user: UserInfo
 }
 
+/** Password/SSO success can require an additional factor; it is not a session. */
+export interface MFAChallenge { mfa_required: true; challenge_token: string; expires_in: number }
+export type LoginOutcome = LoginResult | MFAChallenge
+
 /** 健康检查数据 */
 export interface HealthInfo {
   status: string

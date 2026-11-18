@@ -44,7 +44,20 @@ type apiTest struct {
 	auditDir                   string
 }
 
+// Keep unexpected server failures visible while omitting routine request logs.
+type testServerLog struct{ t *testing.T }
+
+func (w testServerLog) Write(p []byte) (int, error) {
+	w.t.Helper()
+	w.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
+}
+
 func setupAPI(t *testing.T) *apiTest {
+	return setupConfiguredAPI(t, "", nil)
+}
+
+func setupConfiguredAPI(t *testing.T, listen string, configure func(*config.Config, string)) *apiTest {
 	t.Helper()
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
 	metadataDSN := os.Getenv("TEST_METADATA_DSN")
@@ -113,7 +126,19 @@ func setupAPI(t *testing.T) *apiTest {
 		}
 	}
 	a := &apiTest{t: t, pool: pool, targetPool: targetPool, deps: deps, table: fmt.Sprintf("dbhub_http_%d", time.Now().UnixNano()), auditDir: appCfg.AuditDir}
-	a.server = httptest.NewServer(NewRouter(appCfg, slog.New(slog.NewTextHandler(io.Discard, nil)), users, deps))
+	a.server = httptest.NewUnstartedServer(nil)
+	if listen != "" {
+		a.server.Listener.Close()
+		a.server.Listener, e = net.Listen("tcp", listen)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	if configure != nil {
+		configure(appCfg, "http://"+a.server.Listener.Addr().String())
+	}
+	a.server.Config.Handler = NewRouter(appCfg, slog.New(slog.NewTextHandler(testServerLog{t}, &slog.HandlerOptions{Level: slog.LevelError})), users, deps)
+	a.server.Start()
 	t.Cleanup(func() {
 		a.server.Close()
 		deps.Queries.Close()
@@ -278,6 +303,19 @@ func (a *apiTest) exec(token, sql string, want int) map[string]any {
 }
 func TestRealHTTPBackend(t *testing.T) {
 	a := setupAPI(t)
+	t.Run("postgres-xml-result", func(t *testing.T) {
+		a.t = t
+		result := a.exec(a.admin, `SELECT '<sample>示例</sample>'::xml, decode('00ff', 'hex'), NULL::xml`, 200)
+		values := result["rows"].([]any)[0].([]any)
+		if values[0] != "<sample>示例</sample>" || values[1] != "AP8=" || values[2] != nil {
+			t.Fatalf("unexpected XML, bytea, or NULL result values: %#v", values)
+		}
+		plan := a.exec(a.admin, "EXPLAIN (FORMAT XML) SELECT id FROM "+a.table, 200)
+		value, ok := plan["rows"].([]any)[0].([]any)[0].(string)
+		if !ok || !strings.HasPrefix(value, "<explain") {
+			t.Fatalf("expected XML plan text, got %q", value)
+		}
+	})
 	t.Run("query-and-transaction-isolation", func(t *testing.T) {
 		a.t = t
 		result := a.exec(a.admin, "SELECT email FROM "+a.table+" ORDER BY id", 200)
@@ -424,10 +462,15 @@ func TestRealHTTPBackend(t *testing.T) {
 		for _, item := range types {
 			mutate("DELETE", "/redis/key", item.kind, map[string]any{})
 		}
+		a.call("GET", fmt.Sprintf("/redis/value?connection_id=%d&key=%sstring", a.roleRedis[a.readonly], base), a.readonly, nil, 404)
 	})
 	t.Run("policies-preview-sharing-and-enforcement", func(t *testing.T) {
 		a.t = t
-		policy := map[string]any{"connection_id": a.connID, "database_name": "dbhub", "schema_name": "public", "table_name": a.table, "role_code": "readonly", "column_permissions": map[string]any{"email": "masked", "secret": "hidden"}, "row_conditions": []map[string]any{{"column": "owner_id", "operator": "=", "value": 1}}}
+		connection, err := a.deps.Conns.Get(a.actor(), a.connID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := map[string]any{"connection_id": a.connID, "database_name": connection.Database, "schema_name": "public", "table_name": a.table, "role_code": "readonly", "column_permissions": map[string]any{"email": "masked", "secret": "hidden"}, "row_conditions": []map[string]any{{"column": "owner_id", "operator": "=", "value": 1}}}
 		a.call("PUT", "/query/policies", a.developer, policy, 403)
 		p := a.call("PUT", "/query/policies", a.admin, policy, 200)
 		res := a.exec(a.readonly, "SELECT * FROM "+a.table+" WHERE owner_id=2 OR 1=1 ORDER BY id", 200)

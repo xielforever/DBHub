@@ -1,296 +1,20 @@
-<template>
-  <div class="space-y-5">
-    <DashboardViewer
-      v-if="viewing"
-      :key="`${viewing.id}:${viewing.mode}`"
-      :id="viewing.id"
-      :mode="viewing.mode"
-      @close="viewing = undefined"
-    />
-    <template v-else>
-      <header class="flex flex-wrap justify-between items-start gap-3">
-        <div>
-          <h2 class="text-2xl font-semibold">仪表盘</h2>
-          <p class="text-sm text-white/60 mt-2">
-            组合已审批报表，按工作空间管理、审阅和发布。
-          </p>
-        </div>
-        <div class="flex gap-2">
-          <button class="ghost-button" :disabled="loading" @click="load">
-            刷新列表</button
-          ><button
-            v-if="canWrite"
-            class="liquid-button"
-            @click="creating = true"
-          >
-            新建仪表盘
-          </button>
-        </div>
-      </header>
-      <nav
-        class="flex gap-2 border-b border-white/10 pb-3"
-        aria-label="仪表盘分类"
-      >
-        <button
-          class="ghost-button"
-          :aria-pressed="tab === 'published'"
-          @click="tab = 'published'"
-        >
-          已发布</button
-        ><button
-          v-if="canWrite"
-          class="ghost-button"
-          :aria-pressed="tab === 'managed'"
-          @click="tab = 'managed'"
-        >
-          开发与审阅</button
-        ><button
-          class="ghost-button"
-          :aria-pressed="tab === 'access'"
-          @click="tab = 'access'"
-        >
-          访问申请
-        </button>
-      </nav>
-      <form
-        v-if="tab !== 'access'"
-        class="flex flex-wrap gap-2"
-        @submit.prevent="
-          () => {
-            publishedPage = 1
-            managedPage = 1
-            load()
-          }
-        "
-      >
-        <el-select
-          v-if="tab === 'managed' && user.role === 'admin'"
-          v-model="scope"
-          aria-label="仪表盘开发范围"
-          class="!w-40"
-          @change="
-            () => {
-              managedPage = 1
-              load()
-            }
-          "
-          ><el-option label="全部开发看板" value="all" /><el-option
-            label="我的开发"
-            value="mine" /><el-option
-            label="待审阅"
-            value="pending" /></el-select
-        ><input
-          v-model="keyword"
-          class="glass-input flex-1 min-w-0"
-          aria-label="搜索仪表盘"
-          placeholder="搜索名称或说明"
-          maxlength="128"
-        /><button class="ghost-button" :disabled="loading">搜索</button>
-      </form>
-      <p v-if="error" role="alert" class="text-rose-200 text-sm">{{ error }}</p>
-      <p v-if="loading" role="status" class="text-white/60">读取中…</p>
-      <AccessRequestsPanel v-if="tab === 'access'" />
-      <div
-        v-else-if="tab === 'published'"
-        class="grid md:grid-cols-2 xl:grid-cols-3 gap-4"
-      >
-        <button
-          v-for="d in published"
-          :key="d.id"
-          class="glass-panel p-5 text-left space-y-3 hover:border-violet-300/40"
-          @click="viewing = { id: d.id, mode: 'published' }"
-        >
-          <h3 class="font-semibold">{{ d.name }}</h3>
-          <p class="text-sm text-white/60">{{ d.description || '暂无说明' }}</p>
-          <p class="text-xs text-violet-200">
-            正式发布 #{{ d.publication_no }} · 打开看板 →
-          </p>
-        </button>
-        <p
-          v-if="!published.length && !loading"
-          class="glass-panel p-8 text-white/60"
-        >
-          暂无获授权的正式仪表盘。开发者可组合报表并提交审阅，发布后在此查看。
-        </p>
-      </div>
-      <div v-else class="space-y-3">
-        <article
-          v-for="d in managed"
-          :key="d.id"
-          class="glass-panel p-4 space-y-3"
-        >
-          <div class="flex flex-wrap justify-between gap-3">
-            <h3 class="font-semibold">{{ d.draft.name }}</h3>
-            <span class="text-xs text-violet-200">{{ stateLabel(d) }}</span>
-          </div>
-          <p v-if="d.draft.description" class="text-sm text-white/60">
-            {{ d.draft.description }}
-          </p>
-          <p class="text-xs text-white/60">
-            责任人 {{ d.owner_name }} · 草稿 {{ d.draft_version
-            }}<span v-if="d.latest_version">
-              · 内容 v{{ d.latest_version }}</span
-            ><span v-if="d.active_release_id">
-              · 正式发布 #{{ d.publication_no }}</span
-            >
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <button class="liquid-button text-sm" @click="primaryAction(d)">
-              {{ primaryLabel(d) }}
-            </button>
-            <button
-              v-if="
-                d.lifecycle === 'active' &&
-                d.owner_id === user.user?.id &&
-                d.review_status !== 'pending'
-              "
-              class="ghost-button text-sm"
-              @click="submit(d)"
-            >
-              送审检查
-            </button>
-            <el-dropdown
-              trigger="click"
-                @command="moreAction($event, d)"
-              ><button
-                class="ghost-button text-sm"
-                :aria-label="`${d.draft.name}更多操作`"
-              >
-                更多</button
-              ><template #dropdown
-                ><el-dropdown-menu>
-                  <el-dropdown-item command="history" style="min-height: 44px"
-                    >版本、审阅与发布</el-dropdown-item
-                  >
-                  <el-dropdown-item
-                    v-if="
-                      d.lifecycle === 'active' && d.owner_id === user.user?.id
-                    "
-                    command="preview"
-                    style="min-height: 44px"
-                    >预览已保存草稿</el-dropdown-item
-                  >
-                  <el-dropdown-item
-                    v-if="
-                      d.lifecycle === 'active' &&
-                      d.owner_id === user.user?.id &&
-                      primaryLabel(d) !== '编辑草稿'
-                    "
-                    command="edit"
-                    style="min-height: 44px"
-                    >编辑草稿</el-dropdown-item
-                  >
-                  <el-dropdown-item
-                    v-if="d.lifecycle === 'active' && user.role === 'admin'"
-                    command="transfer"
-                    style="min-height: 44px"
-                    >移交责任人</el-dropdown-item
-                  >
-                  <el-dropdown-item
-                    v-if="d.lifecycle === 'active'"
-                    command="archive"
-                    divided
-                    style="min-height: 44px"
-                    >{{
-                      d.latest_version ? '归档' : '删除草稿'
-                    }}</el-dropdown-item
-                  >
-                  <el-dropdown-item
-                    v-else
-                    command="restore"
-                    divided
-                    style="min-height: 44px"
-                    >恢复为草稿</el-dropdown-item
-                  >
-                </el-dropdown-menu></template
-              ></el-dropdown
-            >
-          </div>
-        </article>
-        <p
-          v-if="!managed.length && !loading"
-          class="glass-panel p-8 text-white/60"
-        >
-          还没有开发中的看板。先新建草稿，再添加最多8张已发布且获批契约的报表。
-        </p>
-      </div>
-      <div
-        v-if="tab !== 'access'"
-        class="flex justify-between gap-3 text-xs text-white/60"
-      >
-        <span
-          >共
-          {{ tab === 'published' ? publishedTotal : managedTotal }} 个看板</span
-        >
-        <div class="flex gap-2 items-center">
-          <button
-            class="ghost-button text-xs"
-            :disabled="
-              loading ||
-              (tab === 'published' ? publishedPage : managedPage) <= 1
-            "
-            @click="changePage(-1)"
-          >
-            上一页</button
-          ><span
-            >第 {{ tab === 'published' ? publishedPage : managedPage }} 页</span
-          ><button
-            class="ghost-button text-xs"
-            :disabled="
-              loading ||
-              (tab === 'published' ? publishedPage : managedPage) * 12 >=
-                (tab === 'published' ? publishedTotal : managedTotal)
-            "
-            @click="changePage(1)"
-          >
-            下一页
-          </button>
-        </div>
-      </div>
-    </template>
-    <DashboardEditor
-      v-if="creating || editing"
-      :dashboard="editing"
-      @close="
-        () => {
-          creating = false
-          editing = undefined
-        }
-      "
-      @saved="
-        () => {
-          creating = false
-          editing = undefined
-          tab = 'managed'
-          load()
-        }
-      "
-    />
-    <DashboardReviewDialog
-      v-if="reviewing"
-      :dashboard="reviewing"
-      @close="reviewing = undefined"
-      @changed="load"
-    />
-    <DashboardSubmitDialog
-      v-if="pending"
-      :dashboard="pending"
-      @close="pending = undefined"
-      @submitted="submitted"
-      @edit="editFromCheck"
-    />
-  </div>
-</template>
 <script setup lang="ts">
-import { computed, onMounted, onScopeDispose, ref } from 'vue'
+import LoadingState from '../../components/base/LoadingState.vue'
+import { computed, nextTick, onScopeDispose, ref, watch } from 'vue'
+import PageHeader from '../../components/base/PageHeader.vue'
+import PageState from '../../components/base/PageState.vue'
+import PageCategoryTabs from '../../components/base/PageCategoryTabs.vue'
+import { usePageCategory } from '../../composables/usePageCategory'
+import { useDirectoryRefresh } from '../../composables/useDirectoryRefresh'
 import { ElMessageBox } from 'element-plus'
-import {useRoute} from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '../../stores/user'
 import {
   managedDashboardApi as api,
   type ManagedDashboard,
   type DashboardView,
 } from '../../api/managed-dashboard'
+import {featureAllowed} from '../../utils/permission'
 import { reportCommandKeys } from '../report/reportCommands'
 import DashboardViewer from './DashboardViewer.vue'
 import DashboardEditor from './DashboardEditor.vue'
@@ -298,89 +22,274 @@ import DashboardReviewDialog from './DashboardReviewDialog.vue'
 import AccessRequestsPanel from './AccessRequestsPanel.vue'
 import DashboardSubmitDialog from './DashboardSubmitDialog.vue'
 const user = useUserStore(),
-  canWrite = computed(() => ['admin', 'developer'].includes(user.role)),
+  legacyCanWrite = computed(() => ['admin', 'developer'].includes(user.role)),
+  canWrite = computed(() => featureAllowed(user, 'dashboard.design', legacyCanWrite.value)),
+  canSubmit = computed(() => featureAllowed(user, 'dashboard.submit', legacyCanWrite.value)),
+  canManage = computed(()=>canWrite.value||['dashboard.review','dashboard.publish','dashboard.offline'].some(a=>featureAllowed(user,a,user.hasCapability('report_review')))),
   keys = reportCommandKeys()
-const keyword = ref(''),
-  scope = ref('all'),
-  publishedPage = ref(1),
-  managedPage = ref(1),
-  publishedTotal = ref(0),
-  managedTotal = ref(0)
-const route=useRoute()
-const tab = ref(['managed','access'].includes(String(route.query.tab))?String(route.query.tab):'published'),
-  published = ref<DashboardView[]>([]),
+const canView = computed(() => featureAllowed(user, 'dashboard.view', true))
+const categories = computed(() => [
+  ...(canView.value ? [{ id: 'published', name: '已发布' }] : []),
+  ...(canManage.value ? [{ id: 'managed', name: '开发与审阅' }] : []),
+  { id: 'access', name: '访问申请' },
+])
+const route = useRoute(), router = useRouter()
+const { category } = usePageCategory(categories)
+const tab = computed(() => category.value?.id)
+const keyword = ref('')
+const search = ref('')
+const scope = ref('all')
+const page = ref(1)
+const pageSize = 12
+const total = ref<number>()
+const dashboardId = computed(() => {
+  const id = typeof route.query.dashboard === 'string' ? Number(route.query.dashboard) : 0
+  return Number.isSafeInteger(id) && id > 0 ? id : 0
+})
+const publishedId = computed(() => tab.value === 'published' ? dashboardId.value : 0)
+const openDraft = ref<number>()
+const viewing = computed<{ id: number; mode: 'published' | 'draft' } | undefined>(() => publishedId.value
+  ? { id: publishedId.value, mode: 'published' }
+  : openDraft.value ? { id: openDraft.value, mode: 'draft' } : undefined)
+const directory = ref<HTMLElement>()
+const directoryTable = ref<HTMLElement>()
+const refreshButton = ref<HTMLButtonElement>()
+const linkLoading = ref(false)
+const linkError = ref('')
+let listRead: AbortController | undefined
+let linkRead: AbortController | undefined
+let draftRead: AbortController | undefined
+const readingDraft = ref<number>()
+const published = ref<DashboardView[]>([]),
   managed = ref<ManagedDashboard[]>([]),
   creating = ref(false),
   editing = ref<ManagedDashboard>(),
   reviewing = ref<ManagedDashboard>(),
-  viewing = ref<{ id: number; mode: 'published' | 'draft' }>(),
   loading = ref(false),
-  error = ref(''),
+  listError = ref(''),
+  actionError = ref(''),
   pending = ref<ManagedDashboard>()
-let alive = true,
-  loadGeneration = 0
-onMounted(async()=>{await load();const id=Number(route.query.dashboard);if(alive&&Number.isSafeInteger(id)&&id>0){if(tab.value==='managed'&&canWrite.value){try{const d=await api.get(id);if(alive)reviewing.value=d}catch(e){if(alive)error.value=message(e)}}else if(tab.value==='published')viewing.value={id,mode:'published'}}})
-onScopeDispose(() => {
-  alive = false
-  loadGeneration++
-})
+const { refresh, retry } = useDirectoryRefresh(refreshButton, load, () => loading.value)
+let alive = true
+let reviewOpener: 'primary' | 'more' = 'primary'
+let pendingReviewFocus: { id: number; opener: 'primary' | 'more' } | undefined
 const message = (e: unknown) =>
   e instanceof Error ? e.message : '操作失败，请刷新后核对'
+
+function directoryQuery() {
+  return Object.fromEntries(Object.entries(route.query).filter(([key]) => key !== 'dashboard' && !key.startsWith('p_')))
+}
+
+async function selectCategory(id: string) {
+  if (id === tab.value || !categories.value.some(item => item.id === id)) return
+  await router.push({ query: { ...directoryQuery(), tab: id }, hash: route.hash })
+}
+
+async function openPublished(id: number) {
+  await router.push({ query: { ...directoryQuery(), tab: 'published', dashboard: String(id) } })
+}
+
+async function closeViewer() {
+  openDraft.value = undefined
+  if (publishedId.value) await router.replace({ query: directoryQuery() })
+  await nextTick()
+  directory.value?.focus()
+}
+
 function changePage(change: number) {
-  if (tab.value === 'published') publishedPage.value += change
-  else managedPage.value += change
+  page.value += change
   void load()
 }
+
+function applySearch() {
+  search.value = keyword.value.trim()
+  page.value = 1
+  void load()
+}
+
+function changeScope() {
+  page.value = 1
+  void load()
+}
+
+function clearList() {
+  published.value = []
+  managed.value = []
+  total.value = undefined
+  listError.value = ''
+}
+
 async function load() {
-  const generation = ++loadGeneration
+  listRead?.abort()
+  const selected = tab.value
+  clearList()
+  loading.value = false
+  if (selected !== 'published' && selected !== 'managed' || viewing.value) return
+  const read = new AbortController()
+  listRead = read
   loading.value = true
-  error.value = ''
   try {
-    const [p, m] = await Promise.all([
-      api.published({
-        q: keyword.value,
-        page: publishedPage.value,
-        page_size: 12,
-      }),
-      canWrite.value
-        ? api.list({
-            q: keyword.value,
-            scope: scope.value,
-            page: managedPage.value,
-            page_size: 12,
-          })
-        : Promise.resolve({ items: [], total: 0 }),
-    ])
-    if (alive && generation === loadGeneration) {
-      published.value = p.items
-      managed.value = m.items
-      publishedTotal.value = p.total
-      managedTotal.value = m.total
+    const params = { q: search.value, page: page.value, page_size: pageSize }
+    if (selected === 'published') {
+      const result = await api.published(params, read.signal)
+      if (read.signal.aborted) return
+      published.value = result.items
+      total.value = result.total
+    } else {
+      const result = await api.list({ ...params, scope: scope.value }, read.signal)
+      if (read.signal.aborted) return
+      managed.value = result.items
+      total.value = result.total
     }
-  } catch (e) {
-    if (alive && generation === loadGeneration) error.value = message(e)
+    if (page.value > 1 && page.value > Math.ceil((total.value ?? 0) / pageSize)) {
+      page.value = Math.max(1, Math.ceil((total.value ?? 0) / pageSize))
+      await load()
+    }
+  } catch (failure) {
+    if (!read.signal.aborted) listError.value = message(failure)
   } finally {
-    if (alive && generation === loadGeneration) loading.value = false
+    if (!read.signal.aborted) loading.value = false
   }
 }
-function submit(d: ManagedDashboard) {
-  pending.value = d
+
+async function openReviewLink() {
+  linkRead?.abort()
+  const id = dashboardId.value
+  linkLoading.value = false
+  linkError.value = ''
+  if (tab.value !== 'managed' || !id) return
+  const read = new AbortController()
+  linkRead = read
+  linkLoading.value = true
+  try {
+    const item = await api.get(id, read.signal)
+    if (!read.signal.aborted) reviewing.value = item
+  } catch (failure) {
+    if (!read.signal.aborted) linkError.value = message(failure)
+  } finally {
+    if (!read.signal.aborted) linkLoading.value = false
+  }
 }
-function submitted() {
+
+watch(tab, () => {
+  page.value = 1
+  actionError.value = ''
+  openDraft.value = undefined
+})
+watch([tab, viewing, creating, reviewing, pending], ([category, viewer, create, review, submit]) => {
+  if (category !== 'managed' || viewer || create || review || submit) cancelDraftRead()
+})
+watch([tab, viewing], () => void load(), { immediate: true })
+watch([tab, dashboardId], () => {
+  reviewing.value = undefined
+  reviewOpener = 'primary'
+  pendingReviewFocus = undefined
+  void openReviewLink()
+}, { immediate: true })
+onScopeDispose(() => {
+  alive = false
+  listRead?.abort()
+  linkRead?.abort()
+  cancelDraftRead()
+})
+function canEditDraft(d: ManagedDashboard) {
+  return canWrite.value && d.lifecycle === 'active' && d.owner_id === user.user?.id
+}
+function canSubmitDraft(d: ManagedDashboard) {
+  return canEditDraft(d) && canSubmit.value && d.review_status !== 'pending'
+}
+function canChangeLifecycle(d: ManagedDashboard) {
+  return canWrite.value && (d.owner_id === user.user?.id || user.role === 'admin')
+}
+function submit(d: ManagedDashboard) {
+  if (canSubmitDraft(d)) pending.value = d
+}
+async function submitted() {
   pending.value = undefined
-  tab.value = 'managed'
-  void load()
+  if (tab.value === 'managed') await load()
+  else await selectCategory('managed')
 }
 function editFromCheck(d: ManagedDashboard) {
   pending.value = undefined
-  editing.value = d
+  void openEditor(d.id)
 }
+function cancelDraftRead() {
+  draftRead?.abort()
+  draftRead = undefined
+  readingDraft.value = undefined
+}
+async function openEditor(id: number) {
+  if (readingDraft.value === id || !canWrite.value) return
+  cancelDraftRead()
+  const read = new AbortController()
+  draftRead = read
+  readingDraft.value = id
+  actionError.value = ''
+  try {
+    const item = await api.get(id, read.signal)
+    if (read.signal.aborted || tab.value !== 'managed' || viewing.value || creating.value || reviewing.value || pending.value) return
+    if (!canEditDraft(item)) {
+      actionError.value = '此草稿当前不可编辑，请刷新目录核对状态。'
+      return
+    }
+    editing.value = item
+  } catch (error) {
+    if (!read.signal.aborted) actionError.value = message(error)
+  } finally {
+    if (draftRead === read) {
+      draftRead = undefined
+      readingDraft.value = undefined
+    }
+  }
+}
+function closeEditor() {
+  creating.value = false
+  editing.value = undefined
+}
+async function saved() {
+  closeEditor()
+  if (tab.value === 'managed') await load()
+  else await selectCategory('managed')
+}
+function reviewTrigger(id: number, opener: 'primary' | 'more') {
+  return directoryTable.value?.querySelector<HTMLButtonElement>(
+    `button[data-dashboard="${id}"][data-review-opener="${opener}"]`,
+  )
+}
+
+watch(loading, (isLoading) => {
+  if (isLoading || !pendingReviewFocus) return
+  const { id, opener } = pendingReviewFocus
+  pendingReviewFocus = undefined
+  if (document.activeElement === directory.value && !reviewing.value && tab.value === 'managed') {
+    reviewTrigger(id, opener)?.focus()
+  }
+}, { flush: 'post' })
+
+async function closeReview() {
+  const id = reviewing.value?.id
+  const opener = reviewOpener
+  reviewing.value = undefined
+  if (tab.value === 'managed' && dashboardId.value) await router.replace({ query: directoryQuery() })
+  await nextTick()
+  if (id === undefined || !alive || reviewing.value || tab.value !== 'managed') return
+  const trigger = reviewTrigger(id, opener)
+  const focusTarget = trigger ?? directory.value
+  focusTarget?.focus()
+  if (!trigger && loading.value) pendingReviewFocus = { id, opener }
+}
+function updateReviewerEligibility(dashboardId: number, reviewId: number, eligible: boolean) {
+  const row = managed.value.find((item) => item.id === dashboardId && item.review_id === reviewId)
+  if (row) row.reviewer_eligible = eligible
+}
+
 function stateLabel(d: ManagedDashboard) {
   if (d.lifecycle === 'archived') return '已归档'
   if (d.review_status === 'pending') return '待审阅'
   if (d.review_status === 'approved' && !d.review_was_published)
-    return '已批准 · 待发布'
+    return d.reviewer_eligible === false ? '审阅资格失效 · 待重新送审' : '已批准 · 待发布'
   if (d.active_release_id) return '已发布'
+  if (d.review_status === 'approved' && d.review_was_published && d.publication_no > 0) return '已下线'
   return (
     (
       {
@@ -394,27 +303,36 @@ function stateLabel(d: ManagedDashboard) {
 function primaryLabel(d: ManagedDashboard) {
   if (d.lifecycle === 'archived') return '查看历史版本'
   if (d.review_status === 'pending')
-    return user.role === 'admin' && d.reviewer_id === user.user?.id
+    return featureAllowed(user,'dashboard.review',user.hasCapability('report_review')) && d.reviewer_id === user.user?.id
       ? '审阅'
       : '查看审阅'
-  if (d.review_status === 'approved' && !d.review_was_published)
-    return user.role === 'admin' ? '审阅与发布' : '查看发布进度'
-  return d.owner_id === user.user?.id ? '编辑草稿' : '查看版本'
+  if (d.review_status === 'approved' && !d.review_was_published) {
+    if (d.reviewer_eligible === false) return '查看审阅'
+    return featureAllowed(user,'dashboard.review',user.hasCapability('report_review')) ? '审阅与发布' : '查看发布进度'
+  }
+  return canEditDraft(d) ? '编辑草稿' : '查看版本'
 }
 function primaryAction(d: ManagedDashboard) {
-  if (primaryLabel(d) === '编辑草稿') editing.value = d
-  else reviewing.value = d
+  if (primaryLabel(d) === '编辑草稿') void openEditor(d.id)
+  else {
+    reviewOpener = 'primary'
+    reviewing.value = d
+  }
 }
 function moreAction(action: string, d: ManagedDashboard) {
-  if (action === 'history') reviewing.value = d
-  else if (action === 'preview') viewing.value = { id: d.id, mode: 'draft' }
-  else if (action === 'edit') editing.value = d
+  if (action === 'history') {
+    reviewOpener = 'more'
+    reviewing.value = d
+  }
+  else if (action === 'preview' && canEditDraft(d)) openDraft.value = d.id
+  else if (action === 'edit') void openEditor(d.id)
   else if (action === 'transfer') void transfer(d)
   else if (action === 'archive')
     void lifecycle(d, d.latest_version ? 'archive' : 'delete')
   else if (action === 'restore') void lifecycle(d, 'restore')
 }
 async function lifecycle(d: ManagedDashboard, action: string) {
+  if (!canChangeLifecycle(d)) return
   try {
     await ElMessageBox.confirm(
       action === 'archive'
@@ -433,7 +351,7 @@ async function lifecycle(d: ManagedDashboard, action: string) {
     )
     if (alive) await load()
   } catch (e) {
-    if (e instanceof Error && alive) error.value = message(e)
+    if (e instanceof Error && alive) actionError.value = message(e)
   }
 }
 async function transfer(d: ManagedDashboard) {
@@ -452,13 +370,132 @@ async function transfer(d: ManagedDashboard) {
     )
     if (alive) await load()
   } catch (e) {
-    if (e instanceof Error && alive) error.value = message(e)
+    if (e instanceof Error && alive) actionError.value = message(e)
   }
 }
 </script>
 
-<style scoped>
-button {
-  min-height: 44px;
-}
-</style>
+<template>
+  <div class="ui-page-stack">
+    <DashboardViewer v-if="viewing" :key="viewing.mode + ':' + viewing.id" :id="viewing.id" :mode="viewing.mode" @close="closeViewer" />
+    <template v-else>
+      <div ref="directory" tabindex="-1" class="ui-focus-target">
+        <PageHeader title="仪表盘目录" :description="canManage ? '查看、开发和审阅当前工作空间的仪表盘。' : '查看你有权访问的已发布仪表盘。'">
+          <template #actions>
+            <button v-if="tab === 'published' || tab === 'managed'" ref="refreshButton" type="button" class="ghost-button ui-control-target" :aria-disabled="loading || undefined" @click="refresh">刷新列表</button>
+            <button v-if="canWrite" class="liquid-button ui-control-target" @click="creating = true">新建仪表盘</button>
+          </template>
+        </PageHeader>
+      </div>
+
+      <PageCategoryTabs label="仪表盘分类" :categories="categories" :active-id="tab" @select="selectCategory">
+        <AccessRequestsPanel v-if="tab === 'access'" />
+        <div v-else class="ui-page-stack">
+          <form class="glass-panel ui-card-padding flex flex-wrap items-end gap-3" aria-label="筛选仪表盘" @submit.prevent="applySearch">
+            <label class="text-sm flex-1 min-w-0 basis-48">
+              搜索仪表盘
+              <input v-model="keyword" class="glass-input block w-full mt-1" placeholder="搜索名称或说明" maxlength="128" />
+            </label>
+            <div v-if="tab === 'managed' && featureAllowed(user, 'dashboard.review', user.hasCapability('report_review'))" class="w-full sm:w-44">
+              <label for="dashboard-scope" class="block text-sm">开发范围</label>
+              <select id="dashboard-scope" v-model="scope" class="glass-input block w-full mt-1" @change="changeScope">
+                <option value="all">全部开发看板</option>
+                <option value="mine">我的开发</option>
+                <option value="pending">待审阅</option>
+              </select>
+            </div>
+            <button class="liquid-button ui-control-target">搜索</button>
+          </form>
+          <p v-if="actionError" role="alert" class="text-danger text-sm">{{ actionError }}</p>
+          <LoadingState v-if="linkLoading" label="正在读取审阅对象…" variant="inline" />
+          <PageState v-else-if="linkError" title="无法打开仪表盘审阅" :description="linkError" tone="danger">
+            <template #actions><button class="ghost-button ui-control-target" @click="openReviewLink">重试打开审阅</button></template>
+          </PageState>
+          <LoadingState v-if="loading" label="正在读取仪表盘目录…" />
+          <PageState v-else-if="listError" title="读取仪表盘目录失败" :description="listError" tone="danger">
+            <template #actions><button type="button" class="ghost-button ui-control-target" @click="retry">重试读取列表</button></template>
+          </PageState>
+          <PageState v-else-if="total === 0" :title="tab === 'published' ? '暂无可见的正式仪表盘' : '暂无匹配的开发仪表盘'"
+            description="可调整当前搜索条件或查看其他获准分类。" />
+          <template v-else-if="total !== undefined">
+            <div class="editorial-table-wrap" role="region" tabindex="0" aria-label="仪表盘目录表格">
+              <table v-if="tab === 'published'" class="editorial-table min-w-[530px]" aria-label="已发布仪表盘">
+                <thead><tr><th scope="col">序号</th><th scope="col">仪表盘名称</th><th scope="col">状态</th><th scope="col">内容版本</th><th scope="col">操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="(item, index) in published" :key="item.id">
+                    <td class="editorial-table__number">{{ String((page - 1) * pageSize + index + 1).padStart(2, '0') }}</td>
+                    <td class="editorial-table__name">
+                      <h2 class="editorial-object-title break-words">{{ item.name }}</h2>
+                      <p v-if="item.description" class="editorial-table__meta">{{ item.description }}</p>
+                    </td>
+                    <td><span class="bg-success-soft text-success px-2 py-1 whitespace-nowrap">已发布 #{{ item.publication_no }}</span></td>
+                    <td>v{{ item.version }}</td>
+                    <td><button class="ghost-button ui-control-target whitespace-nowrap" :aria-label="'打开仪表盘 · ' + item.name"
+                      @click="openPublished(item.id)">打开仪表盘</button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <table v-else ref="directoryTable" class="editorial-table min-w-[760px]" aria-label="开发与审阅仪表盘">
+                <thead><tr><th scope="col">序号</th><th scope="col">仪表盘名称</th><th scope="col">状态</th><th scope="col">责任人</th><th scope="col">最近更新</th><th scope="col">操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="(item, index) in managed" :key="item.id">
+                    <td class="editorial-table__number">{{ String((page - 1) * pageSize + index + 1).padStart(2, '0') }}</td>
+                    <td class="editorial-table__name">
+                      <h2 class="editorial-object-title break-words">{{ item.draft.name }}</h2>
+                      <p v-if="item.draft.description" class="editorial-table__meta">{{ item.draft.description }}</p>
+                      <p class="editorial-table__meta">
+                        草稿 {{ item.draft_version }}<span v-if="item.latest_version"> · 内容 v{{ item.latest_version }}</span>
+                        <span v-if="item.active_release_id"> · 正式发布 #{{ item.publication_no }}</span>
+                      </p>
+                    </td>
+                    <td>{{ stateLabel(item) }}</td><td class="break-words">{{ item.owner_name || '—' }}</td>
+                    <td><time v-if="item.updated_at" :datetime="item.updated_at">{{ new Date(item.updated_at).toLocaleString('zh-CN') }}</time><span v-else>—</span></td>
+                    <td>
+                      <div class="flex flex-wrap items-center gap-2">
+                        <button class="ghost-button ui-control-target whitespace-nowrap" :data-dashboard="item.id" :aria-disabled="readingDraft === item.id"
+                          data-review-opener="primary" @click="primaryAction(item)">{{ primaryLabel(item) }}</button>
+                        <button v-if="canSubmitDraft(item)"
+                          class="ghost-button ui-control-target whitespace-nowrap" @click="submit(item)">送审检查</button>
+                        <el-dropdown trigger="click" @command="moreAction($event, item)">
+                          <button class="ghost-button ui-control-target" :aria-label="item.draft.name + '更多操作'"
+                            :data-dashboard="item.id" data-review-opener="more">更多</button>
+                          <template #dropdown>
+                            <el-dropdown-menu>
+                              <el-dropdown-item command="history">版本、审阅与发布</el-dropdown-item>
+                              <el-dropdown-item v-if="canEditDraft(item)" command="preview">预览已保存草稿</el-dropdown-item>
+                              <el-dropdown-item v-if="canEditDraft(item) && primaryLabel(item) !== '编辑草稿'" command="edit">编辑草稿</el-dropdown-item>
+                              <el-dropdown-item v-if="item.lifecycle === 'active' && user.role === 'admin' && canWrite" command="transfer">移交责任人</el-dropdown-item>
+                              <template v-if="canChangeLifecycle(item)">
+                                <el-dropdown-item v-if="item.lifecycle === 'active'" command="archive" divided>{{ item.latest_version ? '归档' : '删除草稿' }}</el-dropdown-item>
+                                <el-dropdown-item v-else command="restore" divided>恢复为草稿</el-dropdown-item>
+                              </template>
+                            </el-dropdown-menu>
+                          </template>
+                        </el-dropdown>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="flex flex-wrap justify-between items-center gap-3 text-sm text-muted">
+              <span aria-live="polite">共 {{ total }} 个仪表盘</span>
+              <div class="flex gap-2 items-center">
+                <button class="ghost-button ui-control-target" :disabled="page <= 1" @click="changePage(-1)">上一页</button>
+                <span>第 {{ page }} 页</span>
+                <button class="ghost-button ui-control-target" :disabled="page * pageSize >= total" @click="changePage(1)">下一页</button>
+              </div>
+            </div>
+          </template>
+        </div>
+        <template #unavailable>
+          <PageState title="此仪表盘分类不可用" description="请选择当前有权访问的分类。" />
+        </template>
+      </PageCategoryTabs>
+    </template>
+    <DashboardEditor v-if="creating || editing" :dashboard="editing" @close="closeEditor" @saved="saved" />
+    <DashboardReviewDialog v-if="reviewing" :dashboard="reviewing" @close="closeReview" @changed="load"
+      @reviewer-eligibility="updateReviewerEligibility" />
+    <DashboardSubmitDialog v-if="pending" :dashboard="pending" @close="pending = undefined" @submitted="submitted" @edit="editFromCheck" />
+  </div>
+</template>

@@ -9,8 +9,12 @@ import (
 // ValidateReport accepts a single SELECT, including read-only CTEs and unions.
 // Execution must ALSO use a database read-only transaction: functions can have
 // effects that cannot be established by inspecting their invocation's AST.
-func ValidateReport(query, dialect string) error {
-	bound, _, err := BindNamed(query, dialect, nil)
+func ValidateReport(query, dialect string, parameters ...map[string]any) error {
+	var values map[string]any
+	if len(parameters) > 0 {
+		values = parameters[0]
+	}
+	bound, _, err := BindNamed(query, dialect, values)
 	if err != nil {
 		return err
 	}

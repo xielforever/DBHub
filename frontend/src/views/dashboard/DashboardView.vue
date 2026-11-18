@@ -1,185 +1,3 @@
-<template>
-  <div ref="rootRef" class="space-y-6">
-    <!-- 欢迎条 -->
-    <header class="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
-      <div>
-        <h1 class="text-xl font-semibold">早上好，{{ userStore.username || '管理员' }}</h1>
-        <p class="text-sm text-white/45 mt-1">以下是平台今日运行概览</p>
-      </div>
-      <span class="text-xs text-white/45">{{ today }}</span>
-    </header>
-
-    <!-- KPI 卡片 -->
-    <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" aria-label="核心指标">
-      <article
-        v-for="kpi in kpis"
-        :key="kpi.label"
-        class="kpi-card glass-card p-5 hover:-translate-y-1"
-      >
-        <div class="flex items-start justify-between">
-          <div
-            class="w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-300"
-            :style="{ background: kpi.tint }"
-          >
-            <component :is="kpi.icon" class="w-5 h-5" :style="{ color: kpi.color }" />
-          </div>
-          <span
-            class="text-xs px-2 py-0.5 rounded-full"
-            :class="kpi.up ? 'bg-emerald-400/15 text-emerald-300' : 'bg-rose-400/15 text-rose-300'"
-          >
-            {{ kpi.delta }}
-          </span>
-        </div>
-        <p class="mt-4 text-2xl font-bold tracking-tight tabular-nums">
-          {{ animated[kpi.key]?.toLocaleString() ?? '0' }}
-        </p>
-        <p class="text-xs text-white/45 mt-1">{{ kpi.label }}</p>
-        <EChart class="mt-2" :option="sparkOption(kpi)" height="36px" :aria-label="kpi.label + '走势'" />
-      </article>
-    </section>
-
-    <!-- 图表区 -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <!-- 查询趋势 -->
-      <article class="chart-card glass-card p-5 lg:col-span-2">
-        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-          <h2 class="font-medium">查询趋势</h2>
-          <div class="flex items-center gap-2">
-            <!-- 时间范围切换 -->
-            <div class="flex p-0.5 rounded-xl bg-white/5 border border-white/10 text-xs">
-              <button
-                v-for="r in ranges"
-                :key="r.value"
-                class="px-2.5 py-1 rounded-lg transition-all duration-200"
-                :class="rangeDays === r.value ? 'text-white shadow' : 'text-white/45 hover:text-white/80'"
-                :style="rangeDays === r.value ? { backgroundImage: 'var(--image-liquid-gradient)' } : {}"
-                @click="switchRange(r.value)"
-              >
-                {{ r.label }}
-              </button>
-            </div>
-            <!-- 图表类型切换 -->
-            <div class="flex p-0.5 rounded-xl bg-white/5 border border-white/10">
-              <button
-                class="p-1.5 rounded-lg transition-all duration-200"
-                :class="chartMode === 'line' ? 'text-white bg-white/15' : 'text-white/40 hover:text-white/80'"
-                aria-label="折线图"
-                @click="chartMode = 'line'"
-              >
-                <TrendingUp class="w-3.5 h-3.5" />
-              </button>
-              <button
-                class="p-1.5 rounded-lg transition-all duration-200"
-                :class="chartMode === 'bar' ? 'text-white bg-white/15' : 'text-white/40 hover:text-white/80'"
-                aria-label="柱状图"
-                @click="chartMode = 'bar'"
-              >
-                <BarChart3 class="w-3.5 h-3.5" />
-              </button>
-            </div>
-            <button
-              class="p-1.5 rounded-lg text-white/40 hover:text-white transition-colors"
-              aria-label="刷新数据"
-              @click="refresh"
-            >
-              <RefreshCw class="w-4 h-4" :class="spinning ? 'animate-spin' : ''" />
-            </button>
-          </div>
-        </div>
-        <EChart ref="trendChartRef" :option="trendOption" height="300px" aria-label="查询趋势图" />
-      </article>
-
-      <!-- 数据源类型分布 -->
-      <article class="chart-card glass-card p-5">
-        <h2 class="font-medium mb-2">数据源类型分布</h2>
-        <EChart
-          ref="donutChartRef"
-          :option="donutOption"
-          height="230px"
-          aria-label="数据源类型分布环形图"
-        />
-        <ul class="mt-2 space-y-2 text-sm">
-          <li
-            v-for="(row, i) in distribution"
-            :key="row.label"
-            class="flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer transition-colors hover:bg-white/5"
-            @mouseenter="highlightSlice(i)"
-            @mouseleave="clearHighlight"
-          >
-            <span class="w-2.5 h-2.5 rounded-sm" :style="{ background: row.color }" />
-            <span class="text-white/60 flex-1">{{ row.label }}</span>
-            <span class="text-white/85 tabular-nums">{{ row.value }}</span>
-            <span class="text-white/35 text-xs w-10 text-right">{{ row.percent }}%</span>
-          </li>
-        </ul>
-      </article>
-    </section>
-
-    <!-- 底部：排行 + 最近查询 -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-      <article class="chart-card glass-card p-5">
-        <h2 class="font-medium mb-4">库查询量排行</h2>
-        <EChart :option="rankOption" height="240px" aria-label="库查询量排行条形图" />
-      </article>
-
-      <article class="table-card glass-card p-5 lg:col-span-2">
-        <h2 class="font-medium mb-4">最近查询历史</h2>
-        <div class="overflow-x-auto">
-          <table class="w-full min-w-[560px] text-sm">
-            <thead>
-              <tr class="text-left text-white/40 text-xs border-b border-white/10">
-                <th class="pb-3 font-medium">数据源</th>
-                <th class="pb-3 font-medium">SQL 摘要</th>
-                <th class="pb-3 font-medium">耗时</th>
-                <th class="pb-3 font-medium">行数</th>
-                <th class="pb-3 font-medium">时间</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(row, i) in recentQueries"
-                :key="i"
-                class="history-row border-b border-white/5 last:border-0 hover:bg-white/5 transition-colors"
-              >
-                <td class="py-3 text-white/80 whitespace-nowrap">{{ row.connection }}</td>
-                <td class="py-3">
-                  <code
-                    class="text-xs px-2 py-1 rounded"
-                    :class="row.failed ? 'text-rose-200/80 bg-rose-400/10' : 'text-indigo-200/80 bg-indigo-400/10'"
-                  >{{ row.sql }}</code>
-                </td>
-                <td class="py-3 text-white/60 whitespace-nowrap">{{ row.duration }}</td>
-                <td class="py-3 tabular-nums" :class="row.failed ? 'text-rose-300/80' : 'text-white/60'">{{ row.rows }}</td>
-                <td class="py-3 text-white/35 whitespace-nowrap">{{ row.time }}</td>
-              </tr>
-              <tr v-if="!recentQueries.length">
-                <td colspan="5" class="py-10 text-center text-white/35 text-sm">
-                  暂无查询记录，去 数据工作台执行第一条查询吧
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </article>
-    </section>
-
-    <!-- 查询性能监控（复用工作台监控能力） -->
-    <section class="grid grid-cols-1 gap-4">
-      <article class="glass-card p-0 overflow-hidden">
-        <div class="px-5 py-3 border-b border-white/10 flex items-center gap-2">
-          <h2 class="font-medium">查询性能监控</h2>
-          <span class="text-xs text-white/40">复用 数据工作台监控能力 · 实时</span>
-          <div class="flex-1" />
-          <button class="ghost-button text-xs py-1 px-2" @click="$router.push('/query')">前往工作台</button>
-        </div>
-        <div class="h-[520px]">
-          <PerformanceMonitorPane @reuse="(sql)=> $router.push({ path: '/query', query: { sql } })" />
-        </div>
-      </article>
-    </section>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef } from 'vue'
 import { gsap } from 'gsap'
@@ -209,12 +27,12 @@ const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').mat
 
 /* ---------- 玻璃化 tooltip 公共配置 ---------- */
 const glassTooltip = {
-  backgroundColor: 'rgba(20, 28, 48, 0.94)',
-  borderColor: 'rgba(255,255,255,0.14)',
+  backgroundColor: 'var(--db-surface-overlay)',
+  borderColor: 'var(--db-divider)',
   borderWidth: 1,
   padding: [8, 12],
-  textStyle: { color: '#fff', fontSize: 12 },
-  extraCssText: 'backdrop-filter: blur(20px); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.4);',
+  textStyle: { color: 'var(--db-text-primary)', fontSize: 12 },
+  extraCssText: 'backdrop-filter: blur(var(--db-blur-overlay)); border-radius: var(--db-radius-control); box-shadow: var(--db-shadow-overlay);',
 }
 
 /* ---------- KPI ---------- */
@@ -230,10 +48,10 @@ interface Kpi {
   spark: number[]
 }
 const kpis = reactive<Kpi[]>([
-  { key: 'sources', label: '数据源总数', value: 0, delta: '已纳管', up: true, icon: Database, color: '#818cf8', tint: 'rgba(102,126,234,0.18)', spark: [] },
-  { key: 'queries', label: '今日查询数', value: 0, delta: '今日', up: true, icon: Activity, color: '#34d399', tint: 'rgba(16,185,129,0.18)', spark: [] },
-  { key: 'active_users', label: '今日活跃用户', value: 0, delta: '今日', up: true, icon: Users, color: '#f472b6', tint: 'rgba(236,72,153,0.16)', spark: [] },
-  { key: 'audits', label: '审计事件', value: 0, delta: '累计', up: true, icon: ScrollText, color: '#fbbf24', tint: 'rgba(251,191,36,0.16)', spark: [] },
+  { key: 'sources', label: '数据源总数', value: 0, delta: '已纳管', up: true, icon: Database, color: 'var(--db-chart-2)', tint: 'color-mix(in srgb, var(--db-chart-2) 18%, transparent)', spark: [] },
+  { key: 'queries', label: '今日查询数', value: 0, delta: '今日', up: true, icon: Activity, color: 'var(--db-chart-3)', tint: 'color-mix(in srgb, var(--db-chart-3) 18%, transparent)', spark: [] },
+  { key: 'active_users', label: '今日活跃用户', value: 0, delta: '今日', up: true, icon: Users, color: 'var(--db-chart-5)', tint: 'color-mix(in srgb, var(--db-chart-5) 16%, transparent)', spark: [] },
+  { key: 'audits', label: '审计事件', value: 0, delta: '累计', up: true, icon: ScrollText, color: 'var(--db-chart-4)', tint: 'color-mix(in srgb, var(--db-chart-4) 16%, transparent)', spark: [] },
 ])
 const animated = reactive<Record<string, number>>({})
 
@@ -256,8 +74,8 @@ function sparkOption(kpi: Kpi): EChartsCoreOption {
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: kpi.color + '55' },
-              { offset: 1, color: kpi.color + '00' },
+              { offset: 0, color: `color-mix(in srgb, ${kpi.color} 33.33%, transparent)` },
+              { offset: 1, color: `color-mix(in srgb, ${kpi.color} 0%, transparent)` },
             ],
           },
         },
@@ -291,9 +109,9 @@ function applyTrend(data: MetricsOverview['trend']) {
 }
 
 const axisCommon = {
-  axisLine: { lineStyle: { color: 'rgba(255,255,255,0.12)' } },
+  axisLine: { lineStyle: { color: 'var(--db-divider)' } },
   axisTick: { show: false },
-  axisLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11 },
+  axisLabel: { color: 'var(--db-text-secondary)', fontSize: 11 },
 }
 
 const trendOption = computed<EChartsCoreOption>(() => {
@@ -306,7 +124,7 @@ const trendOption = computed<EChartsCoreOption>(() => {
       ...glassTooltip,
       axisPointer: {
         type: isLine ? 'line' : 'shadow',
-        lineStyle: { color: 'rgba(255,255,255,0.25)' },
+        lineStyle: { color: 'var(--db-divider)' },
       },
     },
     legend: {
@@ -316,14 +134,14 @@ const trendOption = computed<EChartsCoreOption>(() => {
       itemWidth: 12,
       itemHeight: 8,
       icon: 'roundRect',
-      textStyle: { color: 'rgba(255,255,255,0.55)', fontSize: 11 },
+      textStyle: { color: 'var(--db-text-secondary)', fontSize: 11 },
     },
     grid: { left: 8, right: 12, top: 34, bottom: 4, containLabel: true },
     xAxis: { type: 'category', data: trend.labels, boundaryGap: isLine ? false : true, ...axisCommon },
     yAxis: {
       type: 'value',
-      splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)', type: 'dashed' } },
-      axisLabel: { color: 'rgba(255,255,255,0.4)', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'var(--db-divider)', type: 'dashed' } },
+      axisLabel: { color: 'var(--db-text-secondary)', fontSize: 11 },
     },
     series: isLine
       ? [
@@ -334,15 +152,15 @@ const trendOption = computed<EChartsCoreOption>(() => {
             symbol: 'circle',
             symbolSize: 6,
             showSymbol: false,
-            lineStyle: { width: 2.5, color: '#818cf8' },
-            itemStyle: { color: '#818cf8', borderColor: '#0f172a', borderWidth: 2 },
+            lineStyle: { width: 2.5, color: 'var(--db-chart-2)' },
+            itemStyle: { color: 'var(--db-chart-2)', borderColor: 'var(--db-surface-solid)', borderWidth: 2 },
             emphasis: { focus: 'series', scale: 1.4 },
             areaStyle: {
               color: {
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: 'rgba(129,140,248,0.45)' },
-                  { offset: 1, color: 'rgba(129,140,248,0.02)' },
+                  { offset: 0, color: 'color-mix(in srgb, var(--db-chart-2) 45%, transparent)' },
+                  { offset: 1, color: 'color-mix(in srgb, var(--db-chart-2) 2%, transparent)' },
                 ],
               },
             },
@@ -353,15 +171,15 @@ const trendOption = computed<EChartsCoreOption>(() => {
             type: 'line',
             smooth: true,
             symbol: 'none',
-            lineStyle: { width: 2, color: '#fbbf24' },
-            itemStyle: { color: '#fbbf24' },
+            lineStyle: { width: 2, color: 'var(--db-chart-4)' },
+            itemStyle: { color: 'var(--db-chart-4)' },
             emphasis: { focus: 'series' },
             areaStyle: {
               color: {
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: 'rgba(251,191,36,0.25)' },
-                  { offset: 1, color: 'rgba(251,191,36,0.0)' },
+                  { offset: 0, color: 'color-mix(in srgb, var(--db-chart-4) 25%, transparent)' },
+                  { offset: 1, color: 'color-mix(in srgb, var(--db-chart-4) 0%, transparent)' },
                 ],
               },
             },
@@ -378,19 +196,19 @@ const trendOption = computed<EChartsCoreOption>(() => {
               color: {
                 type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
                 colorStops: [
-                  { offset: 0, color: '#a5b4fc' },
-                  { offset: 1, color: '#6366f1' },
+                  { offset: 0, color: 'var(--db-chart-2)' },
+                  { offset: 1, color: 'var(--db-chart-2)' },
                 ],
               },
             },
-            emphasis: { itemStyle: { color: '#818cf8' } },
+            emphasis: { itemStyle: { color: 'var(--db-chart-2)' } },
             data: trend.queries,
           },
           {
             name: '慢查询',
             type: 'bar',
             barMaxWidth: 14,
-            itemStyle: { borderRadius: [5, 5, 0, 0], color: '#fbbf24' },
+            itemStyle: { borderRadius: [5, 5, 0, 0], color: 'var(--db-chart-4)' },
             data: trend.slow,
           },
         ],
@@ -421,8 +239,8 @@ const donutOption = computed<EChartsCoreOption>(() => ({
     subtext: centerName.value,
     left: 'center',
     top: '38%',
-    textStyle: { color: '#fff', fontSize: 24, fontWeight: 700 },
-    subtextStyle: { color: 'rgba(255,255,255,0.45)', fontSize: 11 },
+    textStyle: { color: 'var(--db-text-primary)', fontSize: 24, fontWeight: 700 },
+    subtextStyle: { color: 'var(--db-text-secondary)', fontSize: 11 },
     itemGap: 4,
   },
   series: [
@@ -435,7 +253,7 @@ const donutOption = computed<EChartsCoreOption>(() => ({
       labelLine: { show: false },
       itemStyle: {
         borderRadius: 7,
-        borderColor: '#121a30',
+        borderColor: 'var(--db-surface-solid)',
         borderWidth: 4,
       },
       emphasis: {
@@ -443,7 +261,7 @@ const donutOption = computed<EChartsCoreOption>(() => ({
         scaleSize: 6,
         itemStyle: {
           shadowBlur: 20,
-          shadowColor: 'rgba(102,126,234,0.5)',
+          shadowColor: 'color-mix(in srgb, var(--db-chart-2) 50%, transparent)',
         },
       },
       data: distribution.map((d) => ({
@@ -454,7 +272,7 @@ const donutOption = computed<EChartsCoreOption>(() => ({
             type: 'linear', x: 0, y: 0, x2: 1, y2: 1,
             colorStops: [
               { offset: 0, color: d.color },
-              { offset: 1, color: d.color + '99' },
+              { offset: 1, color: `color-mix(in srgb, ${d.color} 60%, transparent)` },
             ],
           },
         },
@@ -495,8 +313,8 @@ const rankOption = computed<EChartsCoreOption>(() => ({
   grid: { left: 8, right: 28, top: 6, bottom: 4, containLabel: true },
   xAxis: {
     type: 'value',
-    splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)', type: 'dashed' } },
-    axisLabel: { color: 'rgba(255,255,255,0.35)', fontSize: 10 },
+    splitLine: { lineStyle: { color: 'var(--db-divider)', type: 'dashed' } },
+    axisLabel: { color: 'var(--db-text-secondary)', fontSize: 10 },
   },
   yAxis: {
     type: 'category',
@@ -504,7 +322,7 @@ const rankOption = computed<EChartsCoreOption>(() => ({
     data: rankData.value.map((d) => d.name),
     axisLine: { show: false },
     axisTick: { show: false },
-    axisLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 11 },
+    axisLabel: { color: 'var(--db-text-secondary)', fontSize: 11 },
   },
   series: [
     {
@@ -516,8 +334,8 @@ const rankOption = computed<EChartsCoreOption>(() => ({
         color: {
           type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
           colorStops: [
-            { offset: 0, color: 'rgba(102,126,234,0.35)' },
-            { offset: 1, color: '#818cf8' },
+            { offset: 0, color: 'color-mix(in srgb, var(--db-chart-2) 35%, transparent)' },
+            { offset: 1, color: 'var(--db-chart-2)' },
           ],
         },
       },
@@ -526,8 +344,8 @@ const rankOption = computed<EChartsCoreOption>(() => ({
           color: {
             type: 'linear', x: 0, y: 0, x2: 1, y2: 0,
             colorStops: [
-              { offset: 0, color: 'rgba(167,139,250,0.5)' },
-              { offset: 1, color: '#a78bfa' },
+              { offset: 0, color: 'color-mix(in srgb, var(--db-chart-2) 50%, transparent)' },
+              { offset: 1, color: 'var(--db-chart-2)' },
             ],
           },
         },
@@ -535,7 +353,7 @@ const rankOption = computed<EChartsCoreOption>(() => ({
       label: {
         show: true,
         position: 'right',
-        color: 'rgba(255,255,255,0.55)',
+        color: 'var(--db-text-secondary)',
         fontSize: 10,
         formatter: (p: { value: number }) => p.value.toLocaleString(),
       },
@@ -614,9 +432,9 @@ async function loadOverview(days: number, opts: { animate?: boolean } = {}) {
 
     // 类型分布
     const typeMeta: Array<{ key: string; label: string; color: string }> = [
-      { key: 'mysql', label: 'MySQL', color: '#818cf8' },
-      { key: 'postgres', label: 'PostgreSQL', color: '#a78bfa' },
-      { key: 'redis', label: 'Redis', color: '#f472b6' },
+      { key: 'mysql', label: 'MySQL', color: 'var(--db-chart-1)' },
+      { key: 'postgres', label: 'PostgreSQL', color: 'var(--db-chart-2)' },
+      { key: 'redis', label: 'Redis', color: 'var(--db-chart-5)' },
     ]
     totalSources.value = data.kpi.connections
     distribution.splice(
@@ -706,3 +524,185 @@ onMounted(async () => {
 
 onBeforeUnmount(() => entranceCtx?.revert())
 </script>
+
+<template>
+  <div ref="rootRef" class="ui-page-stack">
+    <!-- 欢迎条 -->
+    <header class="flex flex-col sm:flex-row sm:items-end justify-between gap-2">
+      <div>
+        <h1 class="text-xl font-semibold">早上好，{{ userStore.username || '管理员' }}</h1>
+        <p class="text-sm text-muted mt-1">以下是平台今日运行概览</p>
+      </div>
+      <span class="text-xs text-muted">{{ today }}</span>
+    </header>
+
+    <!-- KPI 卡片 -->
+    <section v-data-loading="loading" data-loading-label="正在读取概览数据…" data-loading-variant="chart" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" aria-label="核心指标">
+      <article
+        v-for="kpi in kpis"
+        :key="kpi.label"
+        class="kpi-card glass-card ui-card-padding"
+      >
+        <div class="flex items-start justify-between">
+          <div
+            class="w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-300"
+            :style="{ background: kpi.tint }"
+          >
+            <component :is="kpi.icon" class="w-5 h-5" :style="{ color: kpi.color }" />
+          </div>
+          <span
+            class="text-xs px-2 py-0.5 rounded-full"
+            :class="kpi.up ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'"
+          >
+            {{ kpi.delta }}
+          </span>
+        </div>
+        <p class="mt-4 text-2xl font-bold tracking-tight tabular-nums">
+          {{ animated[kpi.key]?.toLocaleString() ?? '0' }}
+        </p>
+        <p class="text-xs text-muted mt-1">{{ kpi.label }}</p>
+        <EChart class="mt-2" :option="sparkOption(kpi)" height="36px" :aria-label="kpi.label + '走势'" />
+      </article>
+    </section>
+
+    <!-- 图表区 -->
+    <section v-data-loading="loading" data-loading-label="正在读取概览数据…" data-loading-variant="chart" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <!-- 查询趋势 -->
+      <article class="chart-card glass-card lg:col-span-2 ui-card-padding">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 class="font-medium">查询趋势</h2>
+          <div class="flex items-center gap-2">
+            <!-- 时间范围切换 -->
+            <div class="flex p-0.5 rounded-xl bg-surface-muted border border-stroke text-xs">
+              <button
+                v-for="r in ranges"
+                :key="r.value"
+                class="px-2.5 py-1 rounded-lg transition-all duration-200 ui-control-target"
+                :class="rangeDays === r.value ? 'text-on-primary shadow' : 'text-muted hover:text-content'"
+                :style="rangeDays === r.value ? { backgroundImage: 'var(--image-liquid-gradient)' } : {}"
+                @click="switchRange(r.value)"
+              >
+                {{ r.label }}
+              </button>
+            </div>
+            <!-- 图表类型切换 -->
+            <div class="flex p-0.5 rounded-xl bg-surface-muted border border-stroke">
+              <button
+                class="p-1.5 rounded-lg transition-all duration-200 ui-control-target"
+                :class="chartMode === 'line' ? 'text-content bg-surface-muted' : 'text-subtle hover:text-content'"
+                aria-label="折线图"
+                @click="chartMode = 'line'"
+              >
+                <TrendingUp class="w-3.5 h-3.5" />
+              </button>
+              <button
+                class="p-1.5 rounded-lg transition-all duration-200 ui-control-target"
+                :class="chartMode === 'bar' ? 'text-content bg-surface-muted' : 'text-subtle hover:text-content'"
+                aria-label="柱状图"
+                @click="chartMode = 'bar'"
+              >
+                <BarChart3 class="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <button
+              class="p-1.5 rounded-lg text-subtle hover:text-content transition-colors ui-control-target"
+              aria-label="刷新数据"
+              @click="refresh"
+            >
+              <RefreshCw class="w-4 h-4" :class="spinning ? 'animate-spin' : ''" />
+            </button>
+          </div>
+        </div>
+        <EChart ref="trendChartRef" :option="trendOption" height="300px" aria-label="查询趋势图" />
+      </article>
+
+      <!-- 数据源类型分布 -->
+      <article class="chart-card glass-card ui-card-padding">
+        <h2 class="font-medium mb-2">数据源类型分布</h2>
+        <EChart
+          ref="donutChartRef"
+          :option="donutOption"
+          height="230px"
+          aria-label="数据源类型分布环形图"
+        />
+        <ul class="mt-2 space-y-2 text-sm">
+          <li
+            v-for="(row, i) in distribution"
+            :key="row.label"
+            class="flex items-center gap-2 px-2 py-1 rounded-lg cursor-pointer transition-colors hover:bg-interactive"
+            @mouseenter="highlightSlice(i)"
+            @mouseleave="clearHighlight"
+          >
+            <span class="w-2.5 h-2.5 rounded-sm" :style="{ background: row.color }" />
+            <span class="text-muted flex-1">{{ row.label }}</span>
+            <span class="text-content tabular-nums">{{ row.value }}</span>
+            <span class="text-subtle text-xs w-10 text-right">{{ row.percent }}%</span>
+          </li>
+        </ul>
+      </article>
+    </section>
+
+    <!-- 底部：排行 + 最近查询 -->
+    <section v-data-loading="loading" data-loading-label="正在读取概览数据…" data-loading-variant="chart" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <article class="chart-card glass-card ui-card-padding">
+        <h2 class="font-medium mb-4">库查询量排行</h2>
+        <EChart :option="rankOption" height="240px" aria-label="库查询量排行条形图" />
+      </article>
+
+      <article class="table-card glass-card lg:col-span-2 ui-card-padding">
+        <h2 class="font-medium mb-4">最近查询历史</h2>
+        <div class="overflow-x-auto">
+          <table class="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr class="text-left text-subtle text-xs border-b border-stroke">
+                <th class="pb-3 font-medium">数据源</th>
+                <th class="pb-3 font-medium">SQL 摘要</th>
+                <th class="pb-3 font-medium">耗时</th>
+                <th class="pb-3 font-medium">行数</th>
+                <th class="pb-3 font-medium">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="(row, i) in recentQueries"
+                :key="i"
+                class="history-row border-b border-stroke last:border-0 hover:bg-interactive transition-colors"
+              >
+                <td class="py-3 text-content whitespace-nowrap">{{ row.connection }}</td>
+                <td class="py-3">
+                  <code
+                    class="text-xs px-2 py-1 rounded"
+                    :class="row.failed ? 'text-danger bg-danger-soft' : 'text-accent bg-accent-soft'"
+                  >{{ row.sql }}</code>
+                </td>
+                <td class="py-3 text-muted whitespace-nowrap">{{ row.duration }}</td>
+                <td class="py-3 tabular-nums" :class="row.failed ? 'text-danger' : 'text-muted'">{{ row.rows }}</td>
+                <td class="py-3 text-subtle whitespace-nowrap">{{ row.time }}</td>
+              </tr>
+              <tr v-if="!recentQueries.length">
+                <td colspan="5" class="py-10 text-center text-subtle text-sm">
+                  暂无查询记录，去 数据工作台执行第一条查询吧
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <!-- 查询性能监控（复用工作台监控能力） -->
+    <section v-data-loading="loading" data-loading-label="正在读取概览数据…" data-loading-variant="chart" class="grid grid-cols-1 gap-4">
+      <article class="glass-card p-0 overflow-hidden">
+        <div class="px-5 py-3 border-b border-stroke flex items-center gap-2">
+          <h2 class="font-medium">查询性能监控</h2>
+          <span class="text-xs text-subtle">复用 数据工作台监控能力 · 实时</span>
+          <div class="flex-1" />
+          <button class="ghost-button text-xs py-1 px-2 ui-control-target" @click="$router.push('/query')">前往工作台</button>
+        </div>
+        <div class="h-[520px]">
+          <PerformanceMonitorPane @reuse="(sql)=> $router.push({ path: '/query', query: { sql } })" />
+        </div>
+      </article>
+    </section>
+  </div>
+</template>

@@ -195,7 +195,7 @@ func (r *ConnectorCatalog) SetEnabled(ctx context.Context, kind string, id int64
 	if kind == "template" {
 		query = `UPDATE sys_datasource_templates SET enabled=$2 WHERE id=$1 AND ((visibility='private' AND created_by=$3) OR (visibility='global' AND $4))`
 	}
-	tag, e := r.pool.Exec(ctx, query, id, enabled, ActorID(ctx), ActorAdmin(ctx))
+	tag, e := r.pool.Exec(ctx, query, id, enabled, ActorID(ctx), ActorCapability(ctx, "datasource_manage"))
 	if e != nil {
 		return catalogError(e)
 	}
@@ -209,7 +209,7 @@ func (r *ConnectorCatalog) Delete(ctx context.Context, kind string, id int64) er
 	if kind == "template" {
 		query = `DELETE FROM sys_datasource_templates WHERE id=$1 AND ((visibility='private' AND created_by=$2) OR (visibility='global' AND $3))`
 	}
-	tag, e := r.pool.Exec(ctx, query, id, ActorID(ctx), ActorAdmin(ctx))
+	tag, e := r.pool.Exec(ctx, query, id, ActorID(ctx), ActorCapability(ctx, "datasource_manage"))
 	if e != nil {
 		return catalogError(e)
 	}

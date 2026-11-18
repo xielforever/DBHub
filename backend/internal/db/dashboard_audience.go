@@ -68,17 +68,17 @@ func (r *ManagedDashboardRepository) AudienceChange(ctx context.Context, key str
 		if e != nil {
 			return out, e
 		}
-		if owner != ActorID(ctx) && !ActorAdmin(ctx) {
+		if owner != ActorID(ctx) && !ActorDashboardReviewer(ctx) {
 			return out, ErrManagedDenied
 		}
 		if base != no {
 			return out, ErrManagedConflict
 		}
-		var role *string
-		if e = tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, reviewer).Scan(&role); e != nil {
+		var eligible bool
+		if e = tx.QueryRow(ctx, `SELECT dbhub_iam_can_review($1,'dashboard')`, reviewer).Scan(&eligible); e != nil {
 			return out, e
 		}
-		if reviewer == ActorID(ctx) || role == nil || *role != "admin" {
+		if reviewer == ActorID(ctx) || !eligible {
 			return out, ErrManagedInput
 		}
 		if _, e = tx.Exec(ctx, `UPDATE sys_dashboard_reviews SET status='expired' WHERE dashboard_id=$1 AND status='pending' AND expires_at<=now()`, id); e != nil {

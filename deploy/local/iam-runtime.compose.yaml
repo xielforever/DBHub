@@ -1,0 +1,31 @@
+# Shared runtime for isolated functional fixtures. Import with extends; this
+# file defines no performance workload or published service port.
+services:
+  go-api:
+    image: dbhub-local/golang:1.26.9-bookworm
+    pull_policy: never
+    working_dir: /src
+    environment:
+      CGO_ENABLED: "1"
+      GOFLAGS: -mod=vendor
+      GOTOOLCHAIN: local
+      GOPROXY: "off"
+      GOMAXPROCS: "4"
+      META_DB_MAX_CONNS: "8"
+      APP_ENV: development
+      APP_SECRET_KEY: ${IAM_APP_SECRET:?isolated app secret required}
+      APP_ADMIN_USERNAME: iam-fixture
+      APP_ADMIN_PASSWORD: ${IAM_DEMO_PASSWORD:?isolated fixture password required}
+      REDIS_URL: redis://redis:6379/6
+      DBHUB_AUDIT_DIR: /audit
+      LOG_LEVEL: error
+      DBHUB_LOGIN_MAX_ATTEMPTS: "1000"
+      DBHUB_LOGIN_IP_MAX_ATTEMPTS: "10000"
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+    command: [sh, -ec, "install -d -m 0700 /audit; go build -p=2 -trimpath -o /out/server ./cmd/server; exec /out/server"]
+    logging: {options: {max-size: 10m, max-file: "2"}}
+    depends_on:
+      metadata: {condition: service_healthy}
+      redis: {condition: service_healthy}

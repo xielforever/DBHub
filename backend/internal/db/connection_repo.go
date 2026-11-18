@@ -52,8 +52,14 @@ type Connection struct {
 
 // ConnectionRepository 连接仓储，口令 AES-GCM 加密落库。
 type ConnectionRepository struct {
-	pool   *ScopedPool
-	cipher *crypto.Cipher
+	pool                  *ScopedPool
+	cipher                *crypto.Cipher
+	phase2ReportIsolation string
+}
+
+// ConfigurePhase2Reports supplies the isolation key before report routes and workers are constructed.
+func (r *ConnectionRepository) ConfigurePhase2Reports(isolation string) {
+	r.phase2ReportIsolation = isolation
 }
 
 func NewConnectionRepository(pool *pgxpool.Pool, cipher *crypto.Cipher) *ConnectionRepository {
@@ -121,14 +127,14 @@ func scanConnection(row pgx.Row, extra ...any) (*Connection, error) {
 
 // List returns only the current user's personal connections, including for admins.
 func (r *ConnectionRepository) List(ctx context.Context, dbType, keyword string) ([]Connection, error) {
-	like := "%" + keyword + "%"
-	q := `SELECT ` + connSelectCols + `
-		FROM sys_connections c
-		LEFT JOIN sys_ssh_tunnels t ON t.id = c.ssh_tunnel_id
-		WHERE c.user_id=$3 AND ($1 = '' OR c.type = $1)
-		  AND ($2 = '' OR c.name ILIKE $2 OR c.host ILIKE $2)
-		ORDER BY c.id DESC`
-	rows, err := r.pool.Query(ctx, q, dbType, like, ActorID(ctx))
+	query := r.pool.Query
+	if tx, unlock, err := connectionReadTransaction(ctx, r.pool); err != nil {
+		return nil, err
+	} else if tx != nil {
+		defer unlock()
+		query = tx.Query
+	}
+	rows, err := query(ctx, `SELECT * FROM dbhub_connection_list($1,$2,$3)`, dbType, keyword, ActorID(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("查询连接列表失败: %w", err)
 	}

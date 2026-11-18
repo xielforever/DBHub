@@ -15,6 +15,39 @@ type ManagedDashboardHandler struct {
 func NewManagedDashboardHandler(repo *db.ManagedDashboardRepository) *ManagedDashboardHandler {
 	return &ManagedDashboardHandler{repo}
 }
+
+func (h *ManagedDashboardHandler) DataReview(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.DashboardReviewID = id
+		d.DashboardMode = "isolated_data_review"
+	})
+	if r.Method == http.MethodGet {
+		out, err := h.repo.DataReview(ctx, id)
+		if err != nil {
+			ManagedError(w, err)
+			return
+		}
+		auditctx.Update(ctx, func(d *auditctx.Data) { d.DashboardID = out.DashboardID })
+		if err = auditctx.Checkpoint(ctx); err != nil {
+			httpx.Fail(w, httpx.New(50300, "审计存储暂不可用", nil))
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.OK(w, out)
+		return
+	}
+	in, ok := decodeDataReviewDecision(w, r)
+	if !ok {
+		return
+	}
+	result, err := h.repo.DecideDataReview(ctx, in.RequestID, id, in.Hash, in.Decision, in.Comment)
+	commandResponse(w, result, err)
+}
 func (h *ManagedDashboardHandler) Preflight(w http.ResponseWriter, r *http.Request) {
 	id, ok := reportID(w, r)
 	if !ok {
@@ -157,8 +190,9 @@ func (h *ManagedDashboardHandler) Refresh(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var in struct {
-		Mode     string `json:"mode"`
-		ReviewID int64  `json:"review_id"`
+		Mode     string         `json:"mode"`
+		Params   map[string]any `json:"params"`
+		ReviewID int64          `json:"review_id"`
 	}
 	if e := httpx.DecodeJSON(w, r, &in); e != nil {
 		httpx.Fail(w, e)
@@ -167,7 +201,7 @@ func (h *ManagedDashboardHandler) Refresh(w http.ResponseWriter, r *http.Request
 	if in.Mode == "" {
 		in.Mode = "published"
 	}
-	out, e := h.repo.Refresh(r.Context(), id, in.Mode, in.ReviewID)
+	out, e := h.repo.Refresh(r.Context(), id, in.Mode, in.ReviewID, in.Params)
 	if e != nil {
 		ManagedError(w, e)
 		return

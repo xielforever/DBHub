@@ -12,6 +12,9 @@ RUN --mount=type=secret,id=proxy_ca,required=true,mode=0444 \
     python3 fetch-artifacts.py artifacts.lock.json /out/lib
 COPY src/DBHubJdbc.java ./
 RUN mkdir /out/classes && javac -encoding UTF-8 -cp '/out/lib/*' -d /out/classes DBHubJdbc.java
+COPY test/ ./test/
+RUN mkdir /tmp/jdbc-tests && javac -encoding UTF-8 -cp '/out/classes:/out/lib/*' -d /tmp/jdbc-tests test/*.java \
+    && java -cp '/tmp/jdbc-tests:/out/classes:/out/lib/*' ConnectionDiagnosticsTest
 
 FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 RUN --mount=type=secret,id=proxy_ca,required=true,mode=0444 \

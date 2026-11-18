@@ -1,49 +1,18 @@
-<template>
-  <div class="chart-card">
-    <!-- 表格模式 -->
-    <div v-if="chartType === 'table'" class="overflow-auto max-h-[400px]">
-      <table class="w-full text-sm">
-        <thead class="sticky top-0 bg-white/5 backdrop-blur">
-          <tr class="text-left text-white/45 text-xs">
-            <th v-for="c in columns" :key="c" class="px-3 py-2 font-medium whitespace-nowrap">{{ c }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, i) in displayRows" :key="i" class="border-b border-white/5 last:border-0 hover:bg-white/5">
-            <td v-for="(cell, j) in row" :key="j" class="px-3 py-2 text-white/70 max-w-[240px] truncate" :title="String(cell ?? '')">
-              <span v-if="cell === null || cell === undefined" class="text-white/25 italic">NULL</span>
-              <template v-else>{{ cell }}</template>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <!-- 指标卡 -->
-    <div v-else-if="chartType === 'metric'" class="flex flex-col items-center justify-center py-8 gap-2">
-      <p class="text-xs text-white/40">{{ metricLabel }}</p>
-      <p class="text-4xl font-bold tabular-nums bg-gradient-to-r from-indigo-300 to-violet-300 bg-clip-text text-transparent">
-        {{ metricValue }}
-      </p>
-      <p v-if="metricSub" class="text-[11px] text-white/30">{{ metricSub }}</p>
-    </div>
-
-    <!-- ECharts -->
-    <EChart v-else :option="echartOption" :height="height" :aria-label="`${chartType} 图表`" />
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed } from 'vue'
 import EChart from '../../base/EChart.vue'
+import ReportResult from '../../../views/report/ReportResult.vue'
 import type { EChartsCoreOption } from 'echarts/core'
 
-export type ChartKind = 'table' | 'bar' | 'line' | 'pie' | 'metric'
+export type ChartKind = 'table' | 'bar' | 'line' | 'pie' | 'metric' | 'pivot' | 'stacked_bar' | 'dual_axis'
 
 export interface ChartConfig {
   dimension?: string // 维度列名
   metrics?: string[] // 指标列名
   display?: { labels?: Record<string, string>; grouping?: boolean; fraction_digits?: number }
+  pivot?: { column: string }
+  dual_axis?: { right_metrics: string[]; left_unit: string; right_unit: string }
+  drillthrough?: { report_id: number; bindings: Record<string, string> }
   aggregation?: 'sum' | 'count' | 'avg' | 'min' | 'max'
   sort?: 'asc' | 'desc'
   topN?: number
@@ -162,25 +131,25 @@ const echartOption = computed<EChartsCoreOption>(() => {
   if (props.chartType === 'bar') {
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: metrics, textStyle: { color: 'rgba(255,255,255,0.6)' }, top: 0 },
+      legend: { data: metrics, textStyle: { color: 'var(--db-text-secondary)' }, top: 0 },
       grid: { left: 48, right: 16, top: 32, bottom: 24, containLabel: true },
       xAxis: {
         type: 'category',
         data: groups.map(g => g.key),
-        axisLabel: { color: 'rgba(255,255,255,0.5)', interval: 0, rotate: groups.length > 12 ? 30 : 0 },
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+        axisLabel: { color: 'var(--db-text-secondary)', interval: 0, rotate: groups.length > 12 ? 30 : 0 },
+        axisLine: { lineStyle: { color: 'var(--db-divider)' } },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: 'rgba(255,255,255,0.5)' },
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+        axisLabel: { color: 'var(--db-text-secondary)' },
+        splitLine: { lineStyle: { color: 'var(--db-divider)' } },
       },
       series: metrics.map((m, idx) => ({
         name: m,
         type: 'bar',
         data: groups.map(g => agg(g.values[m] ?? [], aggMethod)),
         itemStyle: {
-          color: ['#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6','#67e8f9'][idx % 6],
+          color: ['var(--db-chart-2)','var(--db-chart-1)','var(--db-chart-3)','var(--db-chart-4)','var(--db-chart-5)','var(--db-chart-6)'][idx % 6],
           borderRadius: [6,6,0,0],
         },
         emphasis: { focus: 'series' as const },
@@ -193,27 +162,27 @@ const echartOption = computed<EChartsCoreOption>(() => {
   if (props.chartType === 'line') {
     return {
       tooltip: { trigger: 'axis' },
-      legend: { data: metrics, textStyle: { color: 'rgba(255,255,255,0.6)' }, top: 0 },
+      legend: { data: metrics, textStyle: { color: 'var(--db-text-secondary)' }, top: 0 },
       grid: { left: 48, right: 16, top: 32, bottom: 24, containLabel: true },
       xAxis: {
         type: 'category',
         data: groups.map(g => g.key),
-        axisLabel: { color: 'rgba(255,255,255,0.5)' },
-        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.1)' } },
+        axisLabel: { color: 'var(--db-text-secondary)' },
+        axisLine: { lineStyle: { color: 'var(--db-divider)' } },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: 'rgba(255,255,255,0.5)' },
-        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.06)' } },
+        axisLabel: { color: 'var(--db-text-secondary)' },
+        splitLine: { lineStyle: { color: 'var(--db-divider)' } },
       },
       series: metrics.map((m, idx) => ({
         name: m,
         type: 'line',
         smooth: true,
         data: groups.map(g => agg(g.values[m] ?? [], aggMethod)),
-        lineStyle: { width: 2, color: ['#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6'][idx % 5] },
-        itemStyle: { color: ['#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6'][idx % 5] },
-        areaStyle: { opacity: 0.12, color: ['#a78bfa','#60a5fa','#34d399','#fbbf24','#f472b6'][idx % 5] },
+        lineStyle: { width: 2, color: ['var(--db-chart-2)','var(--db-chart-1)','var(--db-chart-3)','var(--db-chart-4)','var(--db-chart-5)'][idx % 5] },
+        itemStyle: { color: ['var(--db-chart-2)','var(--db-chart-1)','var(--db-chart-3)','var(--db-chart-4)','var(--db-chart-5)'][idx % 5] },
+        areaStyle: { opacity: 0.12, color: ['var(--db-chart-2)','var(--db-chart-1)','var(--db-chart-3)','var(--db-chart-4)','var(--db-chart-5)'][idx % 5] },
         animationDelay: (i: number) => i * 20,
       })),
     }
@@ -231,16 +200,16 @@ const echartOption = computed<EChartsCoreOption>(() => {
         orient: 'vertical',
         right: 12,
         top: 'center',
-        textStyle: { color: 'rgba(255,255,255,0.6)', fontSize: 11 },
+        textStyle: { color: 'var(--db-text-secondary)', fontSize: 11 },
       },
       series: [{
         type: 'pie',
         radius: ['42%','72%'],
         center: ['38%','50%'],
-        itemStyle: { borderRadius: 6, borderColor: 'rgba(0,0,0,0.3)', borderWidth: 2 },
-        label: { color: 'rgba(255,255,255,0.6)' },
+        itemStyle: { borderRadius: 6, borderColor: 'var(--db-surface-solid)', borderWidth: 2 },
+        label: { color: 'var(--db-text-secondary)' },
         data,
-        emphasis: { itemStyle: { shadowBlur: 12, shadowColor: 'rgba(0,0,0,0.4)' } },
+        emphasis: { itemStyle: { shadowBlur: 12, shadowColor: 'var(--db-scrim)' } },
       }],
     }
   }
@@ -249,9 +218,46 @@ const echartOption = computed<EChartsCoreOption>(() => {
 })
 </script>
 
+<template>
+  <div class="chart-card ui-inset-card">
+    <ReportResult v-if="['pivot','stacked_bar','dual_axis'].includes(chartType)" :type="chartType" :config="config" :result="{kind:'query',columns,rows,duration_ms:0}" title="查询分析" />
+    <!-- 表格模式 -->
+    <div v-else-if="chartType === 'table'" class="overflow-auto max-h-[400px]">
+      <table class="w-full text-sm">
+        <thead class="sticky top-0 bg-surface-muted backdrop-blur">
+          <tr class="text-left text-muted text-xs">
+            <th v-for="c in columns" :key="c" class="px-3 py-2 font-medium whitespace-nowrap">{{ c }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, i) in displayRows" :key="i" class="border-b border-stroke last:border-0 hover:bg-interactive">
+            <td v-for="(cell, j) in row" :key="j" class="px-3 py-2 text-muted max-w-[240px] truncate" :title="String(cell ?? '')">
+              <span v-if="cell === null || cell === undefined" class="text-subtle italic">NULL</span>
+              <template v-else>{{ cell }}</template>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 指标卡 -->
+    <div v-else-if="chartType === 'metric'" class="flex flex-col items-center justify-center py-8 gap-2">
+      <p class="text-xs text-subtle">{{ metricLabel }}</p>
+      <p class="text-4xl font-semibold tabular-nums text-content">
+        {{ metricValue }}
+      </p>
+      <p v-if="metricSub" class="text-xs text-subtle">{{ metricSub }}</p>
+    </div>
+
+    <!-- ECharts -->
+    <EChart v-else :option="echartOption" :height="height" :aria-label="`${chartType} 图表`" />
+  </div>
+</template>
+
+
+
 <style scoped>
 .chart-card {
-  border-radius: 0.75rem;
   overflow: hidden;
 }
 </style>

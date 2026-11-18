@@ -60,7 +60,7 @@ def login(page, name):
         page.locator('button[type=submit]').click()
     assert response.value.status == 200
     sessions.append(response.value.json()['data']['access_token'])
-    page.wait_for_url('**/dashboard')
+    page.wait_for_url('**/home')
     page.goto(frontend + '/reports', wait_until='networkidle')
 
 try:

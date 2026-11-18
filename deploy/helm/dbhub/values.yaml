@@ -32,6 +32,11 @@ backend:
 frontend:
   replicas: 1
   image: {repository: "", tag: "", digest: "", pullPolicy: IfNotPresent}
+  service:
+    type: ClusterIP
+    annotations: {}
+    externalTrafficPolicy: Cluster
+    nodePort: null
   resources:
     requests: {cpu: 50m, memory: 64Mi}
     limits: {cpu: "1", memory: 256Mi}

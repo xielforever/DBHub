@@ -11,10 +11,17 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/user/dbhub/internal/targetallowlist"
 )
 
 // Config 应用运行期配置，全部由环境变量注入。
 type Config struct {
+	// Empty by default. Activation additionally requires an owner-provisioned
+	// database isolation marker, current fleet proof and independent approval.
+	IAMIsolationID string
+	// Phase2ReportVerification opts into policy verification and explicitly bound reports in an isolated database.
+	Phase2ReportVerification bool
 	// Env 运行环境：development / staging / production
 	Env string
 	// Port HTTP 监听端口
@@ -39,6 +46,12 @@ type Config struct {
 	DatabaseURL string
 	// MetaDBMaxConns 元数据库连接池上限（单会话线协议代理应设为 1）
 	MetaDBMaxConns int32
+	// MigrationTimeout 启动迁移及运行账号初始化总时限。
+	MigrationTimeout              time.Duration
+	ReadinessTimeout              time.Duration
+	RedisProbeTimeout             time.Duration
+	LoginRedisTimeout             time.Duration
+	ConnectionCheckPersistTimeout time.Duration
 	// RedisURL Redis 缓存 DSN
 	RedisURL                  string
 	CORSOrigins               []string
@@ -51,6 +64,8 @@ type Config struct {
 	LoginWindow               time.Duration
 	TrustedProxyCIDRs         []netip.Prefix
 	Operations                OperationsConfig
+	OIDC                      OIDCConfig
+	NotificationWebhook       NotificationWebhookConfig
 }
 
 type OperationsConfig struct {
@@ -69,21 +84,63 @@ type AdminConfig struct {
 // Load 从环境变量读取配置并执行必要的校验。
 func Load() (*Config, error) {
 	cfg := &Config{
-		JDBCURL: os.Getenv("DBHUB_JDBC_URL"), JDBCToken: os.Getenv("DBHUB_JDBC_TOKEN"),
-		Env:             getenv("APP_ENV", "development"),
-		Port:            getenv("PORT", "8080"),
-		BindHost:        os.Getenv("HTTP_BIND_HOST"),
-		LogLevel:        getenv("LOG_LEVEL", "info"),
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		MetaDBMaxConns:  int32(getenvInt("META_DB_MAX_CONNS", 10)),
-		RedisURL:        os.Getenv("REDIS_URL"),
-		AuditDir:        getenv("DBHUB_AUDIT_DIR", ".dbhub/audit"),
-		AuditMaxPending: getenvInt("DBHUB_AUDIT_MAX_PENDING", 10000),
-		AIBaseURL:       getenv("DBHUB_AI_BASE_URL", "https://api.openai.com/v1"), AIKey: os.Getenv("DBHUB_AI_API_KEY"), AIModel: getenv("DBHUB_AI_MODEL", "gpt-4.1-mini"),
+		IAMIsolationID: os.Getenv("DBHUB_IAM_ISOLATION_ID"),
+		JDBCURL:        os.Getenv("DBHUB_JDBC_URL"), JDBCToken: os.Getenv("DBHUB_JDBC_TOKEN"),
+		Env:                           getenv("APP_ENV", "development"),
+		Port:                          getenv("PORT", "8080"),
+		BindHost:                      os.Getenv("HTTP_BIND_HOST"),
+		LogLevel:                      getenv("LOG_LEVEL", "info"),
+		DatabaseURL:                   os.Getenv("DATABASE_URL"),
+		MetaDBMaxConns:                int32(getenvInt("META_DB_MAX_CONNS", 10)),
+		MigrationTimeout:              30 * time.Second,
+		ReadinessTimeout:              2 * time.Second,
+		RedisProbeTimeout:             500 * time.Millisecond,
+		LoginRedisTimeout:             500 * time.Millisecond,
+		ConnectionCheckPersistTimeout: 3 * time.Second,
+		RedisURL:                      os.Getenv("REDIS_URL"),
+		AuditDir:                      getenv("DBHUB_AUDIT_DIR", ".dbhub/audit"),
+		AuditMaxPending:               getenvInt("DBHUB_AUDIT_MAX_PENDING", 10000),
+		AIBaseURL:                     getenv("DBHUB_AI_BASE_URL", "https://api.openai.com/v1"), AIKey: os.Getenv("DBHUB_AI_API_KEY"), AIModel: getenv("DBHUB_AI_MODEL", "gpt-4.1-mini"),
 		Admin: AdminConfig{
 			Username: getenv("APP_ADMIN_USERNAME", "admin"),
 			Password: getenv("APP_ADMIN_PASSWORD", "admin123"),
 		},
+	}
+	if raw := os.Getenv("DBHUB_MIGRATION_TIMEOUT_SECONDS"); raw != "" {
+		seconds, err := strconv.Atoi(raw)
+		if err != nil || seconds < 1 || seconds > 600 {
+			return nil, errors.New("DBHUB_MIGRATION_TIMEOUT_SECONDS 必须为1到600的整数")
+		}
+		cfg.MigrationTimeout = time.Duration(seconds) * time.Second
+	}
+	for _, setting := range []struct {
+		key  string
+		max  int
+		unit time.Duration
+		dest *time.Duration
+	}{
+		{"DBHUB_READINESS_TIMEOUT_SECONDS", 60, time.Second, &cfg.ReadinessTimeout},
+		{"DBHUB_REDIS_PROBE_TIMEOUT_MS", 10000, time.Millisecond, &cfg.RedisProbeTimeout},
+		{"DBHUB_LOGIN_REDIS_TIMEOUT_MS", 10000, time.Millisecond, &cfg.LoginRedisTimeout},
+		{"DBHUB_CONNECTION_CHECK_PERSIST_TIMEOUT_SECONDS", 60, time.Second, &cfg.ConnectionCheckPersistTimeout},
+	} {
+		if raw := os.Getenv(setting.key); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 || value > setting.max {
+				return nil, fmt.Errorf("%s 必须为1到%d的整数", setting.key, setting.max)
+			}
+			*setting.dest = time.Duration(value) * setting.unit
+		}
+	}
+	if cfg.IAMIsolationID != "" && cfg.Env != "development" {
+		return nil, errors.New("隔离权限切换仅允许 development 验收部署")
+	}
+	if raw := os.Getenv("DBHUB_PHASE2_REPORT_VERIFICATION"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil || (enabled && (cfg.Env != "development" || strings.TrimSpace(cfg.IAMIsolationID) == "")) {
+			return nil, errors.New("阶段2报表验证需要布尔开关、development 环境和隔离登记标识")
+		}
+		cfg.Phase2ReportVerification = enabled
 	}
 	if cfg.BindHost != "" && net.ParseIP(cfg.BindHost) == nil {
 		return nil, errors.New("HTTP_BIND_HOST 必须为空或有效 IP 地址")
@@ -181,16 +238,12 @@ func Load() (*Config, error) {
 		}
 	}
 	if cfg.IsProduction() {
-		rules := strings.TrimSpace(os.Getenv("DBHUB_TARGET_ALLOWLIST"))
+		rules := strings.TrimSpace(os.Getenv(targetallowlist.Env))
 		if rules == "" {
 			return nil, errors.New("生产环境必须配置 DBHUB_TARGET_ALLOWLIST")
 		}
-		for _, rule := range strings.Split(rules, ",") {
-			host, port, err := net.SplitHostPort(strings.TrimSpace(rule))
-			number, parseErr := strconv.Atoi(port)
-			if err != nil || parseErr != nil || host == "" || strings.ContainsAny(host, "/\\@?#;=\r\n\t ") || number < 1 || number > 65535 {
-				return nil, errors.New("DBHUB_TARGET_ALLOWLIST 必须为主机:端口列表")
-			}
+		if _, err := targetallowlist.Parse(rules); err != nil {
+			return nil, fmt.Errorf("%s %w", targetallowlist.Env, err)
 		}
 	}
 	for _, origin := range strings.Split(os.Getenv("CORS_ALLOWED_ORIGINS"), ",") {
@@ -200,6 +253,14 @@ func Load() (*Config, error) {
 			}
 			cfg.CORSOrigins = append(cfg.CORSOrigins, strings.TrimSpace(origin))
 		}
+	}
+	cfg.OIDC = OIDCConfig{Issuer: os.Getenv("DBHUB_OIDC_ISSUER"), ClientID: os.Getenv("DBHUB_OIDC_CLIENT_ID"), ClientSecret: os.Getenv("DBHUB_OIDC_CLIENT_SECRET"), CallbackURL: os.Getenv("DBHUB_OIDC_CALLBACK_URL")}
+	if err := ValidateOIDC(cfg.OIDC, !cfg.IsProduction()); err != nil {
+		return nil, err
+	}
+	cfg.NotificationWebhook = NotificationWebhookConfig{URL: os.Getenv("DBHUB_NOTIFICATION_WEBHOOK_URL"), Secret: os.Getenv("DBHUB_NOTIFICATION_WEBHOOK_SECRET")}
+	if err := ValidateNotificationWebhook(cfg.NotificationWebhook, !cfg.IsProduction()); err != nil {
+		return nil, err
 	}
 	return cfg, nil
 }

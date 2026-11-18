@@ -1,0 +1,43 @@
+# A06 only: frozen 0046 executable and current executable share a disposable
+# upgraded schema. This does not attach either process to the live database.
+services:
+  mixed-current:
+    extends:
+      file: iam-runtime.compose.yaml
+      service: go-api
+    environment:
+      APP_ADMIN_USERNAME: perf-user-1
+      APP_ADMIN_PASSWORD: TestPassword123!
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_mixed_versions
+      REDIS_URL: redis://redis:6379/8
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - mixed-current-build:/out
+      - mixed-current-audit:/audit
+  mixed-legacy:
+    extends:
+      file: iam-runtime.compose.yaml
+      service: go-api
+    environment:
+      APP_ADMIN_USERNAME: perf-user-1
+      APP_ADMIN_PASSWORD: TestPassword123!
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_mixed_versions
+      REDIS_URL: redis://redis:6379/9
+    volumes:
+      - /mnt/c/dev/backups/DBHub/phase1-20261022-094458/restored-working-copy/backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - mixed-legacy-build:/out
+      - mixed-legacy-audit:/audit
+  mixed-probe:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    volumes:
+      - ./iam-mixed-version.mjs:/fixture/mixed.mjs:ro
+      - ../../.dbhub/phase1-test:/evidence
+    command: [node, /fixture/mixed.mjs]
+volumes:
+  mixed-current-build: {}
+  mixed-legacy-build: {}
+  mixed-current-audit: {}
+  mixed-legacy-audit: {}

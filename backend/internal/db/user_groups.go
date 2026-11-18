@@ -21,7 +21,7 @@ func (r *UserRepository) Groups(ctx context.Context, keyword string, limit, offs
 	if e := requireCurrentActor(ctx, r.pool); e != nil {
 		return nil, 0, e
 	}
-	if !ActorAdmin(ctx) {
+	if !ActorReportReviewer(ctx) && !ActorCapability(ctx, "datasource_manage") {
 		return nil, 0, ErrNotFound
 	}
 	var total int64

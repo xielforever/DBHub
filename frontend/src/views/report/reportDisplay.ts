@@ -11,13 +11,21 @@ export function displayLabel(column: string, display?: ReportDisplay): string {
     : column
 }
 
-export function displayUnit(unit?: string): string {
+export function displayUnit(unit?: string, currency?: string): string {
+  if (unit === 'currency' && currency) {
+    const currencies: Record<string, string> = { CNY:'人民币元', USD:'美元', EUR:'欧元', SGD:'新加坡元', HKD:'港元', JPY:'日元' }
+    return Object.prototype.hasOwnProperty.call(currencies, currency) ? currencies[currency]! : currency
+  }
   const labels: Record<string, string> = {
     CNY_10000: '万元',
     CNY: '元',
     item_count: '项',
     item_quantity: '件',
     percent: '%',
+    currency: '金额',
+    hours: '小时',
+    ratio: '比例',
+    currency_and_count: '人民币元／订单数',
   }
   return unit && Object.prototype.hasOwnProperty.call(labels, unit)
     ? labels[unit]!

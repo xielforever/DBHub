@@ -64,9 +64,16 @@ test('missing and duplicate field names fail visibly',()=>{
  assert.match(reportChart('bar',{dimension:'day',metrics:['amount']},{...result,columns:['day','amount','amount']}).error!,/重名/)
 })
 test('unsafe numbers and invalid types fall back to exact result-table values',()=>{
- for (const value of ['9007199254740993','123456789012345.6789','NaN','',true,Number.MAX_SAFE_INTEGER+1,Infinity]) {
+ for (const value of ['9007199254740993','123456789012345.6789','0.123456789012345600','1e-325','NaN','',true,Number.MAX_SAFE_INTEGER+1,Infinity]) {
   assert.ok(reportChart('bar',{dimension:'day',metrics:['amount']},{...result,rows:[['d',value]]}).error)
  }
+})
+test('PostgreSQL decimal padding keeps drawable values and preserves result text', () => {
+ const rows = [['d', '0.30000000000000000000'], ['e', '1.24000000000000000000'], ['f', '0.00000000000000000000']]
+ const chart = reportChart('bar', { dimension: 'day', metrics: ['amount'] }, { ...result, rows })
+ assert.equal(chart.error, undefined)
+ assert.deepEqual(chart.series[0]?.values, [0.3, 1.24, 0])
+ assert.equal(rows[0]?.[1], '0.30000000000000000000')
 })
 test('metric requires a single result row and keeps null distinct from zero',()=>{
  assert.match(reportChart('metric',{metrics:['amount']},result).error!,/一行/)
@@ -84,14 +91,27 @@ test('empty results remain empty instead of fabricating a zero statistic',()=>{
  const data=reportChart('metric',{metrics:['amount']},{...result,rows:[]})
  assert.equal(data.error,undefined);assert.deepEqual(data.series,[])
 })
-test('switching report invalidates the old response even when transport ignores abort',async()=>{
- const scope=effectScope(),run=scope.run(()=>useReportRun<string>())!,old=deferred<string>(),next=deferred<string>()
- let signal!:AbortSignal
- const first=run.run('old',current=>{signal=current;return old.promise})
- const second=run.run('next',()=>next.promise)
- assert.equal(signal.aborted,true)
- next.resolve('next report');await second;old.resolve('old report');await first
- assert.deepEqual(run.state.value,{status:'success',data:'next report'});scope.stop()
+test('a replaced page keeps the newer rows and count after late success or failure', async () => {
+ const expected = { items: ['newer page row'], total: 111 }
+ for (const oldFails of [false, true]) {
+   const scope = effectScope()
+   try {
+     const run = scope.run(() => useReportRun<typeof expected>())!
+     const old = deferred<typeof expected>(), next = deferred<typeof expected>()
+     let signal!: AbortSignal
+     const first = run.run('page:2', current => { signal = current; return old.promise })
+     const second = run.run('page:3', () => next.promise)
+     assert.equal(signal.aborted, true)
+     next.resolve(expected)
+     assert.equal(await second, true)
+     if (oldFails) old.reject(new Error('late page failure'))
+     else old.resolve({ items: ['old page row'], total: 20 })
+     assert.equal(await first, false)
+     assert.deepEqual(run.state.value, { status: 'success', data: expected })
+   } finally {
+     scope.stop()
+   }
+ }
 })
 test('repeated clicks issue one request while the same report is running',async()=>{
  const scope=effectScope(),run=scope.run(()=>useReportRun<string>())!,pending=deferred<string>();let calls=0

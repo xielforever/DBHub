@@ -12,12 +12,14 @@ import (
 	"github.com/user/dbhub/internal/auditlog"
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/automation"
+	"github.com/user/dbhub/internal/businessops"
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/datasource"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/health"
 	"github.com/user/dbhub/internal/httpx"
+	"github.com/user/dbhub/internal/iam"
 	"github.com/user/dbhub/internal/lineage"
 	"github.com/user/dbhub/internal/lineageapi"
 	"github.com/user/dbhub/internal/metrics"
@@ -32,29 +34,39 @@ import (
 
 // Deps 路由装配所需的仓储与处理器依赖（接入 PostgreSQL 后非空）。
 type Deps struct {
-	UserRepo     *db.UserRepository
-	Conns        *db.ConnectionRepository
-	Tunnels      *db.TunnelRepository
-	Proxies      *db.ProxyRepository
-	History      *db.HistoryRepository
-	Audit        *db.AuditRepository
-	AuditJournal *auditlog.Journal
-	Meta         *db.MetadataRepository
-	Reports      *db.ReportRepository
-	Dashboards   *db.DashboardRepository
-	Shares       *db.ShareRepository
-	Tickets      *db.TicketRepository
-	Lineage      *db.LineageRepository
-	Snippets     *db.SnippetRepository
-	Queries      *queryapi.Handler
-	Sessions     *auth.SessionStore
-	Redis        *redis.Client
-	Controls     *db.QueryControls
+	IAMRoutes           []iam.RouteRule
+	IAMRouteFingerprint string
+	UserRepo            *db.UserRepository
+	Conns               *db.ConnectionRepository
+	Tunnels             *db.TunnelRepository
+	Proxies             *db.ProxyRepository
+	History             *db.HistoryRepository
+	Audit               *db.AuditRepository
+	AuditJournal        *auditlog.Journal
+	Meta                *db.MetadataRepository
+	Reports             *db.ReportRepository
+	Dashboards          *db.DashboardRepository
+	Shares              *db.ShareRepository
+	Tickets             *db.TicketRepository
+	Lineage             *db.LineageRepository
+	Snippets            *db.SnippetRepository
+	Queries             *queryapi.Handler
+	Sessions            *auth.SessionStore
+	Redis               *redis.Client
+	Controls            *db.QueryControls
+	OperationsGateway   businessops.Gateway
 }
 
 // NewRouter 组装全部路由。
 func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps *Deps) http.Handler {
-	mux := http.NewServeMux()
+	mux := &recordedMux{ServeMux: http.NewServeMux()}
+	if deps != nil && deps.Conns != nil {
+		isolation := ""
+		if cfg.Phase2ReportVerification && cfg.Env == "development" {
+			isolation = cfg.IAMIsolationID
+		}
+		deps.Conns.ConfigurePhase2Reports(isolation)
+	}
 
 	// 健康检查（不鉴权，供容器探针与负载均衡使用）
 	healthH := health.NewHandler(cfg.Env)
@@ -72,8 +84,31 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	requireAuth := identityAuth
 	if deps != nil && deps.UserRepo != nil {
 		scoped := workspaceAuth(deps.UserRepo)
-		requireAuth = func(next http.Handler) http.Handler { return identityAuth(scoped(next)) }
-		registerWorkspaces(mux, deps.UserRepo, identityAuth)
+		navigationIdentity := identityAuth
+		connectionIdentity := identityAuth
+		if repository, ok := users.(*db.UserRepository); ok && repository == deps.UserRepo {
+			navigationIdentity = middleware.RequireAuth(cfg.SecretKey, users, sessions, repository.FindIdentityAndWorkspaceDirectory)
+			connectionIdentity = middleware.RequireAuth(cfg.SecretKey, users, sessions, repository.FindMetadataIdentity)
+		}
+		requireAuth = func(next http.Handler) http.Handler {
+			scopedNext := scoped(next)
+			ordinary, connection := identityAuth(scopedNext), connectionIdentity(scopedNext)
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Pattern == "GET /api/v1/connections" {
+					connection.ServeHTTP(w, r)
+					return
+				}
+				ordinary.ServeHTTP(w, r)
+			})
+		}
+		registerWorkspaces(mux, deps.UserRepo, identityAuth, navigationIdentity)
+		registerIAMFoundation(mux, requireAuth)
+		registerIAMManagement(mux, deps.UserRepo, requireAuth, deps)
+		registerIAMRecovery(mux, cfg, deps.UserRepo, sessions, identityAuth)
+		registerIAMStatus(mux, deps.UserRepo, identityAuth)
+		registerBusinessMappings(mux, deps.UserRepo, requireAuth)
+		registerBusinessRowColumnPolicies(mux, deps.UserRepo, requireAuth)
+		registerBusinessOutputPolicies(mux, deps.UserRepo, requireAuth)
 	}
 
 	if deps != nil && deps.Conns != nil {
@@ -81,6 +116,39 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		drivers.RecordUsage = deps.Conns.MarkUsed
 		canWrite := middleware.RequireRoles("admin", "developer")
 		requireAdmin := middleware.RequireRoles("admin")
+		reportManage := workspaceCapability(true, "report_review")
+		reportReview := workspaceCapability(false, "report_review")
+		sourceManage := workspaceCapability(false, "datasource_manage")
+		accountRead := workspaceCapability(false, "datasource_manage", "report_review")
+		audienceDirectory := workspaceCapability(false, "datasource_manage", "report_review")
+		auditRead := workspaceCapability(false, "audit_view")
+		operationGateway := deps.OperationsGateway
+		if operationGateway == nil {
+			operationGateway = businessops.NewGateway(drivers, cfg.SecretKey)
+		}
+		operations := &businessops.Handler{Repo: deps.Conns.BusinessOperations(), Gateway: operationGateway}
+		operations.Register(mux, requireAuth)
+		subscriptions := reportapi.NewSubscriptionHandler(deps.Conns.ReportSubscriptions(), cfg.NotificationWebhook.URL != "")
+		mux.Handle("GET /api/v1/report-subscriptions", middleware.Chain(http.HandlerFunc(subscriptions.List), requireAuth))
+		mux.Handle("POST /api/v1/report-subscriptions", middleware.Chain(http.HandlerFunc(subscriptions.Save), requireAuth))
+		mux.Handle("PUT /api/v1/report-subscriptions/{id}", middleware.Chain(http.HandlerFunc(subscriptions.Save), requireAuth))
+		mux.Handle("POST /api/v1/report-subscriptions/{id}/runs", middleware.Chain(subscriptions.Command(false), requireAuth))
+		mux.Handle("POST /api/v1/report-subscriptions/{id}/archive", middleware.Chain(subscriptions.Command(true), requireAuth))
+		mux.Handle("POST /api/v1/report-subscriptions/{id}/confirm", middleware.Chain(http.HandlerFunc(subscriptions.ConfirmPersonal), requireAuth))
+		mux.Handle("POST /api/v1/report-team-subscriptions", middleware.Chain(http.HandlerFunc(subscriptions.SubmitTeam), requireAuth))
+		mux.Handle("GET /api/v1/report-team-subscriptions/{id}", middleware.Chain(subscriptions.ReadTeam(false), requireAuth))
+		mux.Handle("GET /api/v1/report-team-subscriptions/{id}/review", middleware.Chain(subscriptions.ReadTeam(true), requireAuth))
+		mux.Handle("POST /api/v1/report-team-subscriptions/{id}/review", middleware.Chain(http.HandlerFunc(subscriptions.ReviewTeam), requireAuth))
+		mux.Handle("POST /api/v1/report-team-subscriptions/{id}/recipient-access", middleware.Chain(http.HandlerFunc(subscriptions.ChangeTeamRecipient), requireAuth))
+		mux.Handle("POST /api/v1/report-team-subscriptions/{id}/periods", middleware.Chain(http.HandlerFunc(subscriptions.OpenTeamPeriod), requireAuth))
+		mux.Handle("GET /api/v1/report-team-subscriptions/{id}/periods/{period}", middleware.Chain(subscriptions.TeamStatuses(true), requireAuth))
+		mux.Handle("GET /api/v1/report-team-deliveries", middleware.Chain(subscriptions.TeamStatuses(false), requireAuth))
+		mux.Handle("GET /api/v1/report-team-deliveries/{id}", middleware.Chain(http.HandlerFunc(subscriptions.TeamDelivery), requireAuth))
+		mux.Handle("GET /api/v1/report-deliveries", middleware.Chain(http.HandlerFunc(subscriptions.Runs), requireAuth))
+		mux.Handle("GET /api/v1/report-deliveries/{id}", middleware.Chain(http.HandlerFunc(subscriptions.Delivery), requireAuth))
+		mux.Handle("GET /api/v1/metric-incidents", middleware.Chain(http.HandlerFunc(subscriptions.Incidents), requireAuth))
+		mux.Handle("GET /api/v1/metric-incidents/{id}", middleware.Chain(http.HandlerFunc(subscriptions.Incident), requireAuth))
+		mux.Handle("POST /api/v1/metric-incidents/{id}/actions", middleware.Chain(http.HandlerFunc(subscriptions.IncidentAction), requireAuth))
 
 		// 登录尝试也要审计（无用户上下文，user_id 留空）
 		mux.Handle("POST /api/v1/auth/login",
@@ -98,7 +166,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("GET /api/v1/roles",
 			middleware.Chain(http.HandlerFunc(adminH.Roles), requireAuth, requireAdmin))
 		mux.Handle("GET /api/v1/users",
-			middleware.Chain(http.HandlerFunc(adminH.Users), requireAuth, requireAdmin))
+			middleware.Chain(http.HandlerFunc(adminH.Users), requireAuth, audienceDirectory))
 		mux.Handle("POST /api/v1/users",
 			middleware.Chain(http.HandlerFunc(adminH.CreateUser), requireAuth, requireAdmin))
 		mux.Handle("PUT /api/v1/users/{id}",
@@ -118,7 +186,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			}
 			httpx.OK(w, map[string]any{"items": out})
 		}), requireAuth))
-		mux.Handle("GET /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.Groups), requireAuth, requireAdmin))
+		mux.Handle("GET /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.Groups), requireAuth, audienceDirectory))
 		mux.Handle("POST /api/v1/user-groups", middleware.Chain(http.HandlerFunc(adminH.SaveGroup), requireAuth, requireAdmin))
 		mux.Handle("PUT /api/v1/user-groups/{id}", middleware.Chain(http.HandlerFunc(adminH.SaveGroup), requireAuth, requireAdmin))
 		mux.Handle("DELETE /api/v1/user-groups/{id}", middleware.Chain(http.HandlerFunc(adminH.DeleteGroup), requireAuth, requireAdmin))
@@ -138,13 +206,14 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			auditH.AuditLogs(w, r.WithContext(db.WithPlatformAudit(r.Context())))
 		}), identityAuth, platformOnly))
 		mux.Handle("GET /api/v1/audit-logs",
-			middleware.Chain(http.HandlerFunc(auditH.AuditLogs), requireAuth, requireAdmin))
+			middleware.Chain(http.HandlerFunc(auditH.AuditLogs), requireAuth, auditRead))
 
 		mux.Handle("GET /api/v1/audit-logs/delivery", middleware.Chain(http.HandlerFunc(auditH.Delivery), requireAuth, requireAdmin, platformOnly))
 
 		if deps.UserRepo != nil {
 			autoH := &automation.Handler{Repo: db.NewAutomationRepository(deps.UserRepo), Conns: deps.Conns, Drivers: drivers, Journal: deps.AuditJournal, Config: cfg.Operations}
 			mux.Handle("GET /api/v1/inbox", middleware.Chain(http.HandlerFunc(autoH.Inbox), requireAuth))
+			mux.Handle("GET /api/v1/inbox/delivery/{id}", middleware.Chain(http.HandlerFunc(autoH.NotificationDelivery), requireAuth))
 			mux.Handle("GET /api/v1/inbox/todos", middleware.Chain(http.HandlerFunc(autoH.Todos), requireAuth))
 			mux.Handle("POST /api/v1/inbox/read", middleware.Chain(http.HandlerFunc(autoH.Read), requireAuth))
 			mux.Handle("GET /api/v1/source-tasks", middleware.Chain(http.HandlerFunc(autoH.Tasks), requireAuth))
@@ -160,6 +229,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 
 		// ---------- 数据源 ----------
 		dsH := datasource.NewHandler(deps.Conns, deps.Tunnels, log, deps.Proxies, drivers)
+		dsH.SetCheckPersistTimeout(cfg.ConnectionCheckPersistTimeout)
 		mux.Handle("GET /api/v1/connections",
 			middleware.Chain(http.HandlerFunc(dsH.List), requireAuth))
 		mux.Handle("GET /api/v1/connections/compatibility",
@@ -271,8 +341,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 		mux.Handle("GET /api/v1/query/settings", middleware.Chain(http.HandlerFunc(qH.Settings), requireAuth))
 		mux.Handle("PUT /api/v1/query/settings", middleware.Chain(http.HandlerFunc(qH.SaveSettings), requireAuth))
 		mux.Handle("GET /api/v1/query/policies", middleware.Chain(http.HandlerFunc(qH.Policies), requireAuth))
-		mux.Handle("PUT /api/v1/query/policies", middleware.Chain(http.HandlerFunc(qH.SavePolicy), requireAuth, requireAdmin))
-		mux.Handle("DELETE /api/v1/query/policies/{id}", middleware.Chain(http.HandlerFunc(qH.DeletePolicy), requireAuth, requireAdmin))
+		mux.Handle("PUT /api/v1/query/policies", middleware.Chain(http.HandlerFunc(qH.SavePolicy), requireAuth, sourceManage))
+		mux.Handle("DELETE /api/v1/query/policies/{id}", middleware.Chain(http.HandlerFunc(qH.DeletePolicy), requireAuth, sourceManage))
 		mux.Handle("GET /api/v1/query/shares", middleware.Chain(http.HandlerFunc(qH.ListShares), requireAuth))
 		mux.Handle("POST /api/v1/query/shares", middleware.Chain(http.HandlerFunc(qH.CreateShare), requireAuth))
 		mux.Handle("DELETE /api/v1/query/shares/{id}", middleware.Chain(http.HandlerFunc(qH.RevokeShare), requireAuth))
@@ -349,7 +419,7 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			// 血缘（M5，Step27-28 缓存+实时：sys_meta_lineage 定时 pg_query_go/vitess 解析 sys_query_history）
 			var lineageSvc *lineage.Service
 			if deps.Lineage != nil {
-				lineageSvc = lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log)
+				lineageSvc = lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log, deps.UserRepo)
 			}
 			lH := lineageapi.NewHandler(deps.Meta, deps.History, deps.Reports, deps.Dashboards, deps.Lineage, lineageSvc, log, deps.Conns)
 			mux.Handle("GET /api/v1/assets/lineage",
@@ -360,27 +430,45 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 
 		dashRepo := deps.Conns.ManagedDashboards()
 		dashH := reportapi.NewManagedDashboardHandler(dashRepo)
+		mux.Handle("POST /api/v1/managed-dashboards/{id}/availability", middleware.Chain(http.HandlerFunc(dashH.Availability), requireAuth))
 		mux.Handle("POST /api/v1/managed-dashboards/{id}/preflight", middleware.Chain(http.HandlerFunc(dashH.Preflight), requireAuth, canWrite))
-		mux.Handle("GET /api/v1/dashboard-reviews/{id}/summary", middleware.Chain(http.HandlerFunc(dashH.ReviewSummary), requireAuth, canWrite))
-		mux.Handle("GET /api/v1/managed-dashboards/{id}/current-audience", middleware.Chain(http.HandlerFunc(dashH.CurrentAudience), requireAuth, canWrite))
+		mux.Handle("GET /api/v1/dashboard-reviews/{id}/summary", middleware.Chain(http.HandlerFunc(dashH.ReviewSummary), requireAuth, reportManage))
+		mux.Handle("GET /api/v1/dashboard-reviews/{id}/data-review", middleware.Chain(http.HandlerFunc(dashH.DataReview), requireAuth))
+		mux.Handle("POST /api/v1/dashboard-reviews/{id}/data-review", middleware.Chain(http.HandlerFunc(dashH.DataReview), requireAuth))
+		mux.Handle("GET /api/v1/managed-dashboards/{id}/current-audience", middleware.Chain(http.HandlerFunc(dashH.CurrentAudience), requireAuth, reportManage))
 		mux.Handle("POST /api/v1/managed-dashboards/{id}/audience-changes", middleware.Chain(http.HandlerFunc(dashH.AudienceChange), requireAuth, canWrite))
 		mux.Handle("POST /api/v1/managed-dashboards/{id}/access-requests", middleware.Chain(http.HandlerFunc(dashH.RequestAudienceAccess), requireAuth, canWrite))
-		mux.Handle("GET /api/v1/managed-dashboards", middleware.Chain(http.HandlerFunc(dashH.List), requireAuth, canWrite))
+		mux.Handle("GET /api/v1/managed-dashboards", middleware.Chain(http.HandlerFunc(dashH.List), requireAuth, reportManage))
 		mux.Handle("POST /api/v1/managed-dashboards", middleware.Chain(http.HandlerFunc(dashH.Save), requireAuth, canWrite))
-		mux.Handle("GET /api/v1/managed-dashboards/{id}", middleware.Chain(http.HandlerFunc(dashH.Get), requireAuth, canWrite))
+		mux.Handle("GET /api/v1/managed-dashboards/{id}", middleware.Chain(http.HandlerFunc(dashH.Get), requireAuth, reportManage))
 		mux.Handle("PUT /api/v1/managed-dashboards/{id}/draft", middleware.Chain(http.HandlerFunc(dashH.Save), requireAuth, canWrite))
 		mux.Handle("GET /api/v1/dashboard-report-catalog", middleware.Chain(http.HandlerFunc(dashH.Catalog), requireAuth, canWrite))
-		mux.Handle("GET /api/v1/managed-dashboards/{id}/versions", middleware.Chain(http.HandlerFunc(dashH.Reviews), requireAuth, canWrite))
+		mux.Handle("GET /api/v1/managed-dashboards/{id}/versions", middleware.Chain(http.HandlerFunc(dashH.Reviews), requireAuth, reportManage))
 		mux.Handle("GET /api/v1/published-dashboards", middleware.Chain(http.HandlerFunc(dashH.Published), requireAuth))
 		mux.Handle("GET /api/v1/published-dashboards/{id}", middleware.Chain(http.HandlerFunc(dashH.PublishedGet), requireAuth))
+		for path, handler := range map[string]http.HandlerFunc{
+			"POST /api/v1/published-dashboards/{id}/delivery-plans":                 dashH.SubmitDelivery,
+			"GET /api/v1/dashboard-delivery-plans/{id}/review":                      dashH.ReviewDelivery,
+			"POST /api/v1/dashboard-delivery-plans/{id}/review":                     dashH.ReviewDelivery,
+			"POST /api/v1/dashboard-delivery-plans/{id}/recipient-access":           dashH.ChangeDeliveryRecipient,
+			"GET /api/v1/dashboard-delivery-plans/{id}/runs":                        dashH.DeliveryStates,
+			"GET /api/v1/dashboard-deliveries":                                      dashH.DeliveryStates,
+			"GET /api/v1/dashboard-deliveries/{id}":                                 dashH.Delivery,
+			"POST /api/v1/dashboard-deliveries/{id}/credential":                     dashH.DeliveryCredential,
+			"POST /api/v1/dashboard-deliveries/{id}/redeem":                         dashH.RedeemDelivery,
+			"GET /api/v1/dashboard-delivery-plans/{id}/alerts":                      dashH.DeliveryAlerts,
+			"POST /api/v1/dashboard-delivery-plans/{id}/alerts/{event}/disposition": dashH.DeliveryAlertDisposition,
+		} {
+			mux.Handle(path, middleware.Chain(handler, requireAuth))
+		}
 		mux.Handle("GET /api/v1/dashboard-refreshes/{refresh}/tiles/{tile}/receipt", middleware.Chain(qH.DashboardReceipt(dashRepo), requireAuth))
 		mux.Handle("POST /api/v1/dashboard-refreshes/{refresh}/tiles/{tile}/execute", middleware.Chain(qH.ExecuteDashboard(dashRepo, deps.Conns.ManagedReports()), requireAuth))
 		mux.Handle("POST /api/v1/managed-dashboards/{id}/refreshes", middleware.Chain(http.HandlerFunc(dashH.Refresh), requireAuth))
 		for path, action := range map[string]string{"submit": "submit", "adopt-contract": "adopt", "releases": "release", "archive": "archive", "restore": "restore", "delete": "delete", "transfer": "transfer"} {
-			mux.Handle("POST /api/v1/managed-dashboards/{id}/"+path, middleware.Chain(dashH.Command(action), requireAuth, canWrite))
+			mux.Handle("POST /api/v1/managed-dashboards/{id}/"+path, middleware.Chain(dashH.Command(action), requireAuth, reportManage))
 		}
 		for path, action := range map[string]string{"validate": "validate", "decision": "decision", "reassign": "reassign"} {
-			mux.Handle("POST /api/v1/dashboard-reviews/{id}/"+path, middleware.Chain(dashH.Command(action), requireAuth, canWrite))
+			mux.Handle("POST /api/v1/dashboard-reviews/{id}/"+path, middleware.Chain(dashH.Command(action), requireAuth, reportManage))
 		}
 
 		// ---------- 报表中心（M3/M4） ----------
@@ -388,7 +476,8 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			rH := reportapi.NewHandler(deps.Reports, deps.Conns, log)
 			managed := deps.Conns.ManagedReports()
 			managedH := reportapi.NewManagedHandler(managed, rH)
-			mux.Handle("GET /api/v1/managed-reports/{id}/current-audience", middleware.Chain(http.HandlerFunc(managedH.CurrentAudience), requireAuth, canWrite))
+			mux.Handle("POST /api/v1/managed-reports/{id}/availability", middleware.Chain(http.HandlerFunc(managedH.Availability), requireAuth))
+			mux.Handle("GET /api/v1/managed-reports/{id}/current-audience", middleware.Chain(http.HandlerFunc(managedH.CurrentAudience), requireAuth, reportManage))
 			mux.Handle("GET /api/v1/access-requests", middleware.Chain(http.HandlerFunc(managedH.AccessRequests), requireAuth))
 			mux.Handle("POST /api/v1/managed-reports/{id}/audience-changes", middleware.Chain(http.HandlerFunc(managedH.AudienceChange), requireAuth, canWrite))
 			for path, action := range map[string]string{"assign": "assign", "reject": "reject", "cancel": "cancel"} {
@@ -396,25 +485,45 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 			}
 			mux.Handle("POST /api/v1/published-dashboards/{id}/access-requests", middleware.Chain(http.HandlerFunc(dashH.RequestAccess), requireAuth))
 			mux.Handle("GET /api/v1/published-reports", middleware.Chain(http.HandlerFunc(managedH.Published), requireAuth))
+			mux.Handle("GET /api/v1/metric-catalog", middleware.Chain(http.HandlerFunc(managedH.MetricCatalog), requireAuth))
 			mux.Handle("GET /api/v1/published-reports/{id}", middleware.Chain(http.HandlerFunc(managedH.PublishedGet), requireAuth))
 			mux.Handle("POST /api/v1/published-reports/{id}/execute", middleware.Chain(qH.ExecutePublished(managed), requireAuth))
-			mux.Handle("GET /api/v1/managed-reports", middleware.Chain(http.HandlerFunc(managedH.List), requireAuth, canWrite))
+			const verification = "POST /api/v1/published-reports/{id}/policy-verification"
+			if cfg.Phase2ReportVerification && cfg.Env == "development" && cfg.IAMIsolationID != "" && deps.AuditJournal != nil && deps.UserRepo != nil {
+				mux.Handle(verification, middleware.Chain(businessReportVerification(deps.UserRepo, managed, drivers), requireAuth, requireAdmin))
+			} else {
+				mux.HandleFunc(verification, func(w http.ResponseWriter, _ *http.Request) {
+					httpx.Fail(w, httpx.NotFound("隔离验收入口未启用"))
+				})
+			}
+			mux.Handle("POST /api/v1/published-reports/{id}/exports", middleware.Chain(qH.ExportPublished(managed), requireAuth))
+			mux.Handle("GET /api/v1/report-exports", middleware.Chain(http.HandlerFunc(managedH.Exports), requireAuth))
+			mux.Handle("GET /api/v1/report-exports/{id}", middleware.Chain(http.HandlerFunc(managedH.Export), requireAuth))
+			mux.Handle("POST /api/v1/report-exports/{id}/review", middleware.Chain(http.HandlerFunc(managedH.ReviewExport), requireAuth, reportReview))
+			mux.Handle("GET /api/v1/report-exports/{id}/download", middleware.Chain(http.HandlerFunc(managedH.DownloadExport), requireAuth))
+			mux.Handle("GET /api/v1/report-exports/{id}/preview", middleware.Chain(http.HandlerFunc(managedH.PreviewExport), requireAuth))
+			mux.Handle("POST /api/v1/report-exports/{id}/credential", middleware.Chain(http.HandlerFunc(managedH.IssueExportCredential), requireAuth))
+			mux.Handle("POST /api/v1/report-exports/{id}/redeem", middleware.Chain(http.HandlerFunc(managedH.RedeemExportCredential), requireAuth))
+			mux.Handle("GET /api/v1/managed-reports", middleware.Chain(http.HandlerFunc(managedH.List), requireAuth, reportManage))
 			mux.Handle("POST /api/v1/managed-reports", middleware.Chain(http.HandlerFunc(managedH.SaveDraft), requireAuth, canWrite))
-			mux.Handle("GET /api/v1/managed-reports/{id}", middleware.Chain(http.HandlerFunc(managedH.Get), requireAuth, canWrite))
+			mux.Handle("GET /api/v1/managed-reports/{id}", middleware.Chain(http.HandlerFunc(managedH.Get), requireAuth, reportManage))
 			mux.Handle("PUT /api/v1/managed-reports/{id}/draft", middleware.Chain(http.HandlerFunc(managedH.SaveDraft), requireAuth, canWrite))
+			mux.Handle("POST /api/v1/managed-reports/{id}/promote", middleware.Chain(http.HandlerFunc(managedH.Promote), requireAuth, canWrite))
 			mux.Handle("POST /api/v1/managed-reports/{id}/submit", middleware.Chain(http.HandlerFunc(managedH.Submit), requireAuth, canWrite))
-			mux.Handle("GET /api/v1/managed-reports/{id}/dashboard-dependencies", middleware.Chain(http.HandlerFunc(managedH.DashboardDependencies), requireAuth, canWrite))
-			mux.Handle("GET /api/v1/managed-reports/{id}/dashboard-impact", middleware.Chain(http.HandlerFunc(managedH.DashboardImpact), requireAuth, canWrite))
-			mux.Handle("GET /api/v1/managed-reports/{id}/versions", middleware.Chain(http.HandlerFunc(managedH.Versions), requireAuth, canWrite))
-			mux.Handle("GET /api/v1/managed-reports/{id}/releases", middleware.Chain(http.HandlerFunc(managedH.Releases), requireAuth, canWrite))
-			mux.Handle("POST /api/v1/managed-reports/{id}/releases", middleware.Chain(http.HandlerFunc(managedH.Release), requireAuth, requireAdmin))
+			mux.Handle("GET /api/v1/managed-reports/{id}/dashboard-dependencies", middleware.Chain(http.HandlerFunc(managedH.DashboardDependencies), requireAuth, reportManage))
+			mux.Handle("GET /api/v1/managed-reports/{id}/dashboard-impact", middleware.Chain(http.HandlerFunc(managedH.DashboardImpact), requireAuth, reportManage))
+			mux.Handle("GET /api/v1/managed-reports/{id}/versions", middleware.Chain(http.HandlerFunc(managedH.Versions), requireAuth, reportManage))
+			mux.Handle("GET /api/v1/managed-reports/{id}/releases", middleware.Chain(http.HandlerFunc(managedH.Releases), requireAuth, reportManage))
+			mux.Handle("POST /api/v1/managed-reports/{id}/releases", middleware.Chain(http.HandlerFunc(managedH.Release), requireAuth, reportReview))
 			mux.Handle("POST /api/v1/managed-reports/{id}/transfer", middleware.Chain(http.HandlerFunc(managedH.Transfer), requireAuth, requireAdmin))
-			mux.Handle("POST /api/v1/report-reviews/{id}/validate", middleware.Chain(qH.ValidateReportReview(managed), requireAuth, requireAdmin))
-			mux.Handle("POST /api/v1/report-reviews/{id}/decision", middleware.Chain(http.HandlerFunc(managedH.Decide), requireAuth, canWrite))
-			mux.Handle("GET /api/v1/report-accounts", middleware.Chain(http.HandlerFunc(managedH.Accounts), requireAuth, requireAdmin))
-			mux.Handle("POST /api/v1/report-accounts", middleware.Chain(http.HandlerFunc(managedH.CreateAccount), requireAuth, requireAdmin))
-			mux.Handle("PATCH /api/v1/report-accounts/{id}", middleware.Chain(http.HandlerFunc(managedH.UpdateAccount), requireAuth, requireAdmin))
-			mux.Handle("POST /api/v1/report-accounts/{id}/test", middleware.Chain(qH.TestReportAccount(managed), requireAuth, requireAdmin))
+			mux.Handle("POST /api/v1/report-reviews/{id}/validate", middleware.Chain(qH.ValidateReportReview(managed), requireAuth, reportReview))
+			mux.Handle("POST /api/v1/report-reviews/{id}/decision", middleware.Chain(http.HandlerFunc(managedH.Decide), requireAuth, reportManage))
+			mux.Handle("GET /api/v1/report-reviews/{id}/data-review", middleware.Chain(http.HandlerFunc(managedH.DataReview), requireAuth))
+			mux.Handle("POST /api/v1/report-reviews/{id}/data-review", middleware.Chain(http.HandlerFunc(managedH.DataReview), requireAuth))
+			mux.Handle("GET /api/v1/report-accounts", middleware.Chain(http.HandlerFunc(managedH.Accounts), requireAuth, accountRead))
+			mux.Handle("POST /api/v1/report-accounts", middleware.Chain(http.HandlerFunc(managedH.CreateAccount), requireAuth, sourceManage))
+			mux.Handle("PATCH /api/v1/report-accounts/{id}", middleware.Chain(http.HandlerFunc(managedH.UpdateAccount), requireAuth, sourceManage))
+			mux.Handle("POST /api/v1/report-accounts/{id}/test", middleware.Chain(qH.TestReportAccount(managed), requireAuth, accountRead))
 			mux.Handle("POST /api/v1/reports/preview", middleware.Chain(http.HandlerFunc(qH.PreviewReport), requireAuth, canWrite))
 			mux.Handle("POST /api/v1/reports/{id}/execute", middleware.Chain(qH.ExecuteReport(deps.Reports), requireAuth))
 			mux.Handle("POST /api/v1/reports",
@@ -470,6 +579,18 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	}
 
 	mux.Handle("POST /api/v1/auth/logout", middleware.Chain(http.HandlerFunc(authH.Logout), identityAuth))
+	mux.HandleFunc("POST /api/v1/auth/mfa/verify", authH.MFAVerify)
+	mux.Handle("GET /api/v1/auth/mfa", middleware.Chain(http.HandlerFunc(authH.MFAStatus), identityAuth))
+	mux.Handle("POST /api/v1/auth/mfa/setup", middleware.Chain(http.HandlerFunc(authH.MFASetup), identityAuth))
+	mux.Handle("POST /api/v1/auth/mfa/enable", middleware.Chain(http.HandlerFunc(authH.MFAEnable), identityAuth))
+	mux.Handle("POST /api/v1/auth/mfa/disable", middleware.Chain(http.HandlerFunc(authH.MFADisable), identityAuth))
+	mux.HandleFunc("GET /api/v1/auth/sso", authH.SSOInfo)
+	mux.HandleFunc("GET /api/v1/auth/sso/start", authH.SSOStart)
+	mux.HandleFunc("GET /api/v1/auth/sso/callback", authH.SSOCallback)
+	mux.HandleFunc("POST /api/v1/auth/sso/complete", authH.SSOComplete)
+	if deps != nil && deps.UserRepo != nil {
+		registerExternalIdentities(mux, cfg, deps.UserRepo, identityAuth)
+	}
 
 	// 未匹配路由统一 404 信封
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
@@ -485,9 +606,14 @@ func NewRouter(cfg *config.Config, log *slog.Logger, users auth.UserStore, deps 
 	var auditJournal *auditlog.Journal
 	if deps != nil {
 		auditJournal = deps.AuditJournal
+		deps.IAMRoutes = append([]iam.RouteRule{}, mux.rules...)
+		deps.IAMRouteFingerprint = iam.RouteFingerprint(deps.IAMRoutes)
+		if deps.UserRepo != nil {
+			deps.UserRepo.ConfigureIAMIsolation(cfg.IAMIsolationID, deps.IAMRouteFingerprint)
+		}
 	}
 	return workspaceRouting(middleware.Chain(
-		mux,
+		iamRuntimeHeartbeat(deps, mux),
 		middleware.RequestID,
 		middleware.SecurityHeaders,
 		middleware.TrustedClientIP(cfg.TrustedProxyCIDRs),

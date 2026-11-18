@@ -7,6 +7,10 @@ type claimsCtxKey struct{}
 // ClaimsContextKey 认证用户 Claims 在 request context 中的键。
 var ClaimsContextKey claimsCtxKey
 
+func WithClaims(ctx context.Context, claims *Claims) context.Context {
+	return context.WithValue(ctx, ClaimsContextKey, claims)
+}
+
 // ClaimsFromContext 从 context 取出认证声明。
 func ClaimsFromContext(ctx context.Context) (*Claims, bool) {
 	c, ok := ctx.Value(ClaimsContextKey).(*Claims)

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/user/dbhub/internal/connector"
 )
+
+// ErrDashboardUnknownFreshness is returned when a tile cannot provide a required watermark.
+var ErrDashboardUnknownFreshness = fmt.Errorf("%w: 业务水位未知，未获批允许未知时效", ErrManagedInput)
 
 func dashboardUUID() string {
 	b := make([]byte, 16)
@@ -27,6 +31,7 @@ type DashboardViewTile struct {
 	ExecutionID string           `json:"execution_id,omitempty"`
 }
 type DashboardView struct {
+	Parameters    []ReportParameter   `json:"parameters,omitempty"`
 	Version       int64               `json:"version"`
 	ID            int64               `json:"id"`
 	Name          string              `json:"name"`
@@ -47,17 +52,18 @@ type DashboardRefresh struct {
 // Viewer contracts omit source/account identities while preserving all business semantics.
 func (p DashboardReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		ID            int64           `json:"id"`
-		Name          string          `json:"name"`
-		PublicationNo int64           `json:"publication_no"`
-		Version       int64           `json:"version"`
-		ChartType     string          `json:"chart_type"`
-		ChartConfig   json.RawMessage `json:"chart_config"`
-		Contract      any             `json:"data_contract"`
+		ID            int64             `json:"id"`
+		Name          string            `json:"name"`
+		PublicationNo int64             `json:"publication_no"`
+		Version       int64             `json:"version"`
+		ChartType     string            `json:"chart_type"`
+		ChartConfig   json.RawMessage   `json:"chart_config"`
+		Contract      any               `json:"data_contract"`
+		Parameters    []ReportParameter `json:"parameters,omitempty"`
 	}{p.ID, p.Name, p.PublicationNo, p.Version, p.ChartType, p.ChartConfig, struct {
 		Declaration DataContract `json:"declaration"`
 		Hash        string       `json:"hash"`
-	}{p.Contract.Declaration, p.Contract.Hash}})
+	}{p.Contract.Declaration, p.Contract.Hash}, p.Parameters})
 }
 func (r *ManagedDashboardRepository) publishedDefinition(ctx context.Context, q reportQueryer, id int64) (*DashboardView, *DashboardDefinition, error) {
 	var raw []byte
@@ -74,40 +80,47 @@ func (r *ManagedDashboardRepository) publishedDefinition(ctx context.Context, q 
 		return nil, nil, ErrNotFound
 	}
 	view.Name = d.Name
+	view.Parameters = d.Parameters
 	view.Description = d.Description
 	view.Quality = d.Quality
 	view.Quality.Reason = ""
 	return view, &d, nil
 }
 func (r *ManagedDashboardRepository) Published(ctx context.Context, keyword string, limit, offset int) ([]DashboardView, int64, error) {
-	base := ` FROM sys_managed_dashboards d JOIN sys_dashboard_releases re ON re.id=d.active_release_id JOIN sys_dashboard_reviews rv ON rv.id=re.review_id AND rv.status='approved' JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE d.lifecycle='active' AND dbhub_member_role($1) IS NOT NULL AND (v.definition->'user_ids' @> jsonb_build_array($1::bigint) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(v.definition->'group_ids') g JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=$1)) AND ($2='' OR v.definition->>'name' ILIKE '%'||$2||'%' OR v.definition->>'description' ILIKE '%'||$2||'%')`
+	base := ` FROM sys_managed_dashboards d JOIN sys_dashboard_releases re ON re.id=d.active_release_id JOIN sys_dashboard_reviews rv ON rv.id=re.review_id AND rv.status='approved' JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE d.lifecycle='active' AND (SELECT dbhub_member_role($1)) IS NOT NULL AND (v.definition->'user_ids' @> jsonb_build_array($1::bigint) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(v.definition->'group_ids') g JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=$1)) AND ($2='' OR v.definition->>'name' ILIKE '%'||$2||'%' OR v.definition->>'description' ILIKE '%'||$2||'%')`
 	var total int64
 	if e := r.pool.QueryRow(ctx, `SELECT count(*)`+base, ActorID(ctx), keyword).Scan(&total); e != nil {
 		return nil, 0, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT d.id`+base+` ORDER BY d.updated_at DESC,d.id DESC LIMIT $3 OFFSET $4`, ActorID(ctx), keyword, limit, offset)
+	// The same SQL audience predicate used by dashboardGrant is checked for
+	// every card. Read the approved definitions in that scoped statement rather
+	// than opening two more transactions for each ID in the page.
+	rows, e := r.pool.Query(ctx, `SELECT d.id,v.definition,d.publication_no,d.lifecycle_epoch,v.number`+base+` ORDER BY d.updated_at DESC,d.id DESC LIMIT $3 OFFSET $4`, ActorID(ctx), keyword, limit, offset)
 	if e != nil {
 		return nil, 0, e
 	}
-	ids := []int64{}
+	out := []DashboardView{}
 	for rows.Next() {
-		var id int64
-		if e = rows.Scan(&id); e != nil {
+		var view DashboardView
+		var raw []byte
+		if e = rows.Scan(&view.ID, &raw, &view.PublicationNo, &view.Epoch, &view.Version); e != nil {
 			rows.Close()
 			return nil, 0, e
 		}
-		ids = append(ids, id)
+		var definition DashboardDefinition
+		if json.Unmarshal(raw, &definition) != nil {
+			continue
+		}
+		view.Name = definition.Name
+		view.Description = definition.Description
+		view.Parameters = definition.Parameters
+		view.Quality = definition.Quality
+		view.Quality.Reason = ""
+		out = append(out, view)
 	}
 	rows.Close()
 	if e = rows.Err(); e != nil {
 		return nil, 0, e
-	}
-	out := []DashboardView{}
-	for _, id := range ids {
-		view, _, e := r.publishedDefinition(ctx, r.pool, id)
-		if e == nil {
-			out = append(out, *view)
-		}
 	}
 	return out, total, nil
 }
@@ -121,15 +134,19 @@ func (r *ManagedDashboardRepository) PublishedGet(ctx context.Context, id int64)
 	if e != nil {
 		return nil, e
 	}
-	view.Tiles = r.viewTiles(ctx, tx, *d)
+	governed, e := r.governedDashboard(ctx, tx, id)
+	if e != nil {
+		return nil, e
+	}
+	view.Tiles = r.viewTiles(ctx, tx, *d, governed)
 	return view, tx.Commit(ctx)
 }
-func (r *ManagedDashboardRepository) viewTiles(ctx context.Context, q reportQueryer, d DashboardDefinition) []DashboardViewTile {
+func (r *ManagedDashboardRepository) viewTiles(ctx context.Context, q reportQueryer, d DashboardDefinition, governed bool) []DashboardViewTile {
 	out := []DashboardViewTile{}
 	for _, t := range d.Tiles {
 		tile := DashboardViewTile{DashboardTile: t, Status: "ready"}
 		p, e := loadDashboardReport(ctx, q, t.ReportID, ActorID(ctx))
-		if e != nil {
+		if e != nil || governed && !p.governed {
 			tile.Status = "restricted"
 			tile.ReportID = 0
 			tile.ContractHash = ""
@@ -144,7 +161,7 @@ func (r *ManagedDashboardRepository) viewTiles(ctx context.Context, q reportQuer
 	}
 	return out
 }
-func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode string, review int64) (*DashboardRefresh, error) {
+func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode string, review int64, inputs ...map[string]any) (*DashboardRefresh, error) {
 	// Context metadata expires independently of durable execution receipts.
 	if _, e := r.pool.Exec(ctx, `DELETE FROM sys_dashboard_refreshes WHERE id IN(SELECT id FROM sys_dashboard_refreshes WHERE expires_at<now()-interval '1 day' LIMIT 500)`); e != nil {
 		return nil, e
@@ -176,7 +193,7 @@ func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode
 			}
 		} else {
 			e = tx.QueryRow(ctx, `SELECT v.definition,v.number,d.lifecycle_epoch,COALESCE(v.submitted_by,0),rv.reviewer_id,rv.assignment_version FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id JOIN sys_managed_dashboards d ON d.id=rv.dashboard_id WHERE rv.id=$1 AND d.id=$2 AND rv.status='pending' AND rv.expires_at>now() AND d.lifecycle='active' AND d.lifecycle_epoch=rv.lifecycle_epoch`, review, id).Scan(&raw, &version, &epoch, &owner, &reviewer, &assignment)
-			if e == nil && (reviewer != ActorID(ctx) || owner == ActorID(ctx) || !ActorAdmin(ctx)) {
+			if e == nil && (reviewer != ActorID(ctx) || owner == ActorID(ctx) || !ActorDashboardReviewer(ctx)) {
 				return nil, ErrManagedDenied
 			}
 		}
@@ -187,6 +204,7 @@ func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode
 			return nil, e
 		}
 		view.Name = d.Name
+		view.Parameters = d.Parameters
 		view.Description = d.Description
 		view.Epoch = epoch
 		view.Version = version
@@ -194,16 +212,28 @@ func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode
 	} else {
 		return nil, ErrManagedInput
 	}
+	var input map[string]any
+	governed, e := r.governedDashboard(ctx, tx, id)
+	if e != nil {
+		return nil, e
+	}
+	if len(inputs) > 0 {
+		input = inputs[0]
+	}
+	values, err := ResolveReportParameters(d.Parameters, input, time.Now())
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrManagedInput, err)
+	}
 	out := &DashboardRefresh{DashboardView: *view, ID: dashboardUUID(), Mode: mode}
 	var reviewID *int64
 	if mode == "review" {
 		reviewID = &review
 	}
-	e = tx.QueryRow(ctx, `INSERT INTO sys_dashboard_refreshes(id,user_id,dashboard_id,publication_no,lifecycle_epoch,mode,draft_version,review_id,definition,review_assignment_version) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10) RETURNING created_at,expires_at`, out.ID, ActorID(ctx), id, view.PublicationNo, epoch, mode, version, reviewID, string(canonicalReportJSON(d)), assignment).Scan(&out.ServerTime, &out.ExpiresAt)
+	e = tx.QueryRow(ctx, `INSERT INTO sys_dashboard_refreshes(id,user_id,dashboard_id,publication_no,lifecycle_epoch,mode,draft_version,review_id,definition,review_assignment_version,params) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11::jsonb) RETURNING created_at,expires_at`, out.ID, ActorID(ctx), id, view.PublicationNo, epoch, mode, version, reviewID, string(canonicalReportJSON(d)), assignment, string(canonicalReportJSON(values))).Scan(&out.ServerTime, &out.ExpiresAt)
 	if e != nil {
 		return nil, e
 	}
-	out.Tiles = r.viewTiles(ctx, tx, d)
+	out.Tiles = r.viewTiles(ctx, tx, d, governed)
 	for i := range out.Tiles {
 		t := &out.Tiles[i]
 		if t.Status != "ready" {
@@ -211,7 +241,11 @@ func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode
 		}
 		t.ExecutionID = dashboardUUID()
 		p := t.Report
-		_, e = tx.Exec(ctx, `INSERT INTO sys_dashboard_refresh_tiles(refresh_id,tile_key,report_id,report_publication_no,account_version,account_generation,contract_hash,execution_id,status) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8::uuid,'ready')`, out.ID, t.Key, p.ID, p.PublicationNo, p.AccountVersion, p.Generation, p.Contract.Hash, t.ExecutionID)
+		params, err := dashboardTileParameters(d.Parameters, t.ParameterBindings, p.Parameters, values, out.ServerTime)
+		if err != nil {
+			return nil, fmt.Errorf("%w: 卡片 %s：%s", ErrManagedInput, t.Key, err)
+		}
+		_, e = tx.Exec(ctx, `INSERT INTO sys_dashboard_refresh_tiles(refresh_id,tile_key,report_id,report_publication_no,account_version,account_generation,contract_hash,execution_id,status,params) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8::uuid,'ready',$9::jsonb)`, out.ID, t.Key, p.ID, p.PublicationNo, p.AccountVersion, p.Generation, p.Contract.Hash, t.ExecutionID, string(canonicalReportJSON(params)))
 		if e != nil {
 			return nil, e
 		}
@@ -220,6 +254,7 @@ func (r *ManagedDashboardRepository) Refresh(ctx context.Context, id int64, mode
 }
 
 type DashboardExecution struct {
+	Params                                        map[string]any
 	Mode                                          string
 	DashboardVersion                              int64
 	RefreshID, TileKey, ExecutionID, ContractHash string
@@ -233,7 +268,7 @@ func (r *ManagedDashboardRepository) checkRefresh(ctx context.Context, id string
 	e := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_dashboard_refreshes f JOIN sys_managed_dashboards d ON d.id=f.dashboard_id WHERE f.id=$1::uuid AND f.user_id=$2 AND f.member_version=dbhub_member_epoch() AND f.expires_at>now() AND (NOT COALESCE((f.definition->'quality'->>'allow_unknown_freshness')::boolean,false) OR EXISTS(SELECT 1 FROM sys_workspaces WHERE id=dbhub_workspace() AND allow_unknown_freshness)) AND d.lifecycle='active' AND d.lifecycle_epoch=f.lifecycle_epoch AND (
  (f.mode='published' AND d.active_release_id IS NOT NULL AND d.publication_no=f.publication_no AND dbhub_member_role($2) IS NOT NULL AND ((f.definition->'user_ids') @> jsonb_build_array($2::bigint) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(f.definition->'group_ids') g JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=$2))) OR
  (f.mode='draft' AND d.owner_id=$2 AND d.draft_version=f.draft_version) OR
- (f.mode='review' AND EXISTS(SELECT 1 FROM sys_dashboard_reviews rv WHERE rv.id=f.review_id AND rv.status='pending' AND rv.reviewer_id=$2 AND rv.assignment_version=f.review_assignment_version AND rv.expires_at>now() AND dbhub_member_role($2)='admin'))))`, id, ActorID(ctx)).Scan(&valid)
+ (f.mode='review' AND EXISTS(SELECT 1 FROM sys_dashboard_reviews rv WHERE rv.id=f.review_id AND rv.status='pending' AND rv.reviewer_id=$2 AND rv.assignment_version=f.review_assignment_version AND rv.expires_at>now() AND dbhub_iam_can_review($2,'dashboard')))))`, id, ActorID(ctx)).Scan(&valid)
 	if e != nil {
 		return e
 	}
@@ -248,9 +283,15 @@ func (r *ManagedDashboardRepository) ResolveTile(ctx context.Context, refresh, t
 	}
 	x := &DashboardExecution{RefreshID: refresh, TileKey: tile}
 	var id, no, version, generation int64
-	e := r.pool.QueryRow(ctx, `SELECT f.mode,f.dashboard_id,f.publication_no,f.lifecycle_epoch,f.draft_version,f.expires_at,t.report_id,t.report_publication_no,t.account_version,t.account_generation,t.contract_hash,t.execution_id::text FROM sys_dashboard_refreshes f JOIN sys_dashboard_refresh_tiles t ON t.refresh_id=f.id WHERE f.id=$1::uuid AND f.user_id=$2 AND t.tile_key=$3`, refresh, ActorID(ctx), tile).Scan(&x.Mode, &x.DashboardID, &x.DashboardPublicationNo, &x.Epoch, &x.DashboardVersion, &x.ExpiresAt, &id, &no, &version, &generation, &x.ContractHash, &x.ExecutionID)
+	var raw []byte
+	e := r.pool.QueryRow(ctx, `SELECT f.mode,f.dashboard_id,f.publication_no,f.lifecycle_epoch,f.draft_version,f.expires_at,t.report_id,t.report_publication_no,t.account_version,t.account_generation,t.contract_hash,t.execution_id::text,t.params FROM sys_dashboard_refreshes f JOIN sys_dashboard_refresh_tiles t ON t.refresh_id=f.id WHERE f.id=$1::uuid AND f.user_id=$2 AND t.tile_key=$3`, refresh, ActorID(ctx), tile).Scan(&x.Mode, &x.DashboardID, &x.DashboardPublicationNo, &x.Epoch, &x.DashboardVersion, &x.ExpiresAt, &id, &no, &version, &generation, &x.ContractHash, &x.ExecutionID, &raw)
 	if e != nil {
 		return nil, managedError(e)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if e = decoder.Decode(&x.Params); e != nil {
+		return nil, e
 	}
 	x.Report, e = r.reports.ResolvePublished(ctx, id, no)
 	if e != nil {
@@ -258,6 +299,21 @@ func (r *ManagedDashboardRepository) ResolveTile(ctx context.Context, refresh, t
 	}
 	if x.Report.Manifest.Contract == nil || x.Report.Manifest.Contract.Hash != x.ContractHash || x.Report.AccountVersion != version || x.Report.Generation != generation {
 		return nil, ErrManagedConflict
+	}
+	governed, e := r.governedDashboard(ctx, r.pool, x.DashboardID)
+	if e != nil {
+		return nil, e
+	}
+	if governed {
+		p, err := loadDashboardReport(ctx, r.pool, id, ActorID(ctx))
+		if err != nil || !p.governed || p.PublicationNo != no {
+			return nil, ErrManagedConflict
+		}
+		if x.Mode == "published" {
+			x.Report.custodyDashboard = &custodyDashboardTile{
+				id: x.DashboardID, publication: x.DashboardPublicationNo, key: tile, contract: x.ContractHash,
+			}
+		}
 	}
 	x.Report.AdditionalCheck = func(ctx context.Context) error { return r.checkRefresh(ctx, refresh) }
 	return x, nil
@@ -272,12 +328,12 @@ func (r *ManagedDashboardRepository) CompleteTile(ctx context.Context, x *Dashbo
 		return out, e
 	}
 	if out.Freshness == "unknown" && !allowUnknown {
-		return out, fmt.Errorf("%w: 业务水位未知，未获批允许未知时效", ErrManagedInput)
+		return out, ErrDashboardUnknownFreshness
 	}
 	if e = r.reports.CheckExecution(ctx, x.Report); e != nil {
 		return out, e
 	}
-	_, e = r.pool.Exec(ctx, `UPDATE sys_dashboard_refresh_tiles SET status='succeeded',queried_at=$3,data_as_of=$4 WHERE refresh_id=$1::uuid AND tile_key=$2`, x.RefreshID, x.TileKey, out.QueryCompletedAt, out.DataAsOf)
+	_, e = r.pool.Exec(ctx, `UPDATE sys_dashboard_refresh_tiles SET status='succeeded',queried_at=$3,data_as_of=$4,business_policy_stamp=$5 WHERE refresh_id=$1::uuid AND tile_key=$2`, x.RefreshID, x.TileKey, out.QueryCompletedAt, out.DataAsOf, x.Report.BusinessPolicyStamp())
 	return out, e
 }
 func (r *ManagedDashboardRepository) AcquireLease(ctx context.Context, x *DashboardExecution) (func(), error) {

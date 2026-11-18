@@ -75,7 +75,7 @@ func main() {
 			log.Error("连接元数据库失败", "error", err)
 			os.Exit(1)
 		}
-		migrateCtx, migrateCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		migrateCtx, migrateCancel := context.WithTimeout(context.Background(), cfg.MigrationTimeout)
 		applied, err := db.Migrate(migrateCtx, pgPool)
 		migrateCancel()
 		if err != nil {
@@ -149,7 +149,7 @@ func main() {
 
 	// 血缘定时解析：每 5 分钟增量扫描 sys_query_history（pg_query_go/vitess → sys_meta_lineage）
 	if deps != nil && deps.Lineage != nil {
-		lineageSvc := lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log)
+		lineageSvc := lineage.NewService(deps.Lineage, deps.History, deps.Conns, deps.Meta, log, deps.UserRepo)
 		lineageSvc.StartScheduler(ctx, 5*time.Minute)
 		log.Info("血缘定时解析已启动", "interval", "5m")
 	}

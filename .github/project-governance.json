@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "repository": {
+    "url": "https://github.com/xielforever/DBHub",
+    "default_branch": "main",
+    "project_url": "https://github.com/users/xielforever/projects/5"
+  },
+  "authority": {
+    "kind": "ledger",
+    "ledger_path": "docs/项目管控/开发路线图与当前任务.md"
+  },
+  "references": {
+    "scope": [
+      "docs/项目管控/开发路线图与当前任务.md",
+      "docs/架构设计/数据接入与执行契约.md",
+      "docs/架构设计/内容与交付契约.md",
+      "docs/界面设计/UI设计规范.md"
+    ],
+    "dependencies": [
+      "docs/项目管控/开发路线图与当前任务.md"
+    ],
+    "summaries": [
+      "docs/项目管控/功能模块总览与实现验收状态.md"
+    ]
+  },
+  "tasks": {
+    "id_rule": "复用已同步的 P1-01—P1-04、UI-01—UI-04、INFRA-01 与 P2—P5；A01—A52、QT01—QT08 是验收条目，不自动转为独立任务。新增事项先查重，未确认编号填待确认。",
+    "work_package_label": null,
+    "phase_label": null,
+    "milestone_rule": "沿用路线图阶段0—5及现有 GitHub 里程碑。核对对应阶段父项、里程碑成员、验收和关口后同步阶段状态。未经任务范围确认不创建重复父项或里程碑。"
+  },
+  "status_mapping": {
+    "待办或后续规划": "Todo",
+    "已实施或局部验收、尚有剩余事项": "In Progress",
+    "完整任务完成条件满足并有可核验证据": "Done"
+  },
+  "completion": {
+    "requirements": [
+      "按当前任务范围逐项核对验收条件、证据、未执行项和原因；失败、跳过及环境缺失不能计为通过。",
+      "实现、本地验证、云端CI、提交、推送、PR合并、人工业务验收和真实启用分别记录。",
+      "阶段1遵循A01—A51及A52安全部分；SC-P1-20261024-01移除的性能基准、压测和p95门槛不得自动恢复。",
+      "任务有独立或用户验收要求时须满足；真实权限切换及部署需对应明确授权。"
+    ],
+    "local_acceptance": "allowed_when_authorized",
+    "ci_policy": "沿用 .github/workflows/production-readiness.yml 与 datasource-compatibility.yml；按改动范围执行既有检查，不因治理接入新建或触发云端CI门禁。未执行或失败须如实报告；本地结构通过不等于CI或业务验收通过。"
+  },
+  "validation": {
+    "commands": [
+      "docker compose exec -T frontend npm run build",
+      "docker compose exec -T frontend npm run test:query",
+      "docker compose exec -T backend go test -mod=vendor ./internal/config",
+      "git diff --check"
+    ]
+  },
+  "evidence": {
+    "implementation": [
+      "backend",
+      "frontend",
+      ".local-docs"
+    ],
+    "gates": [
+      "docs/项目管控/开发路线图与当前任务.md"
+    ],
+    "remote": "GitHub Issue记录可核验摘要和剩余事项，Project为同步视图，PR记录代码交付；未发布的本地证据注明本地路径及版本，不用旧默认分支链接冒充新结果。"
+  },
+  "templates": {
+    "task_form": {
+      "path": ".github/ISSUE_TEMPLATE/task.yml",
+      "fields": {
+        "background": "background",
+        "task": "task",
+        "scope": "scope",
+        "acceptance": "acceptance",
+        "verification": "verification",
+        "dependencies": "dependencies"
+      }
+    },
+    "bug_form": {
+      "path": ".github/ISSUE_TEMPLATE/bug.yml",
+      "fields": {
+        "task": "task",
+        "expected_actual": "expected_actual",
+        "reproduction": "reproduction",
+        "environment": "environment",
+        "impact": "impact",
+        "acceptance": "acceptance",
+        "evidence": "evidence"
+      }
+    },
+    "pull_request": {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "sections": {
+        "change": "变更与原因",
+        "task": "关联任务",
+        "validation": "验证与证据",
+        "limits": "未完成项与影响",
+        "progress": "进度核对"
+      }
+    }
+  }
+}

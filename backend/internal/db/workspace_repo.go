@@ -5,37 +5,119 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/iam"
 )
 
 type Workspace struct {
-	Version      int64  `json:"membership_version"`
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Role         string `json:"role"`
-	AllowUnknown bool   `json:"allow_unknown_freshness"`
+	IAM                *iam.Snapshot `json:"-"`
+	AuthorizationEpoch int64         `json:"authorization_epoch"`
+	ConfigVersion      int64         `json:"config_version"`
+	PermissionMode     string        `json:"permission_mode"`
+	ExpiresAt          *time.Time    `json:"expires_at,omitempty"`
+	Capabilities       []string      `json:"capabilities"`
+	Version            int64         `json:"membership_version"`
+	ID                 int64         `json:"id"`
+	Name               string        `json:"name"`
+	Role               string        `json:"role"`
+	AllowUnknown       bool          `json:"allow_unknown_freshness"`
 }
 
 func (r *UserRepository) Workspaces(ctx context.Context) ([]Workspace, error) {
-	rows, e := r.pool.maintenance.Query(ctx, `SELECT w.id,w.name,m.role_code,w.allow_unknown_freshness,m.version FROM sys_workspaces w JOIN sys_workspace_members m ON m.workspace_id=w.id JOIN sys_users u ON u.id=m.user_id WHERE m.user_id=$1 AND m.active AND u.is_active AND w.enabled ORDER BY w.id`, ActorID(ctx))
+	return r.workspaces(ctx, true)
+}
+
+// WorkspacesDirectory lists current navigation choices only. Its values are
+// never authorization snapshots; BindWorkspace always uses the detailed path.
+func (r *UserRepository) WorkspacesDirectory(ctx context.Context) ([]Workspace, error) {
+	if spaces, used, err := r.joinedWorkspaceDirectory(ctx); used {
+		return spaces, err
+	}
+	return r.workspaces(ctx, false)
+}
+
+func (r *UserRepository) workspaces(ctx context.Context, detailed bool) ([]Workspace, error) {
+	out, hasRecovery, err := r.workspaceDirectoryRows(ctx, ActorID(ctx), detailed)
+	if err != nil {
+		return nil, err
+	}
+	out, err = r.withRejoinedWorkspaces(ctx, out)
+	if err != nil {
+		return nil, err
+	}
+	return r.withRecoveryWorkspaces(ctx, out, hasRecovery)
+}
+
+func (r *UserRepository) workspaceDirectoryRows(ctx context.Context, subject int64, detailed bool) ([]Workspace, bool, error) {
+	// The private SQL helper reuses plans, never authorization results. Keeping
+	// the simple protocol also preserves existing metadata proxy compatibility.
+	rows, e := r.pool.maintenance.Query(ctx, `SELECT * FROM dbhub_iam_workspace_directory($1,$2)`, subject, detailed)
 	if e != nil {
-		return nil, e
+		return nil, false, e
 	}
 	defer rows.Close()
 	out := []Workspace{}
+	hasRecovery := false
 	for rows.Next() {
 		var w Workspace
-		if e = rows.Scan(&w.ID, &w.Name, &w.Role, &w.AllowUnknown, &w.Version); e != nil {
-			return nil, e
+		var sequence int64
+		var denied []string
+		var recovery bool
+		if e = rows.Scan(&w.ID, &w.Name, &w.Role, &w.AllowUnknown, &w.Version, &w.Capabilities, &w.ExpiresAt, &w.AuthorizationEpoch, &w.ConfigVersion, &w.PermissionMode, &sequence, &denied, &recovery); e != nil {
+			return nil, false, e
+		}
+		if detailed {
+			w.IAM = &iam.Snapshot{Subject: subject, WorkspaceID: w.ID, MembershipVersion: w.Version, ConfigVersion: w.ConfigVersion, AuthorizationEpoch: w.AuthorizationEpoch, RevocationSequence: sequence, Mode: w.PermissionMode, LegacyDataRole: w.Role, LegacyCapabilities: append([]string{}, w.Capabilities...), ExpiresAt: w.ExpiresAt, DeniedActions: denied}
 		}
 		out = append(out, w)
+		hasRecovery = hasRecovery || recovery
 	}
-	return out, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, false, e
+	}
+	rows.Close()
+	return out, hasRecovery, nil
+}
+
+func (r *UserRepository) withRecoveryWorkspaces(ctx context.Context, out []Workspace, hasRecovery bool) ([]Workspace, error) {
+	// Ordinary members need no second round-trip through the recovery roster.
+	// Empty membership results still check recovery, including a self-frozen user.
+	if len(out) > 0 && !hasRecovery {
+		return out, nil
+	}
+	recovery, e := r.iamRecoverySpaces(ctx)
+	if e != nil {
+		return nil, e
+	}
+	for _, w := range recovery {
+		replaced := false
+		for i := range out {
+			if out[i].ID == w.ID {
+				out[i] = w
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, w)
+		}
+	}
+	return out, nil
 }
 func (r *UserRepository) BindWorkspace(ctx context.Context, id int64) (context.Context, error) {
+	if id > 0 {
+		w, e := r.bindWorkspaceCurrent(ctx, id)
+		if e != nil {
+			return ctx, e
+		}
+		if w != nil {
+			return boundWorkspaceContext(ctx, w)
+		}
+	}
 	spaces, e := r.Workspaces(ctx)
 	if e != nil {
 		return ctx, e
@@ -48,13 +130,15 @@ func (r *UserRepository) BindWorkspace(ctx context.Context, id int64) (context.C
 	}
 	for _, w := range spaces {
 		if w.ID == id {
-			c, ok := auth.ClaimsFromContext(ctx)
-			if !ok || c == nil {
-				return ctx, ErrWorkspaceRequired
+			if w.IAM != nil && !w.IAM.GovernanceOnly && w.IAM.Subject != ActorID(ctx) {
+				return boundWorkspaceContext(rejoinedSubjectContext(ctx, w.IAM.Subject), &w)
 			}
-			copy := *c
-			copy.Role = w.Role
-			return context.WithValue(WithWorkspace(context.WithValue(ctx, auth.ClaimsContextKey, &copy), id), memberEpochKey{}, w.Version), nil
+			if !w.IAM.GovernanceOnly {
+				if e = r.bindIAM(ctx, &w); e != nil {
+					return ctx, e
+				}
+			}
+			return boundWorkspaceContext(ctx, &w)
 		}
 	}
 	return ctx, ErrNotFound
@@ -131,7 +215,7 @@ func (r *UserRepository) AddMember(ctx context.Context, username, role string) e
 		return e
 	}
 	var uid int64
-	if e = tx.QueryRow(ctx, `SELECT id FROM sys_users WHERE username=$1 AND is_active FOR SHARE`, username).Scan(&uid); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT id FROM sys_users WHERE username=$1 AND is_active AND workspace_account_id IS NULL FOR SHARE`, username).Scan(&uid); e != nil {
 		return managedError(e)
 	}
 	tag, e := tx.Exec(ctx, `INSERT INTO sys_workspace_members(workspace_id,user_id,role_code) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, WorkspaceID(ctx), uid, role)
@@ -148,13 +232,26 @@ func workspaceAdminTx(ctx context.Context, tx pgx.Tx) error {
 		return ErrManagedDenied
 	}
 	var uid int64
-	e := tx.QueryRow(ctx, `SELECT m.user_id FROM sys_workspace_members m JOIN sys_users u ON u.id=m.user_id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.active AND m.role_code='admin' AND u.is_active AND w.enabled AND ($3::bigint=0 OR m.version=$3) FOR SHARE OF m,u,w`, WorkspaceID(ctx), ActorID(ctx), MemberEpoch(ctx)).Scan(&uid)
+	e := tx.QueryRow(ctx, `SELECT m.user_id FROM sys_workspace_members m JOIN sys_users u ON u.id=m.user_id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.active AND m.role_code='admin' AND u.is_active AND w.enabled AND ($3::bigint=0 OR m.version=$3)
+ AND (m.expires_at IS NULL OR m.expires_at>statement_timestamp())
+ AND NOT EXISTS(SELECT 1 FROM sys_iam_revocations v WHERE v.workspace_id=m.workspace_id AND v.target_id=m.user_id AND v.kind='member_freeze')
+ FOR SHARE OF m,u,w`, WorkspaceID(ctx), ActorID(ctx), MemberEpoch(ctx)).Scan(&uid)
 	if e != nil {
 		return ErrManagedDenied
 	}
+	if _, e = tx.Exec(ctx, `SELECT set_config('dbhub.actor_id',$1,true),set_config('dbhub.workspace_id',$2,true)`, fmt.Sprint(ActorID(ctx)), fmt.Sprint(WorkspaceID(ctx))); e != nil {
+		return e
+	}
 	return nil
 }
-func (r *UserRepository) UpdateMembership(ctx context.Context, id int64, role string, active *bool, expected int64) error {
+func (r *UserRepository) UpdateMembership(ctx context.Context, id int64, role string, active *bool, expected int64, capabilities ...[]string) error {
+	return r.updateMembership(ctx, id, role, active, expected, nil, capabilities...)
+}
+
+func (r *UserRepository) updateMembership(ctx context.Context, id int64, role string, active *bool, expected int64, email *string, capabilities ...[]string) error {
+	if len(capabilities) > 1 || (len(capabilities) == 1 && !auth.ValidCapabilities(capabilities[0])) {
+		return ErrManagedInput
+	}
 	if !ActorAdmin(ctx) {
 		return ErrManagedDenied
 	}
@@ -180,7 +277,8 @@ func (r *UserRepository) UpdateMembership(ctx context.Context, id int64, role st
 	var prev string
 	var on bool
 	var version int64
-	if e = tx.QueryRow(ctx, `SELECT role_code,active,version FROM sys_workspace_members WHERE workspace_id=$1 AND user_id=$2 FOR UPDATE`, wid, id).Scan(&prev, &on, &version); e != nil {
+	var previousCapabilities []string
+	if e = tx.QueryRow(ctx, `SELECT role_code,active,version,capabilities FROM sys_workspace_members WHERE workspace_id=$1 AND user_id=$2 FOR UPDATE`, wid, id).Scan(&prev, &on, &version, &previousCapabilities); e != nil {
 		return managedError(e)
 	}
 	if expected > 0 && version != expected {
@@ -210,7 +308,20 @@ func (r *UserRepository) UpdateMembership(ctx context.Context, id int64, role st
 			return ErrUserResourcesInUse
 		}
 	}
-	_, e = tx.Exec(ctx, `UPDATE sys_workspace_members SET role_code=$3,active=$4,version=version+1 WHERE workspace_id=$1 AND user_id=$2`, wid, id, role, on)
+	if email != nil {
+		if e := updateWorkspaceIdentityEmail(ctx, tx, id, *email); e != nil {
+			return e
+		}
+	}
+	currentCapabilities := previousCapabilities
+	if len(capabilities) == 1 {
+		currentCapabilities = append([]string{}, capabilities[0]...)
+	}
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.PreviousCapabilities = previousCapabilities
+		d.WorkspaceCapabilities = currentCapabilities
+	})
+	_, e = tx.Exec(ctx, `UPDATE sys_workspace_members SET role_code=$3,active=$4,capabilities=$5,version=version+1 WHERE workspace_id=$1 AND user_id=$2`, wid, id, role, on, currentCapabilities)
 	if e != nil {
 		return e
 	}

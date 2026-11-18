@@ -1,0 +1,204 @@
+# 阶段1专用隔离环境：不发布端口，不挂载现有元数据/业务数据卷。
+name: dbhub-iam-phase1-test
+services:
+  metadata:
+    image: dbhub-local/postgres:16-existing
+    pull_policy: never
+    environment:
+      POSTGRES_USER: iam_test
+      POSTGRES_DB: iam_test
+      POSTGRES_PASSWORD: ${IAM_POSTGRES_PASSWORD:?test password required}
+    tmpfs:
+      - /var/lib/postgresql/data:size=1024m
+    volumes:
+      - ./iam-test-init.sql:/docker-entrypoint-initdb.d/10-iam-test.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U iam_test -d iam_test]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: dbhub-local/redis:7-alpine
+    pull_policy: never
+    command: [redis-server, --save, "", --appendonly, "no"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  business-test:
+    # The complete regression fixture has its own PG, separate from retained
+    # acceptance, restore and performance catalogs. Existing tests deliberately
+    # share metadata and target DBs inside that fixture. No live WSL PG is used.
+    image: dbhub-local/postgres:16-existing
+    pull_policy: never
+    environment:
+      POSTGRES_USER: iam_test
+      POSTGRES_DB: iam_business_test
+      POSTGRES_PASSWORD: ${IAM_POSTGRES_PASSWORD:?test password required}
+    tmpfs:
+      - /var/lib/postgresql/data:size=512m
+    volumes:
+      - ./iam-test-init.sql:/docker-entrypoint-initdb.d/10-iam-test.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U iam_test -d iam_business_test]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  regression-test: &regression-postgres
+    profiles: [preserved-regression]
+    # Fresh regression instance; the earlier 512MB instance is retained exited
+    # after exhausting its WAL volume. Do not clear that failure scene.
+    image: dbhub-local/postgres:16-existing
+    pull_policy: never
+    environment:
+      POSTGRES_USER: iam_test
+      POSTGRES_DB: iam_regression
+      POSTGRES_PASSWORD: ${IAM_POSTGRES_PASSWORD:?test password required}
+    command: [postgres, -c, max_wal_size=128MB, -c, min_wal_size=32MB]
+    tmpfs:
+      - /var/lib/postgresql/data:size=2048m
+    volumes:
+      - ./iam-test-init.sql:/docker-entrypoint-initdb.d/10-iam-test.sql:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U iam_test -d iam_regression]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  regression-final-test:
+    # Keep the earlier long-lived fixture and its timed-out run intact. This
+    # fresh instance uses identical limits and still hosts metadata + test data.
+    <<: *regression-postgres
+    profiles: []
+  backend-test:
+    image: dbhub-local/golang:1.26.9-bookworm
+    pull_policy: never
+    working_dir: /src
+    environment:
+      CGO_ENABLED: "1"
+      GOFLAGS: -mod=vendor
+      GOTOOLCHAIN: local
+      GOPROXY: "off"
+      GOMAXPROCS: "4"
+      TEST_POSTGRES_DSN: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@regression-final-test:5432/iam_regression?sslmode=disable
+      TEST_METADATA_DSN: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@regression-final-test:5432/iam_regression?sslmode=disable
+      TEST_REDIS_URL: redis://redis:6379/0
+      # Only set after restoring the protected baseline into this isolated PG.
+      TEST_IAM_RESTORE_DSN: ${IAM_RESTORE_DSN:-}
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - ./iam-regression.sh:/fixture/iam-regression.sh:ro
+      - ../../.dbhub/phase1-test:/evidence
+    depends_on:
+      metadata: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      regression-final-test: {condition: service_healthy}
+    # Metadata collection scans this temporary PG. Run packages sequentially so
+    # another package cannot drop its schema midway through that real scan.
+    # This controls fixture isolation only; A52 still measures concurrency 8.
+    command: [bash, /fixture/iam-regression.sh]
+  frontend-test:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    working_dir: /tmp/app
+    volumes:
+      - ../../frontend:/source:ro
+      - node-modules:/dependencies/node_modules
+    command: [sh, -ec, "cp -a /source/. /tmp/app/; rm -rf /tmp/app/node_modules; ln -s /dependencies/node_modules /tmp/app/node_modules; npm run build"]
+  frontend-deps:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    working_dir: /tmp/dependencies
+    volumes:
+      - ../../frontend:/source:ro
+      - node-modules:/tmp/dependencies/node_modules
+      - npm-cache:/cache:ro
+    command: [sh, -ec, "cp /source/package.json /source/package-lock.json .; npm ci --offline --cache /cache --audit=false --fund=false --logs-dir=/tmp/npm-logs"]
+  acceptance-api:
+    image: dbhub-local/golang:1.26.9-bookworm
+    pull_policy: never
+    working_dir: /src
+    environment:
+      GOFLAGS: -mod=vendor
+      GOTOOLCHAIN: local
+      GOPROXY: "off"
+      GOMAXPROCS: "4"
+      APP_ENV: development
+      APP_SECRET_KEY: ${IAM_APP_SECRET:?isolated app secret required}
+      APP_ADMIN_USERNAME: iam-owner
+      APP_ADMIN_PASSWORD: ${IAM_DEMO_PASSWORD:?isolated demo password required}
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_acceptance
+      REDIS_URL: redis://redis:6379/4
+      DBHUB_AUDIT_DIR: /var/lib/dbhub/audit
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - acceptance-build:/out
+      - acceptance-audit:/var/lib/dbhub/audit
+    ports:
+      - "127.0.0.1:8082:8080"
+    networks: [default, preview]
+    command: [sh, -ec, "install -d -m 0700 /var/lib/dbhub/audit; go build -p=2 -trimpath -o /out/server ./cmd/server; exec /out/server"]
+    depends_on:
+      metadata: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  acceptance-web:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    working_dir: /app
+    environment:
+      VITE_IAM_UI_ENABLED: "true"
+      VITE_API_PROXY_TARGET: http://acceptance-api:8080
+      VITE_PORT: "5175"
+      VITE_CACHE_DIR: /tmp/iam-vite
+      VITE_USE_POLLING: "true"
+    volumes:
+      - ../../frontend:/app:ro
+      - node-modules:/app/node_modules
+    ports:
+      - "127.0.0.1:5175:5175"
+    networks: [default, preview]
+    command: [node, node_modules/vite/bin/vite.js, --host, 0.0.0.0]
+    depends_on:
+      - acceptance-api
+  acceptance-business-seed:
+    image: dbhub-local/postgres:16-existing
+    pull_policy: never
+    environment:
+      PGPASSWORD: ${IAM_POSTGRES_PASSWORD}
+      IAM_READER_PASSWORD: ${IAM_READER_PASSWORD:?isolated reader password required}
+      IAM_WRITER_PASSWORD: ${IAM_WRITER_PASSWORD:?isolated writer password required}
+    volumes:
+      - ./iam-business-seed.sql:/fixture.sql:ro
+    command: [psql, -h, metadata, -U, iam_test, -d, iam_test, -v, ON_ERROR_STOP=1, -f, /fixture.sql]
+    depends_on:
+      metadata: {condition: service_healthy}
+  acceptance-fixture:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    working_dir: /fixture
+    environment:
+      IAM_DEMO_PASSWORD: ${IAM_DEMO_PASSWORD}
+      IAM_READER_PASSWORD: ${IAM_READER_PASSWORD}
+      IAM_WRITER_PASSWORD: ${IAM_WRITER_PASSWORD}
+    volumes:
+      - ./iam-acceptance-passwords.mjs:/fixture/passwords.mjs:ro
+      - ./iam-acceptance-workflow.mjs:/fixture/flow.mjs:ro
+      - ./iam-acceptance-governance.mjs:/fixture/governance.mjs:ro
+      - ./iam-runtime-routes.mjs:/fixture/routes.mjs:ro
+      - ./iam-acceptance-menus.mjs:/fixture/menus.mjs:ro
+      - ../../.dbhub/phase1-test:/evidence
+    command: [node, passwords.mjs]
+volumes:
+  go-cache: {}
+  node-modules: {}
+  acceptance-build: {}
+  acceptance-audit: {}
+  npm-cache:
+    external: true
+    name: dbhub-local_npm_cache
+networks:
+  default:
+    internal: true
+  preview: {}

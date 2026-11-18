@@ -1,4 +1,5 @@
 import request from '../utils/request'
+import { connectionTestTimeout } from './connection-test-timeout'
 import type { ConnectionItem, ConnectionPayload, TestResult } from './datasource'
 
 export type Visibility = 'private' | 'global'
@@ -37,7 +38,7 @@ export interface DefinitionPayload { name: string; description: string; visibili
 export interface PersonalIdentity { name: string; username: string; password: string; confirmed: boolean }
 
 export const sourceCatalogApi = {
-  list: (params?: {keyword?: string; category?: string; view?: string; page?: number; page_size?: number}) => request.get<unknown, { items: SourceDefinition[]; total: number }>('/datasource-definitions', {params}),
+  list: (params?: {keyword?: string; category?: string; view?: string; page?: number; page_size?: number}, silentError = false) => request.get<unknown, { items: SourceDefinition[]; total: number }>('/datasource-definitions', {params, silentError}),
   categories: () => request.get<unknown, {items: string[]}>('/datasource-definitions/categories'),
   access: (id: number) => request.get<unknown, {mode: 'global' | 'restricted'; user_ids: number[]; group_ids: number[]; version: number}>(`/datasource-definitions/${id}/access`),
   setAccess: (id: number, payload: {mode: string; user_ids: number[]; group_ids: number[]; expected_version: number}) => request.put(`/datasource-definitions/${id}/access`, payload),
@@ -46,9 +47,10 @@ export const sourceCatalogApi = {
   create: (payload: DefinitionPayload) => request.post<unknown, SourceDefinition>('/datasource-definitions', payload),
   publish: (connectionId: number, visibility: Visibility) => request.post<unknown, SourceDefinition>(`/connections/${connectionId}/publish`, { visibility }),
   revise: (id: number, payload: DefinitionPayload) => request.post<unknown, SourceDefinition>(`/datasource-definitions/${id}/revisions`, payload),
-  revisions: (id: number, page = 1) => request.get<unknown, {items: DefinitionRevision[]; total: number; page: number; page_size: number}>(`/datasource-definitions/${id}/revisions`, {params: {page, page_size: 10}}),
+  revisions: (id: number, page = 1, silentError = false) => request.get<unknown, {items: DefinitionRevision[]; total: number; page: number; page_size: number}>(`/datasource-definitions/${id}/revisions`, {params: {page, page_size: 10}, silentError}),
   status: (id: number, enabled: boolean, expectedBindings?: number, expectedReports?: number) => request.patch(`/datasource-definitions/${id}/status`, { enabled, ...(!enabled ? {confirmed: true, expected_binding_count: expectedBindings, expected_report_count: expectedReports} : {}) }),
   add: (id: number, payload: PersonalIdentity) => request.post<unknown, ConnectionItem>(`/datasource-definitions/${id}/connections`, payload),
-  test: (id: number, payload: PersonalIdentity) => request.post<unknown, TestResult>(`/datasource-definitions/${id}/connections?test=true`, payload, { timeout: 25_000 }),
+  test: (id: number, payload: PersonalIdentity, options?: { signal?: AbortSignal; silentError?: boolean }) =>
+    request.post<unknown, TestResult>(`/datasource-definitions/${id}/connections?test=true`, payload, { ...options, timeout: connectionTestTimeout }),
   upgrade: (connectionId: number, definitionId: number, payload: PersonalIdentity) => request.post<unknown, ConnectionItem>(`/connections/${connectionId}/revision`, { ...payload, definition_revision_id: definitionId }),
 }

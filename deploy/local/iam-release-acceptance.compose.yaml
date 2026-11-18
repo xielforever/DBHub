@@ -1,0 +1,53 @@
+# Separate synthetic approval scene; original acceptance space and all live
+# metadata remain untouched. These services carry no real-activation flag.
+services:
+  release-api:
+    image: dbhub-local/golang:1.26.9-bookworm
+    pull_policy: never
+    working_dir: /src
+    environment:
+      GOFLAGS: -mod=vendor
+      GOTOOLCHAIN: local
+      GOPROXY: "off"
+      GOMAXPROCS: "4"
+      APP_ENV: development
+      APP_SECRET_KEY: ${IAM_APP_SECRET}
+      APP_ADMIN_USERNAME: iam-owner
+      APP_ADMIN_PASSWORD: ${IAM_DEMO_PASSWORD}
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_release_acceptance
+      REDIS_URL: redis://redis:6379/11
+      DBHUB_AUDIT_DIR: /audit
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - release-build:/out
+      - release-audit:/audit
+    ports: ["127.0.0.1:8084:8080"]
+    networks: [default, preview]
+    command: [sh, -ec, "install -d -m 0700 /audit; go build -p=2 -trimpath -o /out/server ./cmd/server; exec /out/server"]
+  release-web:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    working_dir: /app
+    environment:
+      VITE_IAM_UI_ENABLED: "true"
+      VITE_API_PROXY_TARGET: http://release-api:8080
+      VITE_PORT: "5176"
+      VITE_CACHE_DIR: /tmp/release-vite
+      VITE_USE_POLLING: "true"
+    volumes:
+      - ../../frontend:/app:ro
+      - node-modules:/app/node_modules
+    ports: ["127.0.0.1:5176:5176"]
+    networks: [default, preview]
+    command: [node, node_modules/vite/bin/vite.js, --host, 0.0.0.0]
+  release-fixture:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    volumes:
+      - ./iam-release-acceptance.mjs:/fixture/release.mjs:ro
+      - ../../.dbhub/phase1-test:/evidence
+    command: [node, /fixture/release.mjs]
+volumes:
+  release-build: {}
+  release-audit: {}

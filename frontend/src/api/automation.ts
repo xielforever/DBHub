@@ -7,6 +7,7 @@ export interface TodoItem {id:number;kind:string;resource_id:number;title:string
 export interface InboxPage {items:NotificationItem[];total:number;unread:number;through_id:number;todo_count:number}
 export type TaskStatus='queued'|'running'|'cancel_requested'|'succeeded'|'failed'|'cancelled'|'interrupted'|'stale'|'skipped'|'unknown'
 export interface SourceTask {
+  permission_bridge?:string;permission_config?:number;permission_epoch?:number;
   id:string;connection_id:number;connection_name:string;kind:'check'|'collect';status:TaskStatus;progress:number;phase:string;
   result:{tables?:number;views?:number;elapsed_ms?:number;version?:string};created_at:string;started_at:string|null;finished_at:string|null;parent_id:string|null
 }

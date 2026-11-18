@@ -85,7 +85,7 @@ docker run -d --name dbhub-metadata-backup --restart unless-stopped --init \
 
 ## Helm / Kubernetes
 
-要求 Helm 3、Kubernetes 1.27+，并已有可用的外部元库/Redis、持久存储与 Ingress Controller。Chart 使用外部 Secret，不将口令保存到 values 或 Helm 发布历史中。先准备命名空间，再从私有文件创建运行 Secret：
+要求 Helm 3、Kubernetes 1.27+，并已有可用的外部元库、Redis 和持久存储。启用 Ingress 时需要相应的 Ingress Controller。Chart 使用外部 Secret，不将口令保存到 values 或 Helm 发布历史中。先准备命名空间，再从私有文件创建运行 Secret：
 
 ```sh
 kubectl create namespace dbhub
@@ -105,6 +105,25 @@ helm upgrade --install dbhub deploy/helm/dbhub --namespace dbhub \
 启用 `backup.enabled` 后需指定备份镜像和独立的 libpq Secret，其中含 `pg_service.conf`、`pgpass`，必要时附 CA 文件。配置在非 root init 容器中复制成 UID 65532 的 `0600` 文件，避免 Kubernetes Secret 默认所有者/权限导致 libpq 拒读。文件路径位于 `/run/dbhub-backup`。CronJob 禁止重叠、保留至少两份完成归档，备份 PVC 内为 `backups/`。计划按集群控制器时区执行，默认示例为每日 02:00；统一采用 UTC。启用后设置 `config.DBHUB_BACKUP_EXPECTED_HOURS: "24"`，并将备份复制到异地。
 
 `helm uninstall` 保留本 Chart 创建的审计/备份 PVC；删除命名空间仍会删除命名空间内的 PVC。Secret 更新需受控重启后端/JDBC。Helm 回滚不回滚数据库迁移，必须先验证旧镜像与当前 Schema 的兼容性或恢复独立元库。当前不提供后端 HPA/多副本支持。
+
+### xyc 本地发布
+
+目标为 `xyc` 集群的 `dbhub` Context、命名空间和 Helm release。该环境用前端 Service 复用现有 CCE ELB，入口 `80/TCP` 转发到容器 `8080`，Ingress 关闭。用 `frontend.service` 声明负载均衡类型、节点端口和现有 ELB 注解。环境实际 values、kubeconfig 与生成的发布记录保存在本地，运行凭据由现有 Secret 提供。其他环境默认使用 ClusterIP。
+
+在仓库根目录使用 Python 3.12、[校验依赖](requirements-check.txt)及 Helm 3 执行本地校验。未指定 `--apply` 时，仅运行 Helm lint 和本地渲染并核对 Service、镜像摘要和 Secret 引用。
+
+```powershell
+python scripts/deploy/xyc_release.py --helm 'C:/path/to/helm.exe'
+```
+
+实际升级前，按[部署运维指南](../docs/部署运维/部署运维指南.md#4-迁移与备份)备份元库并排空活动查询。使用有推送权限的 Docker 登录华东二 SWR，再显式指定 `--apply`。本机 Docker 由 WSL 提供时使用 `--docker-wsl`。工具在 PATH 中时可省略相应路径。管理员已改密时用 `--prompt-login-password` 在执行时输入当前密码。
+
+```powershell
+python scripts/deploy/xyc_release.py --apply --docker-wsl Ubuntu-24.04 `
+  --helm 'C:/path/to/helm.exe' --kubectl 'C:/path/to/kubectl.exe'
+```
+
+脚本核对目标、现有 ELB 和依赖，构建当前工作区的前后端镜像，推送到 values 指定的 SWR 仓库并读回摘要。每次发布将带摘要的完整 values、Git HEAD 和构建快照指纹写入本地的 `.local-docs/helm/xyc-releases/`。应用就绪后，脚本比对 PostgreSQL 迁移记录与构建快照，并经本机临时转发验证前端、健康接口、登录身份和会话退出。失败步骤会返回非零状态，已推送镜像和部署结果可在相应仓库及 Helm 发布记录中核对。ELB 外部访问策略仍由环境运维管理。回退镜像时使用含当前 ELB 配置的 values，Helm 第 1 版的历史清单记录的是 ClusterIP。
 
 ## 源码 / systemd
 

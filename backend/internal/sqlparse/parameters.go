@@ -14,6 +14,25 @@ func nameByte(c byte) bool {
 
 // BindNamed never substitutes inside literals, quoted identifiers or comments.
 func BindNamed(query, dialect string, params map[string]any) (string, []any, error) {
+	return bindNamed(query, dialect, func(name string) (any, bool) { value, ok := params[name]; return value, ok })
+}
+
+// NamedParameters uses the same lexer as execution, including quoted strings,
+// dollar quotes and nested comments. A definition cannot invent a second SQL grammar.
+func NamedParameters(query, dialect string) ([]string, error) {
+	names := []string{}
+	seen := map[string]bool{}
+	_, _, err := bindNamed(query, dialect, func(name string) (any, bool) {
+		if !seen[name] {
+			names = append(names, name)
+			seen[name] = true
+		}
+		return nil, true
+	})
+	return names, err
+}
+
+func bindNamed(query, dialect string, lookup func(string) (any, bool)) (string, []any, error) {
 	var out strings.Builder
 	args := []any{}
 	for i := 0; i < len(query); {
@@ -102,7 +121,7 @@ func BindNamed(query, dialect string, params map[string]any) (string, []any, err
 			}
 		}
 		if name != "" {
-			value, ok := params[name]
+			value, ok := lookup(name)
 			if !ok {
 				return "", nil, fmt.Errorf("缺少参数 %s", name)
 			}

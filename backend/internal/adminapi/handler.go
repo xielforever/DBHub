@@ -31,8 +31,8 @@ type createUserRequest struct {
 }
 
 type updateUserRequest struct {
-	Role  string `json:"role"`
-	Email string `json:"email"`
+	Role  string  `json:"role"`
+	Email *string `json:"email"`
 }
 
 type statusRequest struct {
@@ -158,7 +158,11 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := h.users.UpdateUser(r.Context(), id, in.Role, strings.TrimSpace(in.Email)); err != nil {
+	if in.Email != nil {
+		email := strings.TrimSpace(*in.Email)
+		in.Email = &email
+	}
+	if err := h.users.UpdateUser(r.Context(), id, in.Role, in.Email); err != nil {
 		httpx.Fail(w, mapNotFound(err))
 		return
 	}

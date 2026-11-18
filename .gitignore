@@ -58,3 +58,6 @@ __pycache__/
 !/docs/项目管控/验收证据/2026-10-22-阶段1基础/
 /docs/项目管控/验收证据/2026-10-22-阶段1基础/*
 !/docs/项目管控/验收证据/2026-10-22-阶段1基础/performance-workload-v1.json
+
+# CCE local access configuration
+/dbhub-kubeconfig.yaml

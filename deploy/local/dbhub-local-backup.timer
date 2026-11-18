@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily DBHub local recovery bundle
+
+[Timer]
+OnCalendar=*-*-* 18:30:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=dbhub-local-backup.service
+
+[Install]
+WantedBy=timers.target

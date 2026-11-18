@@ -21,10 +21,10 @@ func scanManaged(row pgx.Row) (*ManagedReport, error) {
 	return m, e
 }
 func (r *ManagedReportRepository) Get(ctx context.Context, id int64) (*ManagedReport, error) {
-	return scanManaged(r.pool.QueryRow(ctx, `SELECT `+managedColumns+` FROM sys_managed_reports m JOIN sys_users u ON u.id=m.owner_id WHERE m.id=$1 AND (m.owner_id=$2 OR $3)`, id, ActorID(ctx), ActorAdmin(ctx)))
+	return scanManaged(r.pool.QueryRow(ctx, `SELECT `+managedColumns+` FROM sys_managed_reports m JOIN sys_users u ON u.id=m.owner_id WHERE m.id=$1 AND (m.owner_id=$2 OR $3)`, id, ActorID(ctx), ActorReportReviewer(ctx)))
 }
 func (r *ManagedReportRepository) List(ctx context.Context, all, pending bool, q string, limit, offset int) ([]ManagedReport, int64, error) {
-	all = all && ActorAdmin(ctx)
+	all = all && ActorReportReviewer(ctx)
 	args := []any{all, ActorID(ctx), q, pending}
 	base := ` FROM sys_managed_reports m JOIN sys_users u ON u.id=m.owner_id WHERE ($1 OR m.owner_id=$2) AND ($3='' OR m.draft->>'name' ILIKE '%'||$3||'%' OR m.draft->>'description' ILIKE '%'||$3||'%') AND (NOT $4 OR EXISTS(SELECT 1 FROM sys_report_versions pv JOIN sys_report_reviews pr ON pr.version_id=pv.id WHERE pv.report_id=m.id AND pr.status='pending'))`
 	var total int64
@@ -64,6 +64,20 @@ func (r *ManagedReportRepository) SaveDraft(ctx context.Context, key string, id,
 	}{id, expected, d}
 	return r.command(ctx, key, "draft", input, false, true, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{}
+		if id == 0 {
+			if e := checkPromotion(ctx, tx, d.Promotion); e != nil {
+				return out, e
+			}
+		}
+		if e := ValidateReportExportPolicy(d.ExportPolicy); e != nil {
+			return out, fmt.Errorf("%w: %s", ErrManagedInput, e)
+		}
+		if e := ValidateReportExportParameters(d.ExportPolicy, d.Parameters); e != nil {
+			return out, fmt.Errorf("%w: %s", ErrManagedInput, e)
+		}
+		if e := ValidateReportParameters(d.Parameters); e != nil {
+			return out, fmt.Errorf("%w: %s", ErrManagedInput, e)
+		}
 		if e := ValidateDataContract(d.DataContract, d.ChartType); e != nil {
 			return out, e
 		}
@@ -79,7 +93,8 @@ func (r *ManagedReportRepository) SaveDraft(ctx context.Context, key string, id,
 			return out, e
 		}
 		var owner, version int64
-		e := tx.QueryRow(ctx, `SELECT owner_id,draft_version FROM sys_managed_reports WHERE id=$1 FOR UPDATE`, id).Scan(&owner, &version)
+		var previous []byte
+		e := tx.QueryRow(ctx, `SELECT owner_id,draft_version,draft FROM sys_managed_reports WHERE id=$1 FOR UPDATE`, id).Scan(&owner, &version, &previous)
 		if e != nil {
 			return out, e
 		}
@@ -89,6 +104,12 @@ func (r *ManagedReportRepository) SaveDraft(ctx context.Context, key string, id,
 		if version != expected {
 			return out, ErrManagedConflict
 		}
+		var old ReportDefinition
+		if e = json.Unmarshal(previous, &old); e != nil {
+			return out, e
+		}
+		d.Promotion = old.Promotion
+		raw, _ = json.Marshal(d)
 		e = tx.QueryRow(ctx, `UPDATE sys_managed_reports SET draft=$2::jsonb,definition_revision_id=$3,draft_version=draft_version+1,updated_at=now() WHERE id=$1 RETURNING id,draft_version`, id, string(raw), d.DefinitionID).Scan(&out.ID, &out.Version)
 		return out, e
 	})
@@ -137,15 +158,23 @@ func (r *ManagedReportRepository) Submit(ctx context.Context, key string, id, ex
 		return out, e
 	})
 }
-func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit, offset int) ([]ReportVersion, int64, error) {
+func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit, offset int, reviewID int64) ([]ReportVersion, int64, error) {
 	if _, e := r.Get(ctx, id); e != nil {
 		return nil, 0, e
 	}
 	var total int64
-	if e := r.pool.QueryRow(ctx, `SELECT count(*) FROM sys_report_versions WHERE report_id=$1`, id).Scan(&total); e != nil {
+	query := `SELECT v.id,v.report_id,v.number,v.definition,v.content_hash,v.submitted_by,v.submitter_name,v.created_at,rv.id,rv.status,rv.decider_name,rv.comment,rv.account_id,COALESCE(a.name,''),rv.manifest,EXISTS(SELECT 1 FROM sys_report_releases re WHERE re.report_id=v.report_id AND re.review_id=rv.id),(SELECT to_jsonb(ac) FROM sys_report_audience_changes ac WHERE ac.review_id=rv.id),
+		COALESCE((SELECT CASE WHEN c.requires_data AND rv.status='pending' THEN 'data_review' WHEN rv.status='approved' THEN 'complete' ELSE '' END
+			FROM sys_report_review_checks c WHERE c.workspace_id=rv.workspace_id AND c.review_id=rv.id),'')
+		FROM sys_report_versions v JOIN sys_report_reviews rv ON rv.version_id=v.id LEFT JOIN sys_report_accounts a ON a.id=rv.account_id WHERE v.report_id=$1`
+	args := []any{id, limit, offset}
+	if reviewID > 0 {
+		query += ` AND rv.id=$4`
+		args = append(args, reviewID)
+	} else if e := r.pool.QueryRow(ctx, `SELECT count(*) FROM sys_report_versions WHERE report_id=$1`, id).Scan(&total); e != nil {
 		return nil, 0, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT v.id,v.report_id,v.number,v.definition,v.content_hash,v.submitted_by,v.submitter_name,v.created_at,rv.id,rv.status,rv.decider_name,rv.comment,rv.account_id,COALESCE(a.name,''),rv.manifest,EXISTS(SELECT 1 FROM sys_report_releases re WHERE re.report_id=v.report_id AND re.review_id=rv.id),(SELECT to_jsonb(ac) FROM sys_report_audience_changes ac WHERE ac.review_id=rv.id) FROM sys_report_versions v JOIN sys_report_reviews rv ON rv.version_id=v.id LEFT JOIN sys_report_accounts a ON a.id=rv.account_id WHERE v.report_id=$1 ORDER BY v.number DESC LIMIT $2 OFFSET $3`, id, limit, offset)
+	rows, e := r.pool.Query(ctx, query+` ORDER BY v.number DESC LIMIT $2 OFFSET $3`, args...)
 	if e != nil {
 		return nil, 0, e
 	}
@@ -154,7 +183,7 @@ func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit,
 	for rows.Next() {
 		var v ReportVersion
 		var raw, manifest, change []byte
-		if e = rows.Scan(&v.ID, &v.ReportID, &v.Number, &raw, &v.ContentHash, &v.SubmitterID, &v.SubmitterName, &v.CreatedAt, &v.ReviewID, &v.Status, &v.DeciderName, &v.Comment, &v.AccountID, &v.AccountName, &manifest, &v.WasPublished, &change); e != nil {
+		if e = rows.Scan(&v.ID, &v.ReportID, &v.Number, &raw, &v.ContentHash, &v.SubmitterID, &v.SubmitterName, &v.CreatedAt, &v.ReviewID, &v.Status, &v.DeciderName, &v.Comment, &v.AccountID, &v.AccountName, &manifest, &v.WasPublished, &change, &v.ApprovalStage); e != nil {
 			return nil, 0, e
 		}
 		if len(change) > 0 {
@@ -174,7 +203,16 @@ func (r *ManagedReportRepository) Versions(ctx context.Context, id int64, limit,
 		}
 		out = append(out, v)
 	}
-	return out, total, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, 0, e
+	}
+	if reviewID > 0 {
+		if len(out) == 0 {
+			return nil, 0, ErrNotFound
+		}
+		return out, 1, nil
+	}
+	return out, total, nil
 }
 func (r *ManagedReportRepository) Decide(ctx context.Context, key string, reviewID int64, decision, validationID, comment string, contractConfirmed bool) (ReportCommandResult, error) {
 	return r.command(ctx, key, "review", []any{reviewID, decision, validationID, comment, contractConfirmed}, decision != "withdrawn", decision == "withdrawn", func(tx pgx.Tx) (ReportCommandResult, error) {
@@ -182,7 +220,10 @@ func (r *ManagedReportRepository) Decide(ctx context.Context, key string, review
 		var status string
 		var submitter *int64
 		var owner int64
-		e := tx.QueryRow(ctx, `SELECT rv.status,v.submitted_by,m.owner_id FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id JOIN sys_managed_reports m ON m.id=v.report_id WHERE rv.id=$1 FOR UPDATE OF rv`, reviewID).Scan(&status, &submitter, &owner)
+		var enrolled bool
+		e := tx.QueryRow(ctx, `SELECT rv.status,v.submitted_by,m.owner_id,EXISTS(
+			SELECT 1 FROM sys_iam_isolated_report_reviews s WHERE s.workspace_id=m.workspace_id AND s.report_id=m.id)
+			FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id JOIN sys_managed_reports m ON m.id=v.report_id WHERE rv.id=$1 FOR UPDATE OF rv`, reviewID).Scan(&status, &submitter, &owner, &enrolled)
 		if e != nil {
 			return out, e
 		}
@@ -202,7 +243,8 @@ func (r *ManagedReportRepository) Decide(ctx context.Context, key string, review
 		var validID *string
 		if decision == "approved" {
 			var account, accountVersion, generation int64
-			e = tx.QueryRow(ctx, `SELECT account_id,account_version,account_generation,manifest,manifest_hash FROM sys_report_validations WHERE id=$1::uuid AND review_id=$2 AND performed_by=$3 AND created_at>now()-interval '15 minutes'`, validationID, reviewID, ActorID(ctx)).Scan(&account, &accountVersion, &generation, &manifest, &hash)
+			var previewStamp string
+			e = tx.QueryRow(ctx, `SELECT account_id,account_version,account_generation,manifest,manifest_hash,business_policy_stamp FROM sys_report_validations WHERE id=$1::uuid AND review_id=$2 AND performed_by=$3 AND created_at>now()-interval '15 minutes'`, validationID, reviewID, ActorID(ctx)).Scan(&account, &accountVersion, &generation, &manifest, &hash, &previewStamp)
 			if e != nil {
 				return out, ErrManagedConflict
 			}
@@ -210,7 +252,6 @@ func (r *ManagedReportRepository) Decide(ctx context.Context, key string, review
 			if e != nil {
 				return out, e
 			}
-			_ = conn
 			if a.Version != accountVersion || a.Generation != generation {
 				return out, ErrManagedConflict
 			}
@@ -227,22 +268,36 @@ func (r *ManagedReportRepository) Decide(ctx context.Context, key string, review
 			if e = audience(ctx, tx, m.UserIDs, m.GroupIDs); e != nil {
 				return out, e
 			}
+			if enrolled {
+				requiresData, err := r.signBusinessReportReview(ctx, tx, reviewID, m, hash, previewStamp, validationID, comment, conn, a)
+				if err != nil {
+					return out, err
+				}
+				if requiresData {
+					out.ApprovalStage = "data_review"
+					return out, nil
+				}
+			}
 			accountID = &account
 			validID = &validationID
 		}
 		_, e = tx.Exec(ctx, `UPDATE sys_report_reviews SET status=$2,decided_by=$3,decider_name=(SELECT username FROM sys_users WHERE id=$3),comment=$4,account_id=$5,manifest=$6::jsonb,manifest_hash=NULLIF($7,''),validation_id=$8::uuid,decided_at=now() WHERE id=$1`, reviewID, decision, ActorID(ctx), comment, accountID, nullableJSON(manifest), hash, validID)
 		if e == nil {
-			next := "approved_pending_release"
-			if decision == "rejected" {
-				next = "rejected"
-			}
-			if decision == "withdrawn" {
-				next = "cancelled"
-			}
-			_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=$2,decision_reason=CASE WHEN $2 IN('rejected','cancelled') THEN $3 ELSE decision_reason END,version=version+1 WHERE review_id=$1 AND expires_at>now() AND status IN('processing','approved_pending_release')`, reviewID, next, comment)
+			e = updateReportAccessAfterReview(ctx, tx, reviewID, decision, comment)
 		}
 		return out, e
 	})
+}
+func updateReportAccessAfterReview(ctx context.Context, tx pgx.Tx, reviewID int64, decision, comment string) error {
+	next := decision
+	switch decision {
+	case "approved":
+		next = "approved_pending_release"
+	case "withdrawn":
+		next = "cancelled"
+	}
+	_, err := tx.Exec(ctx, `UPDATE sys_access_requests SET status=$2,decision_reason=CASE WHEN $2 IN('rejected','cancelled') THEN $3 ELSE decision_reason END,version=version+1 WHERE review_id=$1 AND expires_at>now() AND status IN('processing','approved_pending_release')`, reviewID, next, comment)
+	return err
 }
 func nullableJSON(raw []byte) any {
 	if len(raw) == 0 {
@@ -253,6 +308,9 @@ func nullableJSON(raw []byte) any {
 func (r *ManagedReportRepository) Transfer(ctx context.Context, key string, id, expected, owner int64) (ReportCommandResult, error) {
 	return r.command(ctx, key, "transfer", []int64{id, expected, owner}, true, false, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{}
+		if err := guardCustodyTransfer(ctx, tx, availabilityObject{report: id}); err != nil {
+			return out, err
+		}
 		var valid bool
 		if e := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_users u JOIN sys_roles r ON r.code=dbhub_member_role(u.id) WHERE u.id=$1 AND u.is_active AND r.code IN ('admin','developer'))`, owner).Scan(&valid); e != nil {
 			return out, e

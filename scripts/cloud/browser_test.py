@@ -82,7 +82,7 @@ with sync_playwright() as p:
     page.locator('#username').fill(values['APP_ADMIN_USERNAME'])
     page.locator('#password').fill(values['APP_ADMIN_PASSWORD'])
     page.locator('button[type=submit]').click()
-    page.wait_for_url('**/dashboard')
+    page.wait_for_url('**/home')
 
     def open_sql(kind, sql, connection=None):
         page.goto(frontend+f"/query?connection={connection or ids[kind]}&sql={quote(sql)}", wait_until='networkidle')
@@ -283,7 +283,7 @@ with sync_playwright() as p:
             page.locator('#username').fill(username)
             page.locator('#password').fill(password)
             page.locator('button[type=submit]').click()
-            page.wait_for_url('**/dashboard')
+            page.wait_for_url('**/home')
             browser_token = page.evaluate("localStorage.getItem('dbhub_access_token')")
             personal = request('POST', '/connections', {'name':username+' personal PostgreSQL', 'type':'postgres', 'host':'postgres', 'port':5432, 'database':values['POSTGRES_DB'], 'username':values['POSTGRES_USER'], 'password':values['POSTGRES_PASSWORD'], 'ssl_mode':'disable', 'environment':'dev'}, (201,), token_override=browser_token)
             request('GET', f"/connections/{ids['postgres']}", expected=(404,), token_override=browser_token)

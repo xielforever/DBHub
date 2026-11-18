@@ -6,10 +6,15 @@ export const retryableTask=(status:TaskStatus)=>['failed','cancelled','interrupt
 
 // Routes are derived from a closed resource vocabulary, never a stored URL.
 export function inboxTarget(resource:string,id:number):string|undefined{
-  if(resource==='operations')return '/settings?section=operations'
+  if(resource==='operations')return '/platform?tab=operations'
   if(resource==='source_tasks')return '/source-tasks'
   if(!Number.isSafeInteger(id)||id<1)return undefined
   if(resource==='published_report')return `/reports?view=published&report=${id}`
+  if(resource==='report_export')return `/reports?view=exports&export=${id}`
+  if(resource==='report_subscription')return `/reports?view=subscriptions&subscription=${id}`
+  if(resource==='report_delivery')return `/reports?view=subscriptions&delivery=${id}`
+  if(resource==='metric_incident')return `/reports?view=subscriptions&incident=${id}`
+  if(resource==='business_operation')return `/business-operations?request=${id}`
   if(resource==='published_dashboard')return `/dashboards?dashboard=${id}`
   if(resource==='report'||resource==='report_review')return `/reports?view=managed&report=${id}`
   if(resource==='dashboard'||resource==='dashboard_review')return `/dashboards?tab=managed&dashboard=${id}`

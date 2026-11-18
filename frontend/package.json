@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test:query": "node --test tests/query-execution.test.ts",
+    "test": "node --experimental-vm-modules --test tests/*.test.ts tests/*.test.mjs",
+    "test:query": "node --experimental-vm-modules --test tests/query-execution.test.ts tests/query-target.test.ts tests/query-workspace.test.mjs",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "test:report": "node --test tests/report.test.ts",

@@ -3,13 +3,16 @@ package connectorruntime
 import (
 	"context"
 	"crypto/x509"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -39,6 +42,14 @@ func TestConnectionDiagnosticsPreserveMeaningWithoutDriverText(t *testing.T) {
 		{"tls", "tls_failed", x509.HostnameError{Certificate: &x509.Certificate{}, Host: secret}},
 		{"dns", "dns_failed", &net.DNSError{Err: secret, Name: secret, IsNotFound: true}},
 		{"network", "network_unreachable", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}},
+		{"eof", "connection_lost", io.EOF},
+		{"partial-packet", "connection_lost", io.ErrUnexpectedEOF},
+		{"mysql-invalid", "connection_lost", &connector.Error{Kind: "connection_failed", Message: secret, Cause: mysql.ErrInvalidConn}},
+		{"sql-bad-connection", "connection_lost", driver.ErrBadConn},
+		{"network-eof", "connection_lost", &net.OpError{Op: "read", Net: "tcp", Err: io.EOF}},
+		{"text-only-invalid", "unknown", errors.New("invalid connection " + secret)},
+		{"canceled-before-disconnect", "canceled", errors.Join(context.Canceled, mysql.ErrInvalidConn)},
+		{"deadline-before-disconnect", "timeout", errors.Join(context.DeadlineExceeded, io.EOF)},
 		{"timeout", "timeout", fmt.Errorf("%s: %w", secret, context.DeadlineExceeded)},
 		{"canceled", "canceled", context.Canceled},
 		{"redis-auth", "authentication_failed", fixtureRedisError("WRONGPASS " + secret)},
@@ -57,5 +68,47 @@ func TestConnectionDiagnosticsPreserveMeaningWithoutDriverText(t *testing.T) {
 				t.Fatal("diagnostic exposed driver text or lacks recovery guidance")
 			}
 		})
+	}
+}
+
+func TestMySQLGreetingDisconnectDiagnostic(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			done <- err
+			return
+		}
+		// 不发送完整欢迎包，复现驱动读取报头时的unexpected EOF。
+		_, err = conn.Write([]byte{10, 0})
+		conn.Close()
+		done <- err
+	}()
+	cfg := mysql.NewConfig()
+	cfg.Net, cfg.Addr = "tcp", listener.Addr().String()
+	driver, err := mysql.NewConnector(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := driver.Connect(ctx)
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("incomplete greeting unexpectedly connected")
+	}
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+	wrapped := &connector.Error{Kind: "connection_failed", Message: "safe message", Cause: err}
+	if got := DiagnoseConnectionError(wrapped); got.Code != "connection_lost" {
+		t.Fatalf("diagnostic=%s driver error type=%T", got.Code, err)
 	}
 }

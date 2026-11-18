@@ -267,9 +267,12 @@ func (r *HistoryRepository) SearchBySQL(ctx context.Context, userID int64, isAdm
 	return out, rows.Err()
 }
 
-// ActiveActors supplies explicit principals for the internal metadata-only lineage worker.
+// ActiveActors discovers actual metadata-only inputs. Qualification still occurs
+// at pickup and persistence; idle members are not hundreds of empty jobs.
 func (r *HistoryRepository) ActiveActors(ctx context.Context) ([]auth.Claims, error) {
-	rows, e := r.pool.maintenance.Query(ctx, `SELECT u.id,u.username,m.role_code,m.workspace_id FROM sys_users u JOIN sys_workspace_members m ON m.user_id=u.id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE u.is_active AND m.active AND w.enabled ORDER BY m.workspace_id,u.id`)
+	rows, e := r.pool.maintenance.Query(ctx, `SELECT u.id,u.username,m.role_code,m.workspace_id FROM sys_users u JOIN sys_workspace_members m ON m.user_id=u.id JOIN sys_workspaces w ON w.id=m.workspace_id WHERE u.is_active AND m.active AND w.enabled
+ AND (EXISTS(SELECT 1 FROM sys_query_history h WHERE h.workspace_id=m.workspace_id AND h.user_id=u.id AND h.status=1)
+ OR EXISTS(SELECT 1 FROM sys_meta_snapshots s WHERE s.workspace_id=m.workspace_id)) ORDER BY m.workspace_id,u.id`)
 	if e != nil {
 		return nil, e
 	}

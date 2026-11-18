@@ -98,7 +98,7 @@ func lockManagedFamily(ctx context.Context, tx pgx.Tx, id int64) (*SourceDefinit
 		return nil, e
 	}
 	var published, admin, active bool
-	if e = tx.QueryRow(ctx, `SELECT u.is_active,r.code='admin',EXISTS(SELECT 1 FROM sys_source_definitions WHERE family_id=$2::uuid AND visibility='global') FROM sys_users u JOIN sys_roles r ON r.id=u.role_id WHERE u.id=$1`, ActorID(ctx), d.FamilyID).Scan(&active, &admin, &published); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT u.is_active,dbhub_has_capability(u.id,'datasource_manage'),EXISTS(SELECT 1 FROM sys_source_definitions WHERE family_id=$2::uuid AND visibility='global') FROM sys_users u WHERE u.id=$1`, ActorID(ctx), d.FamilyID).Scan(&active, &admin, &published); e != nil {
 		return nil, ErrNotFound
 	}
 	if !active || (published && !admin) || (!published && d.OwnerID != ActorID(ctx)) {

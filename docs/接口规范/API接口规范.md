@@ -16,6 +16,8 @@
 | 403 / 40300 | 当前资格不足 |
 | 404 / 40400 | 不存在或当前不可见，不用错误泄漏受限对象 |
 | 409 / 40900 | 版本、基线、幂等内容或引用冲突 |
+| 499 / 49900 | 非治理业务响应交付前请求上下文已取消；不交付缓冲结果，不表示权限变化或写入回滚 |
+| 504 / 50400 | 非治理业务响应交付前请求上下文截止时间已到；不交付缓冲结果，不自动重试 |
 | 428 | 需要明确工作空间等前置条件，具体响应按接口 |
 | 429 / 42900 | 登录/准入限流，按响应处理Retry-After |
 | 500 / 50000 | 内部错误，仅返回通用提示 |
@@ -36,6 +38,8 @@
 | POST `/api/v1/auth/change-password` | `{old_password,new_password}`；核对原密码，新旧不能相同；会话失效按当前认证版本处理 |
 
 启用MFA的登录先返回 `{mfa_required:true,challenge_token,expires_in:300}`，此时没有访问或刷新令牌。真实外部身份环境仍按路线图待验，不将路由存在视为SSO产品验收。请求/响应完整类型见[auth](../../backend/internal/auth/)、[adminapi](../../backend/internal/adminapi/)及[前端身份状态](../../frontend/src/stores/user.ts)。
+
+`GET /api/v1/auth/sso/start` 可接收可选 `redirect`，值为以单个 `/` 开头的站内路径，可附带查询和片段。服务端将有效值保存在同次短期一次性授权状态。回跳消费有效状态后，返回配置的 DBHub 登录地址，并在 `sso` 标记之外带回 `redirect`。无效地址或无有效授权状态时省略该参数。身份提供方的回调地址继续使用部署配置，页面导航沿用现有工作空间和权限核验。
 
 Access Token优先取Authorization Bearer，其次X-Access-Token，再取Cookie dbhub_access_token；不通过URL查询参数传令牌。只用Cookie认证的修改请求须携带X-DBHub-CSRF: 1。令牌有效期按JWT_ACCESS_TTL_MINUTES/JWT_REFRESH_TTL_HOURS配置，默认15分钟/7天；失效或刷新失败不能保活旧权，依赖故障503也不能被误报为密码错误。
 
@@ -175,9 +179,11 @@ SSH隧道和代理都是当前本人网络配置，不能读取或借用其他�
 - 以用户和请求编号为唯一键，在 PostgreSQL 元数据库中原子登记。已登记编号再次提交返回 HTTP 409，`data` 为原执行回执；不同 SQL、参数、目标、选项或角色不得复用同一编号。失败、超时、进程退出均不释放编号，服务端不会自动重跑。
 - 一次只允许执行一条语句（多语句返回 `40000`，防止批量注入）；
 - 默认最多返回 **1000 行**，超出 `truncated=true`；默认超时 30 秒。`max_rows`、`timeout_ms` 服从用户保存的更严格限制；硬上限分别为 10000 行、120 秒。返回行数限制不限制更新或删除的影响行数。
+- PostgreSQL 原生连接的标量 `xml` 值作为原文字符串返回，包括 `EXPLAIN (FORMAT XML)`。`NULL` 保留为空值，二进制 `bytea` 沿用 Base64 编码。
 - `readonly` 角色同时使用 SQL AST 检查和数据库只读事务。默认禁止没有 WHERE、或 WHERE 明显恒真的 UPDATE/DELETE；支持识别 `TRUE`、`1=1`、`OR 1=1` 等字面量条件，不证明任意条件的影响范围。
 - 普通执行使用独立连接；仅显式传入 `transaction_id` 时使用已有事务。事务内语句成功不表示事务已提交。
 - 执行完成后记录历史；请求登记和执行回执不保存 SQL、参数或查询结果行，不提供结果缓存。
+- 普通 SQL 执行的结果交付因权限复核失败而停止时返回 HTTP 409 / `40902`，响应不携带执行数据。已确认成功的持久回执保持 `succeeded`。调用方保留原编号，日后仍须具备当前空间和回执许可才可读取。
 
 **GET** `/query/executions/{request_id}`：查询本人执行回执，其他用户（含管理员）不能跨用户读取。示例 `data`：
 
@@ -195,6 +201,8 @@ SSH隧道和代理都是当前本人网络配置，不能读取或借用其他�
 ```
 
 `status` 为 `queued`、`running`、`succeeded`、`failed`、`rejected` 或 `unknown`。`rejected` 表示未发送用户 SQL；`unknown` 表示结果不确定，不得解释为写入回滚。执行错误响应也可能携带回执，客户端应优先使用回执状态。元数据库暂时不可用时返回 503；重复编号返回 409；排队过载返回 429。未找到回执的 404 也不能单独证明原请求未执行。
+
+执行与查询回执的 `data.cancellation_confirmed` 为可选布尔值，仅在 `failed` 或 `rejected` 终态且服务端确认原请求因取消而未完成时返回 `true`。历史回执和缺少确认的回执省略该字段。客户端按实际回执呈现成功、失败、已取消或结果待确认，发起取消及客户端连接中断本身均不能用来确认终态或回滚。
 
 取消、超时、断网后只查询回执，不自动重新提交 SQL。超过 5 分钟未完成的排队/执行记录展示为 `unknown`，保持编号占用。回执不保存查询行，确认查询完成后只显示完成摘要。完整一致性与部署边界见 [执行可靠性](../架构设计/数据接入与执行契约.md#3-发送前登记回执和未知结果)。
 
@@ -228,8 +236,10 @@ SSH隧道和代理都是当前本人网络配置，不能读取或借用其他�
 | 接口 | 说明 |
 | --- | --- |
 | `/redis/overview?connection_id=` | 版本/模式/运行天数/客户端数/内存/键空间统计 |
-| `/redis/keys?connection_id=&pattern=user:*&limit=200` | SCAN 游标遍历键（默认上限 500），含类型与 TTL |
-| `/redis/value?connection_id=&key=k` | 按类型预览值（string/list/hash/set/zset，大元素截断 100 项） |
+| `/redis/keys?connection_id=&pattern=user:*&limit=200` | SCAN 游标遍历键（默认上限 200），含类型与 TTL |
+| `/redis/value?connection_id=&key=k` | 按类型预览值（string/list/hash/set/zset），列表和有序集合最多读取 10000 项 |
+
+键详情沿用当前工作空间来源授权。请求在获准来源内确认指定键已不存在时返回 HTTP 404、业务码 `40401`。来源缺失和读取失败沿用各自错误码。
 
 ### 查询历史
 - **GET** `/query/history?connection_id=&status=success|failed&page=1&page_size=20`
@@ -248,13 +258,15 @@ SSH隧道和代理都是当前本人网络配置，不能读取或借用其他�
 | GET `/roles` | 内置角色列表（admin/developer/readonly） |
 | GET `/users?keyword=&page=&page_size=` | 用户分页列表（含角色、状态、最近登录） |
 | POST `/users` | 创建用户 `{username(>=3), password(>=8), role, email?}`，重名返回 `40900` |
-| PUT `/users/{id}` | 修改角色/邮箱（不能降低自己角色；须保留至少一个启用管理员） |
+| PUT `/users/{id}` | 修改当前工作空间角色，按全局身份许可选改邮箱。请求 `{role, email?}`，确认后返回 `{id}` |
 | PATCH `/users/{id}/status` | 启用/停用 `{is_active}`（不能停用自己） |
 | POST `/users/{id}/reset-password` | 管理员重置密码 `{new_password}` |
 | DELETE `/users/{id}` | 删除用户（不能删除自己；级联清理其连接/历史） |
 
 ### 兼容管理边界
 本人改密见“身份与会话”，不依赖空间管理许可。
+
+用户目录的 `can_edit_email` 说明当前操作者能否通过兼容入口修改该用户的邮箱。角色编辑仍要求当前工作空间管理许可，保留本人降级与最后一位启用管理员限制。邮箱属于全局身份，修改沿用兼容身份操作的范围，操作者须具有平台管理资格，目标仅属于当前工作空间。省略邮箱或提交当前值时只编辑角色，有许可时显式提交空字符串可清空邮箱。角色与邮箱在同一事务确认。认证沿用当前工作空间的登录会话。目标不存在返回 `40400`，修改邮箱无许可时返回 `40300`，角色不合法或触发管理员保护时返回 `40000`。
 
 旧角色与职责的兼容边界统一见[逐主体映射](../架构设计/数据接入与执行契约.md#72-旧权限逐主体兼容)；新自定义角色使用IAM接口，旧users/roles接口不承载新角色许可。旧角色/职责变更受到迁移屏障约束，不得绕过当前收紧。
 
@@ -338,7 +350,7 @@ sensitivity仍为旧normal/sensitive/confidential标注，不等于阶段2统一
 
 ### 创建报表
 
-**POST** `/reports`（写角色，记审计）
+**POST** `/reports`。使用当前工作空间的 Bearer 会话，需要个人报表写入资格。服务端记审计。
 
 ```json
 {
@@ -346,22 +358,20 @@ sensitivity仍为旧normal/sensitive/confidential标注，不等于阶段2统一
   "description": "按月聚合",
   "connection_id": 1,
   "database": "postgres",
+  "request_id": "7d24d585-bbcd-4ce6-bf83-ff9829266ff7",
   "sql": "SELECT date_trunc('month', created_at) AS month, SUM(total_amount) FROM shop.orders GROUP BY 1 ORDER BY 1",
   "chart_type": "bar",
   "chart_config": {
     "dimension": "month",
-    "metrics": ["sum"],
-    "aggregation": "sum",
-    "sort": "asc",
-    "topN": 20
+    "metrics": ["sum"]
   },
   "visibility": "private"
 }
 ```
 
-- `name` 必填 ≤128，`sql` 必填单语句，`chart_type`按当前[图表定义](../../frontend/src/components/business/chart/ChartCard.vue)校验，`visibility ∈ private|shared`
-- `chart_config` 为 ChartCard 配置：维度/指标/聚合/排序/TopN
-- 成功返回报表详情，含 `id/owner_user_id/created_at` 等
+- `name` 必填且最多 128 字。`sql` 为单条只读语句。`request_id` 为非空 UUID。`visibility` 支持 `private` 和 `shared`。
+- 表格报表可以提交 `chart_config: {}`。持久配置支持维度、指标和适用的展示及图表设置。聚合、排序和筛选由查询定义表达。提交预览的聚合、排序和 TopN 配置会返回 400。
+- 成功返回 HTTP 200 和报表详情，含 `id`、`version`、`owner_user_id`、`created_at` 等。定义或连接参数无效返回 400，当前连接或源授权不可用返回 403，创建编号与已有定义冲突返回 409。
 
 ### 报表列表
 
@@ -456,6 +466,8 @@ POST /assets/lineage/refresh 提供刷新入口。读取接口需登录并通过
 
 工单不接受 SELECT。全局目标的 `database` 不能覆盖发布的数据库。执行结果仅保留 `kind`、`affected_rows`、`duration_ms`，不提供执行者身份下的结果行或列。状态为 `pending|approved|rejected|executing|executed|failed`；失败或不确定执行不会自动重试。旧共享连接工单的迁移规则见文末 0022 说明。
 
+原生 PostgreSQL 的 INSERT、UPDATE 和 DELETE 使用数据库命令标签的影响行数，包括带 `RETURNING` 的语句。执行响应与持久化回执使用同一计数，适用范围见 [A2 工单详情](../界面设计/UI设计规范.md)。
+
 资产血缘入口可通过 `/tickets?table=&db=&title=&sql=&risk=` 预填变更申请。
 
 ---
@@ -526,9 +538,74 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 
 0022 将引用他人连接的 pending/approved 旧工单改为 rejected，要求以个人连接重新提交，并将历史执行结果收敛为不含结果行的摘要。
 
-连接检查失败的 `data.diagnostic` 增加固定的 `{code,title,hint,action}`。已保存检查会持久化，草稿检查不保存；成功时不返回失败诊断。分类包括认证、权限、数据库不存在、TLS、DNS、网络、超时、容量、驱动服务、目标策略、配置、取消和未知原因，不回显底层异常。完整分类和修订管理契约见[数据源修订与连接诊断](../架构设计/数据接入与执行契约.md#1-数据源身份与能力)。
+连接检查失败的 `data.diagnostic` 增加固定的 `{code,title,hint,action}`。已保存检查会持久化，草稿检查不保存；成功时不返回失败诊断。分类包括认证、权限、数据库不存在、TLS、DNS、网络、通信中断、超时、容量、驱动服务、目标策略、配置、取消和未知原因，不回显底层异常。`connection_lost` 表示读取EOF、不完整响应或驱动已失效连接等明确断连信号，标题为“连接在通信过程中断开”；不推断错误密码或断连责任方，提示检查协议端点和服务器/代理日志，不自动重试或降低TLS要求。完整分类和修订管理契约见[数据源修订与连接诊断](../架构设计/数据接入与执行契约.md#1-数据源身份与能力)。
 
 生产环境必须配置 `DBHUB_TARGET_ALLOWLIST`；未获允许的目标、代理及 SSH 端点不可连接。被驱动配置或其他资源引用的用户删除返回 409，可先停用用户并处理配置归属。
+
+## P2-01 业务身份与数据集映射
+
+使用现有 Bearer 登录和工作空间绑定。仅当前空间管理员可调用，按数据源治理权限与当前限制检查。请求与响应使用公共 JSON 信封；`PUT` 成功返回与相应 `GET` 相同的对象和新 `version`。
+
+| 请求 | 参数与响应 |
+| --- | --- |
+| `GET /api/v1/business-datasets/{key}` | 返回数据集键、登记来源、来源版本、有效期、版本、`available` 及受管执行账号 ID、账号版本、固定来源修订 ID。 |
+| `PUT /api/v1/business-datasets/{key}` | 对象字段 `expected_version`、`authority`、`source_version`、`valid_from`、`valid_until`、`account_id`、`account_version`。 |
+| `GET /api/v1/business-identities/{user}` | `{user}` 为当前空间应用成员 ID。返回 `user_id`、`business_key`、登记来源、来源版本、有效期、版本、`available` 和 `datasets`。数组项含数据集 `key`、已确认的 `version` 与 `available`。 |
+| `PUT /api/v1/business-identities/{user}` | 对象字段 `expected_version`、`authority`、`business_key`、`source_version`、`valid_from`、`valid_until`、`datasets`。`datasets` 是 `{key, version}` 数组，必填，空数组明确清除全部绑定。 |
+
+数据集键使用小写字母、数字、点、下划线和连字符，首字符为字母或数字，最多 80 字符。来源、业务键和来源版本均为非空文本，最多 128 字符。有效期用 RFC 3339 时间戳，截止时刻不再有效。`expected_version: 0` 创建，修改提交最近一次读回版本。`account_version` 与映射中 `version` 必须匹配已确认的对象版本。每次身份保存最多提交 100 个数据集。
+
+无效字段或重复数据集键返回 `40000`，缺少登录 `40100`，不具备管理资格 `40300`，当前空间无对应成员或登记记录 `40400`，旧版本、重复业务键、账号或数据集版本过时或不可登记返回 `40900`。无有效空间时沿用工作空间 `40400`/`42800`，基础设施错误沿用公共错误约定。读写纳入现有持久审计，记录对象标识和结果。响应只含元数据，映射不会授予数据动作或返回账号凭据。
+
+## P2-02 部门、仓库与运输组织范围
+
+沿用 P2-01 的 Bearer 登录、空间管理员资格、数据源治理权限、工作空间隔离、审计和公共响应信封。路径为 `/api/v1/business-identities/{user}/datasets/{key}/organization-scope`。
+
+| 方法 | 请求与响应 |
+| --- | --- |
+| GET | 返回 `user_id`、`dataset_key`、`identity_version`、`dataset_version`、`version`、登记来源和有效期、`scopes`（已登记组合）、`effective_scopes`（当前可用组合）。 |
+| PUT | 请求字段为 `expected_version`、`identity_version`、`dataset_version`、`authority`、`source_version`、`valid_from`、`valid_until` 和 `scopes`，成功返回与 GET 相同的字段及新版本。 |
+
+`scopes` 为必填数组，最多 100 条。每条可含 `department_key`、`warehouse_key`、`transport_org_key`，至少一个非空业务键。业务键两端不得有空白，最多 128 字符，按精确值记录。空数组收回组织范围。缺省维度不会被展开为通配。保存先检查身份和数据集的绑定及版本，`expected_version: 0` 创建，其余值须为当前范围版本。
+
+字段缺失、全空组合或组合重复返回 `40000`，无登录返回 `40100`，无权限返回 `40300`，当前空间未登记范围时查询返回 `40400`，上游绑定不存在或任一预期版本不匹配返回 `40900`。过期、上游映射不可用或版本变更时，已保存记录仍可读，`effective_scopes` 为空数组。
+
+## P2-03 行列条件
+
+沿用 P2-01 的认证、工作空间、管理员资格和数据源治理检查。范围、来源和错误沿用公共响应信封。
+
+| 路径 | 请求与响应 |
+| --- | --- |
+| `GET /api/v1/business-datasets/{key}/row-column-policy` | 返回策略及 `version`，包含固定的 `dataset_version`、来源版本、有效期和 `definition`。 |
+| `PUT /api/v1/business-datasets/{key}/row-column-policy` | 参数为 `expected_version`、`dataset_version`、`authority`、`source_version`、`valid_from`、`valid_until` 和 `definition`，返回保存后的策略。 |
+| `POST /api/v1/business-identities/{user}/datasets/{key}/row-column-plan` | 参数为 `scope_version`、`policy_version`、`columns`。返回数据集键、身份/数据集/组织范围/策略版本、获准列及保留的组织组合数量。 |
+
+`definition` 包含 `schema`、`view`、`dimension_columns`（可映射 `department_key`、`warehouse_key`、`transport_org_key`）、`allowed_scopes`、`denied_scopes`、`allowed_columns` 和 `denied_columns`。组织范围沿用 P2-02 的完整组合，禁止清单可为空。标识符限 ASCII 字母、数字和下划线，首字符不能为数字，长度最多 63。请求列及各清单最多 100 条。计划摘要只用于校验。
+
+参数或组合不合法返回 `40000`，无认证返回 `40100`，空间权限不足、策略拒绝或配置已过期返回 `40300`，策略查询无对应记录返回 `40400`，版本冲突或策略登记目标不支持时返回 `40900`。
+
+## P2-04 字段分类与默认输出计划
+
+沿用 P2-03 的工作空间与管理资格。以下为分类登记、计划校验及受控明文元数据接口。审批还须匹配数据集内专门登记的独立复核人。
+
+| 方法和路径 | 请求与响应 |
+| --- | --- |
+| `GET /api/v1/business-datasets/{key}/output-policy` | 返回分类策略及 `version`、`dataset_version`、`row_column_policy_version`、来源版本、有效期、`fields` 和明文配置。 |
+| `PUT /api/v1/business-datasets/{key}/output-policy` | 提交 `expected_version`、`dataset_version`、`row_column_policy_version`、`authority`、`source_version`、`valid_from`、`valid_until`、`fields`，可选 `record_key_column`、`record_version_column`、`reviewer_ids`。 |
+| `POST /api/v1/business-identities/{user}/datasets/{key}/output-plan` | 提交 `scope_version`、`policy_version`、`output_policy_version`、`columns`。核查明文时附 `reveal_request_id`、`purpose`、`channel: interactive_check`，且 `user` 必须为当前申请人。普通计划使用默认脱敏。 |
+| `POST /api/v1/business-datasets/{key}/reveal-requests` | 提交组织范围、行列策略、输出策略三个版本、`columns`、`purpose`、`records`（`{key, version}` 列表，最多 100 项）、`ttl_seconds`（1 至 86400）。返回申请元数据。 |
+| `POST /api/v1/business-reveal-requests/{request}/approve` | 提交 `ttl_seconds`（1 至 28800）。指定复核人须与申请人不同，并以其当前有效的组织范围覆盖本次申请。返回审批元数据。 |
+| `POST /api/v1/business-reveal-requests/{request}/revoke` | 申请人或对应审批人收回申请，返回收回后的元数据。 |
+
+`fields` 是以字段名为键的映射，最多 200 项。每项含 `classification`（`internal`、`sensitive`、`high_sensitive` 或 `credential_secret`），可含 `legacy_label`、`legacy_protection`（`none`、`masked` 或 `hidden`）、`review_reference` 和 `depends_on`（本策略内明确登记的来源列）。旧 `confidential` 须提交逐字段复核引用。字段命名遵循 P2-03。所有行列允许列必须完成分类，派生关系禁止循环和降级。
+
+参数、未知分类或不完整登记返回 `40000`；无认证 `40100`；权限不足、分类策略不可用或请求禁止字段返回 `40300`；查询未登记策略 `40400`；写入时上游未确认或预期版本冲突 `40900`。计划摘要不含目标数据或 SQL。
+
+## P2-05 已发布报表隔离验收
+
+`POST /api/v1/published-reports/{id}/policy-verification` 接收 `dataset_key`、`publication_no` 以及上述输出计划参数。先按当前会话验证发布受众及查看资格，再验证输出策略的 `report_id` 和 `publication_no` 绑定。响应包含列名、结果行和脱敏摘要，使用 `Cache-Control: no-store`。
+
+输出策略可选同时登记 `report_id` 与 `publication_no` 正整数。首批验收适用于无参数、无独立数据契约的正式发布。批准的 SQL 须为 `SELECT "列1", "列2" FROM "模式"."视图"` 形式，并与行列策略的完整允许列清单顺序一致。请求实际投影仍受列清单和禁止规则约束。验收入口需 development、显式开关及元库隔离登记。入口未启用返回 `40400`，无认证返回 `40100`，范围或查看资格不足返回 `40300`，发布号、批次或访问状态变化返回 `40900`，审计不可用时返回 `50300`。
 
 ## 正式报表与仪表盘
 
@@ -539,6 +616,7 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 | POST `/managed-reports`；PUT `/managed-reports/{id}/draft` | 报表定义及request_id，修改含version；返回id/version |
 | POST `/managed-reports/{id}/submit` | version、request_id；冻结内容并建立审批记录 |
 | GET `/managed-reports/{id}/versions`、`/managed-reports/{id}/releases` | 分页版本/审批与追加发布事件，分别保留真实状态及版本号 |
+| GET `/managed-reports/{id}/versions?review_id={reviewId}` | 按关联审批编号读取此报表唯一冻结版本，沿用登录和报表管理读取权限。请求可省略 `page` 或传入 `1`，返回原分页结构，`items` 一项且 `total=1`。编号非正整数或请求其他页返回 400。编号无对应版本、与报表不匹配或对象不可见时返回 404。 |
 | POST `/report-reviews/{id}/validate` | account_id、user_ids、group_ids、params及request_id；返回result、validation_id、manifest_hash |
 | POST `/report-reviews/{id}/decision` | decision、validation_id、comment、contract_confirmed、request_id；批准须本人15分钟内且当前账号/受众等基线一致的验证，不可自审 |
 | POST `/managed-reports/{id}/releases` | expected_publication_no、review_id、kind及request_id；publish/rollback/unpublish按当前资格及依赖检查 |
@@ -547,9 +625,11 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 | GET `/published-reports`、`/published-reports/{id}`、`/metric-catalog` | 仅当前获准展示信息，不含SQL、目标地址及执行账号配置 |
 | POST `/published-reports/{id}/execute` | publication_no、request_id、params；禁止覆盖SQL、目标、账号和事务 |
 | POST `/managed-dashboards`；PUT `/managed-dashboards/{id}/draft` | definition、request_id，修改含version；definition含tiles、user_ids/group_ids、quality及parameters |
+| GET `/managed-dashboards`、`/managed-dashboards/{id}` | 仪表盘开发目录或单项；`reviewer_eligible` 表示该项当前生命周期内最新审阅的原审阅人资格，没有审阅时为 `false` |
 | POST `/managed-dashboards/{id}/preflight` | version；返回当前依赖及受众覆盖预检，不能作为长期授权凭证 |
-| GET `/managed-dashboards/{id}/versions`、`/dashboard-reviews/{id}/summary` | 当前编排版本、独立审批摘要及实际差异 |
+| GET `/managed-dashboards/{id}/versions`、`/dashboard-reviews/{id}/summary` | 当前编排版本、独立审批摘要及实际差异；版本列表的 `reviewer_eligible` 表示该冻结版本的原审阅人当前是否具备审阅资格 |
 | GET `/published-dashboards`、`/published-dashboards/{id}` | 当前获准看板及逐卡ready/restricted/contract_changed说明 |
+| GET `/access-requests` | 当前工作空间的申请与实际生效发布号。普通身份仅读取本人提交或本人为目标的申请，响应不返回报表编号。动作受控审阅人按 `report.review` 或 `dashboard.review` 读取空间内的申请与关联审批，即使兼有 `task.page`。兼容身份继续按原审批职责。未登录返回 401，缺少入口许可返回 403。 |
 | POST `/managed-dashboards/{id}/refreshes` | mode、review_id、params；返回refresh_id及固定本轮清单 |
 | POST `/dashboard-refreshes/{id}/tiles/{tile}/execute` | 原刷新及卡片；返回本轮绑定结果、execution_id和quality，不按客户端新目标重解释 |
 
@@ -557,9 +637,54 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 
 仪表盘tiles绑定report_id、contract_hash、required、comparison_group及follow_published，固定历史依赖和仪表盘文件/周期交付尚未开放。访问申请、仅调整受众、发布/归档/恢复等动作沿现有专用接口和版本控制，完整载荷见[managed-report.ts](../../frontend/src/api/managed-report.ts)、[managed-dashboard.ts](../../frontend/src/api/managed-dashboard.ts)及[处理器](../../backend/internal/reportapi/)。不把通用action字符串视为允许任意操作的协议。
 
+目录、单项和版本列表沿用工作空间认证与各自现有读取权限。`reviewer_eligible` 为只读布尔值，独立于历史审批状态。发布或回滚仍按服务端提交时的资格校验，原审阅人资格已失效时返回 HTTP 409。
+
 同一命令编号换操作或内容返回409，未知状态先核实原记录。报告/看板审批、源状态、账号代次、当前受众及发布号每次重查；普通查看与审批预览分别授权。
 
+阶段 3 明确登记的隔离正式报表复用原送审、预览和发布接口。业务复核后若仍需数据复核，审批保持待审。报表版本读回可带 `approval_stage`。已认证且具备当前数据集授权与数据覆盖的数据复核人可使用 GET `/report-reviews/{id}/data-review` 读取冻结定义和待复核摘要。POST `/report-reviews/{id}/data-review` 接收 `request_id`、`manifest_sha256`、`decision` 与 `comment`，批准后才可进入正常发布。缺资格返回 403，签名不足、预览过期或基线变化返回 409。未登记的审批对象沿用原接口。
+
+受管数据集的 `row-column-policy.definition.parameter_bindings` 可登记 `column`、`operator` 和 `domain`。`domain` 使用报表参数定义，包括名称、类型、必填、枚举或数值边界。日期边界用 `date_min`、`date_max`，格式为 `YYYY-MM-DD`。支持 `eq`，以及同列成对的 `gte` 和 `lte`。固定查询在投影后按报表参数顺序串接比较条件，列及参数类型使用批准的比较类型。调用继续使用原 `params`，域外值及倒置区间返回 400，冻结定义与数据集登记无法匹配返回 409。本机隔离验收的登记示例见相应技术证据。
+
+阶段 3 隔离仪表盘沿用原送审、逐卡预览、业务审批和发布接口。高风险业务复核后返回 `approval_stage=data_review`。已认证且具备全部引用数据集授权及覆盖的数据复核人可用 GET `/dashboard-reviews/{id}/data-review` 读取冻结定义与复核指纹，再用 POST 同路径提交 `request_id`、`manifest_sha256`、`decision` 及 `comment`。缺资格返回 403，审批、预览或基线过期及缺签发布返回 409。原兼容仪表盘沿用已有协议。
+
+阶段 3 隔离对象通过 POST `/managed-reports/{id}/availability` 和 `/managed-dashboards/{id}/availability` 办理下线与应急。请求须携带认证会话、空间上下文、UUID `request_id`、正整数 `expected_publication_no`、动作 `action` 和非空 `reason`（最多 1000 字符）。
+
+| action | 当前资格与请求补充 | 响应 |
+| --- | --- | --- |
+| `request_offline` | 对象负责人或业务复核人登记原因 | `id` 为申请号，`version` 为基准发布号，`dependency_count` 为受影响的对象数 |
+| `approve_offline` | 有当前对象及下线资格的独立业务复核人传入 `approval_id` 及原申请原因，并确认同一依赖基线 | `id` 为下线事件号，`version` 为新发布号 |
+| `emergency_stop` | 具备当前对象应急停止授权的人员登记原因 | `id` 为停止事件号，`version` 为新发布号 |
+| `emergency_restore` | 具备当前对象应急恢复授权并覆盖当前数据边界，继续执行显式发布限制。恢复人与停止人不同，恢复目标由服务端按停止事件确定 | `id` 为恢复事件号，`version` 为新发布号 |
+
+参数无效返回 400，未认证返回 401，缺资格返回 403，对象不存在或未纳入隔离方案返回 404，基准变化、旧发布不可恢复或无法证明当前约束时返回 409。已纳管对象通过上述动作下线及应急恢复，通过既有正常发布流程重新送审上线。
+
+托管期间及接任后保留原发布时，已获当前访问资格的请求仍须符合该发布的原审批快照。正式报表查询、仪表盘卡片执行、导出生成及文件领取、订阅快照领取遇范围扩大或原审批边界无法核验时返回 409，响应不包含结果或文件。订阅任务遇同类冲突时暂停该订阅并停止当期交付。现有认证、工作空间和请求字段继续适用。
+
 ## 报表导出、个人订阅与告警
+
+阶段 2 本地隔离验证复用正式报表发布、执行、导出及个人订阅的原认证和请求字段，由服务端登记报表与数据集。绑定报表的发布遇未知分类或策略不一致返回 409，未生效的隔离配置或缺少当前数据资格返回 403。结果执行和已有快照领取按当前版本复核，脱敏字段返回空值。通知负载仅包含提示及需要现有鉴权的资源引用。
+
+P4-01 的隔离登记报表继续使用原认证、空间及导出申请、预览、审批请求字段。申请仅生成供独立复核的预览。审批成功返回审批状态和可选的 `generation_status`，其值为 `awaiting_approval`、`queued`、`running`、`succeeded`、`failed`、`interrupted` 或 `rejected`，可从原导出详情读回。重复审批版本和过期或已变化的审批边界返回 409，权限不足返回 403，行数或字节超限返回 413。新模式的本人文件领取待 #27，原下载接口对新记录返回 403，原模式及存量记录复用原下载规则。
+
+P4-02 使用原认证及空间上下文。新个人计划保存后待本人确认，列表返回 `review_required` 和可选 `review_until`。POST `/report-subscriptions/{id}/confirm` 接收 UUID `request_id` 和当前 `version`，返回计划编号和新版本。团队 POST `/report-team-subscriptions` 接收 `request_id`、`definition`、`user_ids`、`group_ids` 和可选的续期或重提 `previous_id`。GET `/report-team-subscriptions/{id}` 返回申请及冻结名单。独立复核人通过 GET 同对象的 `/review` 获取 `basis_sha256`，POST 同路径携带 `request_id`、`version`、`basis_sha256`、`decision` 和 `comment` 作出决定。错误输入返回 400，权限不足返回 403，不存在或不属当前空间返回 404，版本、发布或复核边界变化返回 409。
+
+P4-03 继续使用当前认证和空间。POST `/report-exports/{id}/credential` 由原申请人申请一次性凭证，返回 `credential` 和 `expires_at`。POST `/report-exports/{id}/redeem` 接收 `credential` 并返回已生成的文件字节。团队 POST `/report-team-subscriptions/{id}/recipient-access` 接收 `request_id`、`recipient_id`、收件资格的预期 `version`、`action` 和 `reason`。团队 POST `/report-team-subscriptions/{id}/periods` 接收 `request_id` 和获批计划 `version`，由当前负责人显式触发一期。GET 同计划的 `/periods/{period}` 向负责人返回各收件人的状态。收件人从 GET `/report-team-deliveries` 识别本人期次，以 GET `/report-team-deliveries/{id}` 领取本人快照。无当前资格、旧凭证或已撤权限拒绝，已变化的复核边界返回 409，其他主体的结果返回 404。
+
+P4-04 的新交付通知在本人站内列表返回 `link_expires_at`。GET `/inbox/delivery/{id}` 以当前登录和原空间打开本人通知，返回 `resource_type`、`resource_id` 与可选 `delivery_id`，由对应领取接口执行当前权限及期限检查。过期、不存在或属其他成员的通知引用返回 404。通知自身仍可按原留存规则查看状态。个人告警事件可返回 `observed_value`，仅在存在原发生值证据且当前资格覆盖时提供。团队自动期次沿用逐人期次领取接口。
+
+P4-05 的仪表盘交付接口使用当前登录、原空间及 `dashboard.view`，后台另查隔离登记、当前发布和各操作的独立资格。写入计划、复核、收件授权及告警处置使用 UUID `request_id`。
+
+| 方法与路径 | 请求及返回 |
+| --- | --- |
+| POST `/published-dashboards/{id}/delivery-plans` | 提交 `kind`（`export`、`personal` 或 `team`）、`publication_no`、`params` 和可选 `tile_key`，返回计划 `id`、`version`。导出另带 `format`（`csv`、`json` 或 `xlsx`）及 `reason`。个人订阅带 `confirmed=true`、`interval_minutes` 和可选 `alert_tile`、`alert_rule`。团队订阅带 `interval_minutes`、`user_ids` 或 `group_ids`。订阅重提可带 `previous_id`。 |
+| GET、POST `/dashboard-delivery-plans/{id}/review` | 读取受限复核依据，包括冻结参数、数据集、卡片键和收件名单。POST 提交 `version`、`basis_sha256` 及 `decision`，返回计划及新版本。 |
+| POST `/dashboard-delivery-plans/{id}/recipient-access` | 独立授权人提交 `recipient_id`、预期 `version`、`action`（`grant` 或 `revoke`）及 `reason`，返回收件授权新版本。 |
+| GET `/dashboard-delivery-plans/{id}/runs`、`/dashboard-deliveries` | 前者向计划负责人返回各期次的送达状态，后者返回本人交付记录，均不返回业务载荷。 |
+| GET `/dashboard-deliveries/{id}` | 返回本人交付的 `kind`、`sha256` 和 `expires_at`。订阅返回原期次的 `snapshot`，导出返回文件 `format`。整板文件是逐卡分文件的 ZIP，单卡保留所选格式。 |
+| POST `/dashboard-deliveries/{id}/credential`、`/dashboard-deliveries/{id}/redeem` | 前者返回本人会话的一次凭证及有效期，后者接收 `credential`，返回原文件字节及 `X-Report-File-SHA256`。 |
+| GET `/dashboard-delivery-plans/{id}/alerts`、POST `/dashboard-delivery-plans/{id}/alerts/{event}/disposition` | 读取个人指标卡事件及经授权的原值，或提交 `note` 保存处置。 |
+
+参数无效返回 400，越权返回 403，其他主体的记录及过期领取返回 404，发布、批准依据或数据边界变化返回 409。元信息、快照、出件及文件兑换分别校验当前资格。
 
 本节描述已有接口。旧文件/期次保持7天；新24小时文件、10分钟本人领取凭证、90/30天复核及团队逐人交付是[阶段4规则](../架构设计/内容与交付契约.md#8-已确认的后续内容与交付规则)，当前未启用。
 
@@ -595,6 +720,8 @@ JDBC 查询沿用 /query/execute 防重与回执，不自动重发 SQL；精确�
 | POST `/business-operations/requests/{id}/validate`、`/business-operations/requests/{id}/decision` | 当前version、核验结果及独立决定；批准含validation_id、confirmed和request_id |
 | POST `/business-operations/requests/{id}/execute`、`/business-operations/requests/{id}/reconcile` | 执行含version/confirmed，核实沿原operation_id；返回原申请状态及裁剪回执，unknown不得自动重跑 |
 
+数据源任务提交返回 HTTP 202 和本次任务标识，排队、执行及终态由 `status` 与 `phase` 表示。兼容字段 `progress` 为阶段刻度，当前检查与采集接口没有全任务的计量总量。采集结果以成功后的 `result` 为准。
+
 任务容量、租约、最短周期及主体约束见[数据执行契约](../架构设计/数据接入与执行契约.md#4-检查采集与持久任务)，通知与留存见[内容契约](../架构设计/内容与交付契约.md#6-导出订阅和通知)。固定业务办理不接收任意SQL，与数据库变更工单分别授权；完整载荷及状态见[automation.ts](../../frontend/src/api/automation.ts)、[business-operations.ts](../../frontend/src/api/business-operations.ts)及[业务处理器](../../backend/internal/businessops/)。
 
 平台运行状态使用独立绝对路径GET `/api/v1/platform/operations`，需要平台资格；不能通过选择一个空间获得平台运维权限。
@@ -629,9 +756,13 @@ foundation是兼容诊断接口；当前治理实现见下节。`foundation`保�
 | GET `/iam/roles`、`assignments`、`delegations`、`groups`、`members` | 按各细项查看空间治理目录；不能据此读取个人凭据或业务结果 |
 | GET `/iam/assignable-roles`、`assignment-targets` | 仅返回本人当前有效委派可处理的角色和成员，不以全量目录权限作为选择器前提 |
 | GET `/iam/proposals`、`own-proposals`、`custody` | 治理申请或本人申请、冻结后的待交接资产摘要；业务审批和原签名不改写 |
+| GET `/iam/custody-items`、`/iam/custody-nominations` | 同空间治理读者查询逐项资产，候选人查询本人提名。只返回对象、版本、依赖和交接状态。 |
+| POST `/iam/custody-items/{item}/handover` | 已认证且在登记的隔离环境中。请求含 `request_id`、`version`、`action`、`reason`。治理人 `nominate` 时提供 `candidate_id`，候选人 `accept` 或 `reject`，由另一治理复核人 `approve`。提名和批准须携带委派号和版本。返回对象号、交接状态及新版本。无效请求 400，缺资格 403，未登记或不可见 404，基线变化 409。 |
+| POST `/iam/custody-rejoins` | 已认证且在登记的隔离环境中，由两位治理人分别提交 `propose` 与 `approve`。请求含 `request_id`、`action`、`target_id`、`reason`、`delegation_id` 与 `delegation_version`。批准附 `proposal_id`。返回提案状态，批准后返回新的原空间成员编号。随后用同一平台账号重新登录。400、403、404、409 含义同上。 |
 | POST `/iam/proposals/preview`、`/iam/proposals` | 预览和提交角色定义、角色分配、组增加、委派、限期解除禁止或隔离包启用；均不立即扩权 |
 | POST `/iam/proposals/review` | 审批精确变更；申请人与全部受益人回避，同时核实当前复核资格、委派范围及原基线 |
-| POST `/iam/restrictions` | 冻结成员、停用角色、撤销角色来源或委派、禁止功能操作；限制与递增代次先原子持久化 |
+| POST `/iam/restrictions` | 按 `kind` 检查精确许可：`member.freeze` 需要 `space.members.exit`，`role.disable` 需要 `space.roles.manage`，`assignment.revoke` 和 `delegation.revoke` 需要 `space.assign.manage`，`action.revoke` 需要 `space.resources.revoke`。未知动作拒绝。服务端继续核对当前治理委派、目标和基线，将限制与递增代次原子持久化。 |
+| POST `/iam/restrictions` 的 `exit_mode` | `member.freeze` 可在登记的隔离环境显式传入 `planned`。若冻结后没有仍有效的治理委派接续，返回 409。缺省沿现有紧急冻结处理。 |
 | GET `/iam/restrictions` | 查询当前治理委派目标与许可范围内的最新操作禁止、限期解除和审批历史；需要`space.assign.view`，不提供任意成员的禁止目录 |
 | GET/PUT `/iam/menus` | 11个稳定目录的完整显示配置；只支持名称、分类、顺序、显示和推荐首页，不接受任意路由或动作 |
 | PUT `/iam/home` | 保存本人在当前空间可见且有权访问的菜单首页 |
@@ -639,6 +770,8 @@ foundation是兼容诊断接口；当前治理实现见下节。`foundation`保�
 | GET `/iam/routes`、`/iam/migration/bridge` | 实际展开的有限接口规则与当前运行版本核对，不作为授权凭证 |
 | POST `/iam/migration/shadow` | 元数据只读对照，不取目标数据库业务数据、不导出、不送达消息 |
 | POST `/iam/bundles`、`/iam/bundles/rollback` | 准备配置包或执行兼容回退；仅服务器与数据库双重登记的隔离环境可使用；启用还需独立审批和当前运行桥核对 |
+
+`GET /iam/effective` 可为已登记隔离部署中采用旧权限方案的当前主体返回 `isolated_migration`，字段 `prepare`、`review`、`rollback` 为布尔值。仅在现有治理能力与至少一项当前委派均有效时返回该对象。前端用它展示对应迁移入口，提交、复核和回退仍按原接口检查委派上限、回避、配置基线和运行证明。仍使用本人会话和工作空间上下文；401、403 及原写入接口的 409 语义保持现有约定。
 
 治理写入使用UUID `request_id`、明确的`delegation_id`与`delegation_version`、当前`baseline={config_version,authorization_epoch}`以及精确目标版本。相同请求与相同内容返回原回执；同编号换内容或基线变化返回冲突。有限委派同时约束治理动作、可授许可、目标成员、数据源及期限；本人可执行不等于可授予。
 

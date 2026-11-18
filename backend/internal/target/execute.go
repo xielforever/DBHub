@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/user/dbhub/internal/sqlparse"
 )
 
 type ExecuteOptions struct {
+	LargeResult      bool
 	MaxRows          int
 	MaxBytes         int
 	LosslessNumbers  bool
@@ -92,7 +94,11 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 	if ast.UnsafeWrite && !opt.AllowUnsafeWrite {
 		return nil, fmt.Errorf("禁止执行没有 WHERE 条件或条件明显恒真的 UPDATE/DELETE")
 	}
-	if opt.MaxRows <= 0 || opt.MaxRows > 10000 {
+	rowLimit := 10000
+	if opt.LargeResult {
+		rowLimit = 100000
+	}
+	if opt.MaxRows <= 0 || opt.MaxRows > rowLimit {
 		opt.MaxRows = 1000
 	}
 	if opt.Timeout <= 0 || opt.Timeout > 120*time.Second {
@@ -141,7 +147,8 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 			return nil, err
 		}
 		defer rows.Close()
-		for _, field := range rows.FieldDescriptions() {
+		fields := rows.FieldDescriptions()
+		for _, field := range fields {
 			result.Columns = append(result.Columns, string(field.Name))
 		}
 		usedBytes := 0
@@ -154,10 +161,13 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 			if e != nil {
 				return nil, e
 			}
-			if opt.LosslessNumbers {
-				for i, value := range values {
-					field := rows.FieldDescriptions()[i]
-					values[i] = losslessPGValue(value, rows.RawValues()[i], field.DataTypeOID, field.Format)
+			for i, field := range fields {
+				// pgx decodes XML to bytes, which JSON would otherwise base64-encode.
+				if xmlBytes, ok := values[i].([]byte); ok && field.DataTypeOID == pgtype.XMLOID {
+					values[i] = string(xmlBytes)
+				}
+				if opt.LosslessNumbers {
+					values[i] = losslessPGValue(values[i], rows.RawValues()[i], field.DataTypeOID, field.Format)
 				}
 			}
 			if opt.MaxBytes > 0 {
@@ -179,9 +189,13 @@ func ExecuteWithOptions(ctx context.Context, r *RelDB, query string, readOnly bo
 		if err = rows.Err(); err != nil {
 			return nil, err
 		}
+		tag := rows.CommandTag()
 		if len(result.Columns) == 0 {
 			result.Kind = "write"
-			result.AffectedRows = rows.CommandTag().RowsAffected()
+		}
+		// RETURNING supplies a result set, but its write count comes from the command tag.
+		if result.Kind == "write" || tag.Insert() || tag.Update() || tag.Delete() {
+			result.AffectedRows = tag.RowsAffected()
 		}
 	} else if r.sqlConn != nil {
 		if !ast.ReadOnly {

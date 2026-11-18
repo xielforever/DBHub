@@ -2,6 +2,7 @@ package reportapi
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -79,20 +80,28 @@ func bindManaged(ctx context.Context, id, version int64) {
 }
 
 type managedDraftRequest struct {
-	DataContract *db.DataContract `json:"data_contract"`
-	RequestID    string           `json:"request_id"`
-	Version      int64            `json:"version"`
-	Name         string           `json:"name"`
-	Description  string           `json:"description"`
-	ConnectionID int64            `json:"connection_id"`
-	Database     string           `json:"database"`
-	SQL          string           `json:"sql"`
-	ChartType    string           `json:"chart_type"`
-	ChartConfig  json.RawMessage  `json:"chart_config"`
+	ExportPolicy *db.ReportExportPolicy `json:"export_policy"`
+	Parameters   []db.ReportParameter   `json:"parameters"`
+	DataContract *db.DataContract       `json:"data_contract"`
+	RequestID    string                 `json:"request_id"`
+	Version      int64                  `json:"version"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	ConnectionID int64                  `json:"connection_id"`
+	Database     string                 `json:"database"`
+	SQL          string                 `json:"sql"`
+	ChartType    string                 `json:"chart_type"`
+	ChartConfig  json.RawMessage        `json:"chart_config"`
 }
 
 func (h *ManagedHandler) definition(r *http.Request, in managedDraftRequest) (db.ReportDefinition, error) {
-	rep := &db.Report{Name: in.Name, Description: in.Description, ConnectionID: in.ConnectionID, DatabaseName: in.Database, SQLText: in.SQL, ChartType: in.ChartType, ChartConfig: in.ChartConfig, Visibility: "private"}
+	if e := db.ValidateReportExportPolicy(in.ExportPolicy); e != nil {
+		return db.ReportDefinition{}, httpx.BadRequest(e.Error())
+	}
+	if e := db.ValidateReportExportParameters(in.ExportPolicy, in.Parameters); e != nil {
+		return db.ReportDefinition{}, httpx.BadRequest(e.Error())
+	}
+	rep := &db.Report{Parameters: in.Parameters, Name: in.Name, Description: in.Description, ConnectionID: in.ConnectionID, DatabaseName: in.Database, SQLText: in.SQL, ChartType: in.ChartType, ChartConfig: in.ChartConfig, Visibility: "private"}
 	if rep.ChartType == "" {
 		rep.ChartType = "table"
 	}
@@ -121,7 +130,7 @@ func (h *ManagedHandler) definition(r *http.Request, in managedDraftRequest) (db
 	if e := db.ValidateContractMapping(in.DataContract, rep.ChartConfig); e != nil {
 		return db.ReportDefinition{}, e
 	}
-	return db.ReportDefinition{DataContract: in.DataContract, Name: rep.Name, Description: rep.Description, DefinitionID: rep.DefinitionRevisionID, Database: rep.DatabaseName, SQL: rep.SQLText, ChartType: rep.ChartType, ChartConfig: rep.ChartConfig}, nil
+	return db.ReportDefinition{ExportPolicy: in.ExportPolicy, Parameters: rep.Parameters, DataContract: in.DataContract, Name: rep.Name, Description: rep.Description, DefinitionID: rep.DefinitionRevisionID, Database: rep.DatabaseName, SQL: rep.SQLText, ChartType: rep.ChartType, ChartConfig: rep.ChartConfig}, nil
 }
 func (h *ManagedHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 	var in managedDraftRequest
@@ -168,7 +177,7 @@ func (h *ManagedHandler) List(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("scope 非法"))
 		return
 	}
-	if scope == "pending" && !db.ActorAdmin(r.Context()) {
+	if scope == "pending" && !db.ActorReportReviewer(r.Context()) {
 		ManagedError(w, db.ErrManagedDenied)
 		return
 	}
@@ -202,7 +211,20 @@ func (h *ManagedHandler) Versions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, total, e := h.repo.Versions(r.Context(), id, size, (page-1)*size)
+	var reviewID int64
+	if query := r.URL.Query(); query.Has("review_id") {
+		var err error
+		reviewID, err = strconv.ParseInt(query.Get("review_id"), 10, 64)
+		if err != nil || reviewID <= 0 {
+			httpx.Fail(w, httpx.BadRequest("review_id 非法"))
+			return
+		}
+		if page != 1 {
+			httpx.Fail(w, httpx.BadRequest("按审批编号读取时 page 必须为 1"))
+			return
+		}
+	}
+	items, total, e := h.repo.Versions(r.Context(), id, size, (page-1)*size, reviewID)
 	if e != nil {
 		ManagedError(w, e)
 		return
@@ -235,7 +257,7 @@ func (h *ManagedHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	d := draft.Draft
 	// Revalidate the submitting developer's current personal connection. No
 	// service identity can be used to develop or sneak new SQL into a submission.
-	_, e = h.definition(r, managedDraftRequest{Name: d.Name, Description: d.Description, ConnectionID: draft.ConnectionID, Database: d.Database, SQL: d.SQL, ChartType: d.ChartType, ChartConfig: d.ChartConfig, DataContract: d.DataContract})
+	_, e = h.definition(r, managedDraftRequest{ExportPolicy: d.ExportPolicy, Parameters: d.Parameters, Name: d.Name, Description: d.Description, ConnectionID: draft.ConnectionID, Database: d.Database, SQL: d.SQL, ChartType: d.ChartType, ChartConfig: d.ChartConfig, DataContract: d.DataContract})
 	if e != nil {
 		ManagedError(w, e)
 		return
@@ -272,6 +294,65 @@ func (h *ManagedHandler) Decide(w http.ResponseWriter, r *http.Request) {
 	})
 	result, e := h.repo.Decide(r.Context(), in.RequestID, id, in.Decision, in.ValidationID, in.Comment, in.ContractConfirmed)
 	commandResponse(w, result, e)
+}
+func (h *ManagedHandler) DataReview(w http.ResponseWriter, r *http.Request) {
+	id, ok := reportID(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.ReportReviewID = id
+		d.ReportMode = "isolated_data_review"
+	})
+	if r.Method == http.MethodGet {
+		detail, err := h.repo.ReportDataReview(ctx, id)
+		if err != nil {
+			ManagedError(w, err)
+			return
+		}
+		if err = auditctx.Checkpoint(ctx); err != nil {
+			httpx.Fail(w, httpx.New(50300, "审计存储暂不可用", nil))
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		httpx.OK(w, detail)
+		return
+	}
+	in, ok := decodeDataReviewDecision(w, r)
+	if !ok {
+		return
+	}
+	auditctx.Update(ctx, func(d *auditctx.Data) {
+		d.ReportDecision = in.Decision
+		d.ReportManifestHash = in.Hash
+	})
+	result, err := h.repo.DecideReportDataReview(ctx, in.RequestID, id, in.Hash, in.Decision, in.Comment)
+	commandResponse(w, result, err)
+}
+
+type dataReviewDecision struct {
+	RequestID string `json:"request_id"`
+	Hash      string `json:"manifest_sha256"`
+	Decision  string `json:"decision"`
+	Comment   string `json:"comment"`
+}
+
+func decodeDataReviewDecision(w http.ResponseWriter, r *http.Request) (dataReviewDecision, bool) {
+	var in dataReviewDecision
+	if err := httpx.DecodeJSON(w, r, &in); err != nil {
+		httpx.Fail(w, err)
+		return in, false
+	}
+	in.Comment = strings.TrimSpace(in.Comment)
+	decoded, err := hex.DecodeString(in.Hash)
+	if err != nil || len(decoded) != 32 || !requestKey(in.RequestID) ||
+		utf8.RuneCountInString(in.Comment) > 1000 || strings.ContainsRune(in.Comment, 0) ||
+		in.Decision != "approved" && in.Decision != "rejected" || in.Decision == "rejected" && in.Comment == "" {
+		httpx.Fail(w, httpx.BadRequest("数据复核参数无效，退回须填写原因"))
+		return in, false
+	}
+	return in, true
 }
 func (h *ManagedHandler) Release(w http.ResponseWriter, r *http.Request) {
 	id, ok := reportID(w, r)
@@ -343,11 +424,21 @@ func (h *ManagedHandler) Transfer(w http.ResponseWriter, r *http.Request) {
 	commandResponse(w, result, e)
 }
 func (h *ManagedHandler) Published(w http.ResponseWriter, r *http.Request) {
+	h.published(w, r, false)
+}
+func (h *ManagedHandler) MetricCatalog(w http.ResponseWriter, r *http.Request) {
+	h.published(w, r, true)
+}
+func (h *ManagedHandler) published(w http.ResponseWriter, r *http.Request, onlyContracts bool) {
 	page, size, ok := managedPage(w, r)
 	if !ok {
 		return
 	}
-	items, total, e := h.repo.Published(r.Context(), strings.TrimSpace(r.URL.Query().Get("q")), size, (page-1)*size)
+	list := h.repo.Published
+	if onlyContracts {
+		list = h.repo.MetricCatalog
+	}
+	items, total, e := list(r.Context(), strings.TrimSpace(r.URL.Query().Get("q")), size, (page-1)*size)
 	if e != nil {
 		ManagedError(w, e)
 		return

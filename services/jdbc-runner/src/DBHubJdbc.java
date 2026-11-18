@@ -191,7 +191,8 @@ public final class DBHubJdbc {
         if(ro&&s.transaction&&!s.readOnly)throw new Problem(400,"permission","只读请求不能使用读写事务");
         if(own)begin(s,ro);
         s.operation=key;s.cancelled=false;long start=System.nanoTime();
-        int max=Math.max(1,Math.min(10000,number(q,"max_rows",1000)));int byteBudget=number(q,"max_bytes",0);byteBudget=byteBudget<=0?8*1024*1024:Math.min(8*1024*1024,byteBudget-4096);boolean succeeded=false;
+        int rowLimit=bool(q,"large_result")?100000:10000;
+        int max=Math.max(1,Math.min(rowLimit,number(q,"max_rows",1000)));int byteBudget=number(q,"max_bytes",0);byteBudget=byteBudget<=0?8*1024*1024:Math.min(bool(q,"large_result")?16*1024*1024:8*1024*1024,byteBudget-4096);boolean succeeded=false;
         try(PreparedStatement st=s.connection.prepareStatement(sql)){
             s.statement.set(st);st.setMaxRows(max+1);st.setFetchSize(Math.min(max+1,100));st.setQueryTimeout(Math.max(1,(number(q,"budget_ms",30000)+999)/1000));
             JsonArray args=q.has("args")?q.getAsJsonArray("args"):new JsonArray();int index=1;

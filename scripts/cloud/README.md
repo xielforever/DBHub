@@ -65,7 +65,9 @@ Go 门禁使用官方模块名与固定的 Go 1.26.9 / govulncheck v1.9.0，拒�
 
 元数据库保持使用基础 PostgreSQL 16；HTTP 夹具通过 `TEST_METADATA_DSN` 读取元库，而 `TEST_POSTGRES_DSN` 指向待测业务目标。目标表、采集故障和锁在业务实例上准备及清理，不把 PostgreSQL 14 业务库当作应用元库来执行迁移。矩阵报告同时保存实际工具链和元库版本。
 
-报告在私有 `compatibility-artifacts/<UTC时间>/matrix.json`，记录真实补丁号、镜像摘要、测试名称、跳过与清理状态，以及后端 Go 实现和迁移 SQL 的独立指纹。PostgreSQL 各分支额外执行数据源检查、并发编辑、采集失败/互斥/取消的可靠性测试。完整有效报告可通过 `python3 scripts/cloud/compatibility.py --record-from /私有报告路径/matrix.json` 更新内嵌版本记录；部分报告、失败或任一实现/迁移指纹变化时拒绝更新。恢复运行会记录原报告摘要和复用项来源，不会掩盖原运行的失败。`.github/workflows/datasource-compatibility.yml` 提供手动触发的完整 CI 验证，不上传凭据文件。具体范围见 [数据源版本兼容](../../docs/架构设计/数据接入与执行契约.md#4-检查采集与持久任务)。
+报告在私有 `compatibility-artifacts/<UTC时间>/matrix.json`，记录真实补丁号、镜像摘要、测试名称、跳过与清理状态。`backend_source_sha256` 覆盖模块清单、后端源码目录中的内嵌资源及仓内依赖，迁移 SQL 单独记录指纹。内嵌版本表是报告更新的输出，排除在实现指纹之外。每组测试前后都会核对输入。PostgreSQL 各分支额外执行数据源检查、并发编辑、采集失败、互斥及取消的可靠性测试。
+
+完整有效报告可通过 `python3 scripts/cloud/compatibility.py --record-from /私有报告路径/matrix.json` 更新内嵌版本记录。部分报告、测试失败或指纹变化时拒绝更新。`--resume-from` 只复用输入一致的完整矩阵报告中已通过的分支，并记录原报告摘要及复用项来源。仅含 `backend_go_sha256` 的旧报告保留为历史证据，需要重新运行后才能续跑或更新版本记录。`.github/workflows/datasource-compatibility.yml` 提供手动触发的完整 CI 验证，不上传凭据文件。具体范围见 [数据源版本兼容](../../docs/架构设计/数据接入与执行契约.md#4-检查采集与持久任务)。
 
 版本提示的浏览器验收：`DBHUB_BROWSER_TEST_SCRIPT=/app/scripts/cloud/version_browser_test.py ./scripts/cloud/browser.sh`。验证真实数据库版本显示、修改连接后清除旧结果、过期响应处理及手机表单；MariaDB 警示使用界面契约样例，不代表真实产品兼容验证。
 

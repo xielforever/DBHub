@@ -50,7 +50,7 @@ func (r *ManagedDashboardRepository) ReviewSummary(ctx context.Context, review i
 	var id, reviewer, publication int64
 	var release *int64
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT d.id,v.number,v.definition,rv.reviewer_id,d.active_release_id,d.publication_no FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id JOIN sys_managed_dashboards d ON d.id=rv.dashboard_id WHERE rv.id=$1 AND d.lifecycle<>'deleted' AND (d.owner_id=$2 OR $3)`, review, ActorID(ctx), ActorAdmin(ctx)).Scan(&id, &out.Version, &raw, &reviewer, &release, &publication)
+	err = tx.QueryRow(ctx, `SELECT d.id,v.number,v.definition,rv.reviewer_id,d.active_release_id,d.publication_no FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id JOIN sys_managed_dashboards d ON d.id=rv.dashboard_id WHERE rv.id=$1 AND d.lifecycle<>'deleted' AND (d.owner_id=$2 OR $3)`, review, ActorID(ctx), ActorDashboardReviewer(ctx)).Scan(&id, &out.Version, &raw, &reviewer, &release, &publication)
 	if err != nil {
 		return nil, managedError(err)
 	}

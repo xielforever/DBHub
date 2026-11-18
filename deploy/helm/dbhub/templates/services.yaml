@@ -1,11 +1,26 @@
 {{- range $component, $port := dict "backend" 8080 "frontend" 80 }}
+{{- $frontend := eq $component "frontend" }}
+{{- $service := $.Values.frontend.service }}
+{{- $loadBalancer := and $frontend (eq $service.type "LoadBalancer") }}
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: {{ include "dbhub.name" $ }}-{{ $component }}
+  {{- if and $frontend $service.annotations }}
+  annotations: {{ toYaml $service.annotations | nindent 4 }}
+  {{- end }}
 spec:
-  type: ClusterIP
+  type: {{ ternary "LoadBalancer" "ClusterIP" $loadBalancer }}
+  {{- if $loadBalancer }}
+  externalTrafficPolicy: {{ $service.externalTrafficPolicy }}
+  {{- end }}
   selector: {app.kubernetes.io/instance: {{ $.Release.Name }}, app.kubernetes.io/component: {{ $component }}}
-  ports: [{name: http, port: {{ $port }}, targetPort: http}]
+  ports:
+    - name: http
+      port: {{ $port }}
+      targetPort: {{ if $loadBalancer }}8080{{ else }}http{{ end }}
+      {{- if and $loadBalancer $service.nodePort }}
+      nodePort: {{ $service.nodePort }}
+      {{- end }}
 {{- end }}

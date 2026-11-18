@@ -1,0 +1,16 @@
+[Unit]
+Description=DBHub local WSL recovery bundle
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=dzz
+SupplementaryGroups=docker
+Environment=DBHUB_LOCAL_REPO=/mnt/c/dev/projects/DBHub
+Environment=DBHUB_LOCAL_BACKUP_DIR=/home/dzz/.local/share/dbhub/backups
+Environment=DBHUB_LOCAL_BACKUP_RETENTION_DAYS=14
+ExecStart=/usr/local/lib/dbhub-local/backup-local-bundle.sh --local
+ExecStopPost=/usr/local/lib/dbhub-local/resume-local-backup.sh
+TimeoutStartSec=900
+UMask=0077

@@ -13,7 +13,17 @@ func (r *ManagedDashboardRepository) Reviews(ctx context.Context, id int64) ([]D
 	if _, e := r.Get(ctx, id); e != nil {
 		return nil, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT rv.id,v.id,v.number,v.definition,v.submitted_by,v.submitter_name,rv.reviewer_id,CASE WHEN rv.status='pending' AND rv.expires_at<=now() THEN 'expired' ELSE rv.status END,rv.comment,rv.expires_at,rv.validated_at,rv.lifecycle_epoch,EXISTS(SELECT 1 FROM sys_dashboard_releases re WHERE re.review_id=rv.id) FROM sys_dashboard_versions v JOIN sys_dashboard_reviews rv ON rv.version_id=v.id WHERE v.dashboard_id=$1 ORDER BY v.number DESC LIMIT 100`, id)
+	rows, e := r.pool.Query(ctx, `SELECT rv.id,v.id,v.number,v.definition,v.submitted_by,v.submitter_name,rv.reviewer_id,
+		COALESCE(dbhub_iam_can_review(rv.reviewer_id,'dashboard'),false),
+		CASE WHEN rv.status='pending' AND rv.expires_at<=now() THEN 'expired' ELSE rv.status END,
+		rv.comment,rv.expires_at,rv.validated_at,rv.lifecycle_epoch,
+		EXISTS(SELECT 1 FROM sys_dashboard_releases re WHERE re.review_id=rv.id),
+		COALESCE((SELECT CASE WHEN c.requires_data AND rv.status='pending' AND rv.expires_at>now() THEN 'data_review'
+			WHEN rv.status='approved' THEN 'complete' ELSE '' END
+			FROM sys_dashboard_review_checks c WHERE c.workspace_id=rv.workspace_id AND c.review_id=rv.id
+			AND c.assignment_version=rv.assignment_version),'')
+		FROM sys_dashboard_versions v JOIN sys_dashboard_reviews rv ON rv.version_id=v.id
+		WHERE v.dashboard_id=$1 ORDER BY v.number DESC LIMIT 100`, id)
 	if e != nil {
 		return nil, e
 	}
@@ -22,7 +32,8 @@ func (r *ManagedDashboardRepository) Reviews(ctx context.Context, id int64) ([]D
 	for rows.Next() {
 		var rv DashboardReview
 		var raw []byte
-		if e = rows.Scan(&rv.ID, &rv.VersionID, &rv.Number, &raw, &rv.SubmitterID, &rv.Submitter, &rv.ReviewerID, &rv.Status, &rv.Comment, &rv.ExpiresAt, &rv.ValidatedAt, &rv.Epoch, &rv.WasPublished); e != nil {
+		if e = rows.Scan(&rv.ID, &rv.VersionID, &rv.Number, &raw, &rv.SubmitterID, &rv.Submitter, &rv.ReviewerID,
+			&rv.ReviewerEligible, &rv.Status, &rv.Comment, &rv.ExpiresAt, &rv.ValidatedAt, &rv.Epoch, &rv.WasPublished, &rv.ApprovalStage); e != nil {
 			return nil, e
 		}
 		if e = json.Unmarshal(raw, &rv.Definition); e != nil {
@@ -102,12 +113,24 @@ func (r *ManagedDashboardRepository) ValidateReview(ctx context.Context, key str
 		if e != nil {
 			return out, e
 		}
-		_, e = tx.Exec(ctx, `UPDATE sys_dashboard_reviews SET validation=$2::jsonb,validated_at=now() WHERE id=$1`, review, string(evidence))
+		s, governed, _, e := r.dashboardReviewBasis(ctx, tx, review, d)
+		if e != nil {
+			return out, e
+		}
+		var stamp string
+		if governed {
+			basis, _, err := r.buildDashboardReviewBoundary(ctx, tx, s, refs, refresh, 0, false)
+			if err != nil {
+				return out, err
+			}
+			stamp = reportDigest(basis)
+		}
+		_, e = tx.Exec(ctx, `UPDATE sys_dashboard_reviews SET validation=$2::jsonb,validated_at=now(),governed_validation_stamp=$3 WHERE id=$1`, review, string(evidence), stamp)
 		return out, e
 	})
 }
 func (r *ManagedDashboardRepository) Decision(ctx context.Context, key string, review int64, decision, comment string) (ReportCommandResult, error) {
-	return r.reports.command(ctx, key, "dashboard-decision", []any{review, decision, comment}, decision != "withdrawn", true, func(tx pgx.Tx) (ReportCommandResult, error) {
+	return r.reports.command(ctx, key, "dashboard-decision", []any{review, decision, comment}, decision != "withdrawn", decision == "withdrawn", func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{ID: review}
 		var raw, evidence []byte
 		var owner, reviewer int64
@@ -147,6 +170,27 @@ func (r *ManagedDashboardRepository) Decision(ctx context.Context, key string, r
 			if reportDigest(json.RawMessage(evidence)) != reportDigest(json.RawMessage(currentEvidence)) {
 				return out, ErrManagedConflict
 			}
+			s, governed, stamp, err := r.dashboardReviewBasis(ctx, tx, review, d)
+			if err != nil {
+				return out, err
+			}
+			if governed {
+				basis, _, err := r.buildDashboardReviewBoundary(ctx, tx, s, refs, "", 0, false)
+				if err != nil {
+					return out, err
+				}
+				if stamp == "" || stamp != reportDigest(basis) {
+					return out, ErrManagedConflict
+				}
+				requiresData, err := signDashboardBusinessReview(ctx, tx, s, review, basis, comment)
+				if err != nil {
+					return out, err
+				}
+				if requiresData {
+					out.ApprovalStage = "data_review"
+					return out, nil
+				}
+			}
 		}
 		if decision != "approved" && decision != "rejected" && decision != "withdrawn" {
 			return out, ErrManagedInput
@@ -181,14 +225,14 @@ func (r *ManagedDashboardRepository) Reassign(ctx context.Context, key string, i
 		out := ReportCommandResult{ID: id}
 		var raw []byte
 		var owner int64
-		var role *string
+		var eligible bool
 		if e := tx.QueryRow(ctx, `SELECT v.definition,COALESCE(v.submitted_by,0) FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id JOIN sys_managed_dashboards d ON d.id=rv.dashboard_id WHERE rv.id=$1 AND rv.status='pending' AND rv.expires_at>now() AND d.lifecycle='active' AND d.lifecycle_epoch=rv.lifecycle_epoch FOR UPDATE OF rv`, id).Scan(&raw, &owner); e != nil {
 			return out, e
 		}
-		if e := tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, reviewer).Scan(&role); e != nil {
+		if e := tx.QueryRow(ctx, `SELECT dbhub_iam_can_review($1,'dashboard')`, reviewer).Scan(&eligible); e != nil {
 			return out, e
 		}
-		if owner == reviewer || role == nil || *role != "admin" {
+		if owner == reviewer || !eligible {
 			return out, ErrManagedInput
 		}
 		var d DashboardDefinition
@@ -201,7 +245,7 @@ func (r *ManagedDashboardRepository) Reassign(ctx context.Context, key string, i
 		if _, e := r.checkDefinition(ctx, tx, d, reviewer); e != nil {
 			return out, e
 		}
-		_, e := tx.Exec(ctx, `UPDATE sys_dashboard_reviews SET reviewer_id=$2,assignment_version=assignment_version+1,validation=NULL,validated_at=NULL WHERE id=$1`, id, reviewer)
+		_, e := tx.Exec(ctx, `UPDATE sys_dashboard_reviews SET reviewer_id=$2,assignment_version=assignment_version+1,validation=NULL,validated_at=NULL,governed_validation_stamp='' WHERE id=$1`, id, reviewer)
 		return out, e
 	})
 }
@@ -217,6 +261,20 @@ func (r *ManagedDashboardRepository) Release(ctx context.Context, key string, id
 		if number != expected || state != "active" {
 			return out, ErrManagedConflict
 		}
+		if kind == "publish" {
+			if err := guardCustodyPublication(ctx, tx, availabilityObject{dashboard: id}, review); err != nil {
+				return out, err
+			}
+		}
+		if kind != "publish" {
+			enrolled, err := r.governedDashboard(ctx, tx, id)
+			if err != nil {
+				return out, err
+			}
+			if enrolled {
+				return out, fmt.Errorf("%w: 已纳管仪表盘须使用下线与恢复流程", ErrManagedConflict)
+			}
+		}
 		var selected *int64
 		if kind == "unpublish" {
 			if active == nil {
@@ -225,11 +283,26 @@ func (r *ManagedDashboardRepository) Release(ctx context.Context, key string, id
 		} else if kind == "publish" || kind == "rollback" {
 			var raw []byte
 			var rvEpoch, version, reviewer int64
-			var role *string
-			if e := tx.QueryRow(ctx, `SELECT v.definition,rv.lifecycle_epoch,v.number,rv.reviewer_id,dbhub_member_role(rv.reviewer_id) FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE rv.id=$1 AND rv.dashboard_id=$2 AND rv.status='approved'`, review, id).Scan(&raw, &rvEpoch, &version, &reviewer, &role); e != nil {
+			var reviewStatus string
+			var eligible bool
+			if e := tx.QueryRow(ctx, `SELECT v.definition,rv.lifecycle_epoch,v.number,rv.reviewer_id,dbhub_iam_can_review(rv.reviewer_id,'dashboard'),rv.status
+				FROM sys_dashboard_reviews rv JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE rv.id=$1 AND rv.dashboard_id=$2`, review, id).
+				Scan(&raw, &rvEpoch, &version, &reviewer, &eligible, &reviewStatus); e != nil {
 				return out, e
 			}
-			if rvEpoch != epoch || role == nil || *role != "admin" {
+			if reviewStatus != "approved" {
+				if kind == "publish" {
+					governed, err := r.governedDashboard(ctx, tx, id)
+					if err != nil {
+						return out, err
+					}
+					if governed {
+						return out, fmt.Errorf("%w: 仪表盘须先完成当前复核", ErrManagedConflict)
+					}
+				}
+				return out, pgx.ErrNoRows
+			}
+			if rvEpoch != epoch || !eligible {
 				return out, ErrManagedConflict
 			}
 			var audienceBase *int64
@@ -243,8 +316,14 @@ func (r *ManagedDashboardRepository) Release(ctx context.Context, key string, id
 			if e := json.Unmarshal(raw, &d); e != nil {
 				return out, e
 			}
-			if _, e := r.checkDefinition(ctx, tx, d, reviewer); e != nil {
+			refs, e := r.checkDefinition(ctx, tx, d, reviewer)
+			if e != nil {
 				return out, e
+			}
+			if kind == "publish" {
+				if e = r.confirmDashboardPublicationPolicy(ctx, tx, review, d, refs); e != nil {
+					return out, e
+				}
 			}
 			var previous *int64
 			var currentReview *int64
@@ -264,27 +343,33 @@ func (r *ManagedDashboardRepository) Release(ctx context.Context, key string, id
 		} else {
 			return out, ErrManagedInput
 		}
-		out.Version = number + 1
-		if e := tx.QueryRow(ctx, `INSERT INTO sys_dashboard_releases(dashboard_id,number,kind,review_id,lifecycle_epoch,performed_by,performer_name) VALUES($1,$2,$3,$4,$5,$6,(SELECT username FROM sys_users WHERE id=$6)) RETURNING id`, id, out.Version, kind, selected, epoch, ActorID(ctx)).Scan(&out.ID); e != nil {
-			return out, e
-		}
-		var next *int64
-		if selected != nil {
-			next = &out.ID
-		}
-		_, e := tx.Exec(ctx, `UPDATE sys_managed_dashboards SET publication_no=$2,active_release_id=$3,updated_at=now() WHERE id=$1`, id, out.Version, next)
-		if e == nil && kind == "unpublish" {
-			_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'cancelled' END,decision_reason='看板已下线',version=version+1 WHERE dashboard_id=$1 AND status IN('pending','processing','approved_pending_release')`, id)
-		}
-		return out, e
+		return appendDashboardRelease(ctx, tx, id, number, epoch, kind, selected)
 	})
 }
+func appendDashboardRelease(ctx context.Context, tx pgx.Tx, id, number, epoch int64, kind string, selected *int64) (ReportCommandResult, error) {
+	out := ReportCommandResult{}
+	out.Version = number + 1
+	if e := tx.QueryRow(ctx, `INSERT INTO sys_dashboard_releases(dashboard_id,number,kind,review_id,lifecycle_epoch,performed_by,performer_name) VALUES($1,$2,$3,$4,$5,$6,(SELECT username FROM sys_users WHERE id=$6)) RETURNING id`, id, out.Version, kind, selected, epoch, ActorID(ctx)).Scan(&out.ID); e != nil {
+		return out, e
+	}
+	var next *int64
+	if selected != nil {
+		next = &out.ID
+	}
+	_, e := tx.Exec(ctx, `UPDATE sys_managed_dashboards SET publication_no=$2,active_release_id=$3,updated_at=now() WHERE id=$1`, id, out.Version, next)
+	if e == nil && kind == "unpublish" {
+		_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'cancelled' END,decision_reason='看板已下线',version=version+1 WHERE dashboard_id=$1 AND status IN('pending','processing','approved_pending_release')`, id)
+	}
+	return out, e
+}
+
 func (r *ManagedDashboardRepository) Lifecycle(ctx context.Context, key string, id, expected int64, action string) (ReportCommandResult, error) {
 	return r.reports.command(ctx, key, "dashboard-lifecycle", []any{id, expected, action}, false, true, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{ID: id}
 		var owner, version, latest, epoch, publication int64
 		var state string
-		if e := tx.QueryRow(ctx, `SELECT owner_id,draft_version,latest_version,lifecycle_epoch,publication_no,lifecycle FROM sys_managed_dashboards WHERE id=$1 FOR UPDATE`, id).Scan(&owner, &version, &latest, &epoch, &publication, &state); e != nil {
+		var published bool
+		if e := tx.QueryRow(ctx, `SELECT owner_id,draft_version,latest_version,lifecycle_epoch,publication_no,lifecycle,active_release_id IS NOT NULL FROM sys_managed_dashboards WHERE id=$1 FOR UPDATE`, id).Scan(&owner, &version, &latest, &epoch, &publication, &state, &published); e != nil {
 			return out, e
 		}
 		if owner != ActorID(ctx) && !ActorAdmin(ctx) {
@@ -303,6 +388,15 @@ func (r *ManagedDashboardRepository) Lifecycle(ctx context.Context, key string, 
 		case "archive":
 			if state != "active" {
 				return out, ErrManagedConflict
+			}
+			if published {
+				enrolled, err := r.governedDashboard(ctx, tx, id)
+				if err != nil {
+					return out, err
+				}
+				if enrolled {
+					return out, fmt.Errorf("%w: 请先按独立流程下线已纳管仪表盘", ErrManagedConflict)
+				}
 			}
 			next = "archived"
 		case "restore":
@@ -332,6 +426,9 @@ func (r *ManagedDashboardRepository) Lifecycle(ctx context.Context, key string, 
 func (r *ManagedDashboardRepository) Transfer(ctx context.Context, key string, id, version, owner int64) (ReportCommandResult, error) {
 	return r.reports.command(ctx, key, "dashboard-transfer", []int64{id, version, owner}, true, false, func(tx pgx.Tx) (ReportCommandResult, error) {
 		out := ReportCommandResult{ID: id}
+		if err := guardCustodyTransfer(ctx, tx, availabilityObject{dashboard: id}); err != nil {
+			return out, err
+		}
 		var role *string
 		if e := tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, owner).Scan(&role); e != nil {
 			return out, e

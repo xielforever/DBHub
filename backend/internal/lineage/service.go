@@ -18,11 +18,33 @@ type Service struct {
 	history *db.HistoryRepository
 	conns   *db.ConnectionRepository
 	meta    *db.MetadataRepository
+	users   *db.UserRepository
 	log     *slog.Logger
 }
 
-func NewService(lineage *db.LineageRepository, history *db.HistoryRepository, conns *db.ConnectionRepository, meta *db.MetadataRepository, log *slog.Logger) *Service {
-	return &Service{lineage: lineage, history: history, conns: conns, meta: meta, log: log}
+func NewService(lineage *db.LineageRepository, history *db.HistoryRepository, conns *db.ConnectionRepository, meta *db.MetadataRepository, log *slog.Logger, users *db.UserRepository) *Service {
+	return &Service{lineage: lineage, history: history, conns: conns, meta: meta, log: log, users: users}
+}
+
+// Metadata jobs execute for their original actor/space. A scheduler has no
+// administrator identity, and a stale discovery row is never an authorization.
+func (s *Service) qualify(ctx context.Context) (context.Context, func(), error) {
+	if s.users == nil || db.ActorID(ctx) == 0 {
+		return ctx, nil, db.ErrManagedDenied
+	}
+	bound, e := s.users.BindWorkspace(ctx, db.WorkspaceID(ctx))
+	if e != nil {
+		return ctx, nil, e
+	}
+	c, _ := auth.ClaimsFromContext(bound)
+	if !auth.HasAction(c, "catalog.metadata") {
+		return ctx, nil, db.ErrManagedDenied
+	}
+	copy := *c
+	copy.CurrentAction = "catalog.metadata"
+	bound = auth.WithClaims(bound, &copy)
+	release, e := s.users.IAMLease(bound)
+	return bound, release, e
 }
 
 // ParseRecentHistory 增量解析最近 limit 条成功历史，返回新增边数
@@ -39,12 +61,18 @@ func (s *Service) ParseRecentHistory(ctx context.Context, limit int) (int, error
 			}
 			n, err := s.ParseRecentHistory(context.WithValue(db.WithWorkspace(ctx, actors[i].WorkspaceID), auth.ClaimsContextKey, &actors[i]), limit)
 			if err != nil {
-				return total, err
+				s.log.Debug("血缘任务跳过当前无资格主体", "workspace_id", actors[i].WorkspaceID, "actor_id", actors[i].Subject)
+				continue
 			}
 			total += n
 		}
 		return total, nil
 	}
+	ctx, release, err := s.qualify(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	if limit <= 0 || limit > 2000 {
 		limit = 500
 	}
@@ -66,6 +94,9 @@ func (s *Service) ParseRecentHistory(ctx context.Context, limit int) (int, error
 }
 
 func (s *Service) parseOne(ctx context.Context, h *db.QueryHistory) (int, error) {
+	if e := s.users.IAMCurrent(ctx); e != nil {
+		return 0, e
+	}
 	sqlText := strings.TrimSpace(h.SQLText)
 	if sqlText == "" {
 		return 0, nil
@@ -111,6 +142,9 @@ func (s *Service) parseOne(ctx context.Context, h *db.QueryHistory) (int, error)
 
 	count := 0
 	for _, e := range edges {
+		if err := s.users.IAMCurrent(ctx); err != nil {
+			return count, err
+		}
 		upConn, downConn := h.ConnectionID, h.ConnectionID
 		upDB, downDB := h.DatabaseName, h.DatabaseName
 		if e.up.Database != "" {
@@ -161,6 +195,11 @@ func (s *Service) parseOne(ctx context.Context, h *db.QueryHistory) (int, error)
 
 // ParseHistoryID 供外部触发单条解析（测试/手工刷新）
 func (s *Service) ParseHistoryID(ctx context.Context, historyID int64) (int, error) {
+	ctx, release, err := s.qualify(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	// 简化：直接查最近 1000 条中找到该 ID
 	hists, _, err := s.history.List(ctx, 0, true, 0, "", 1000, 0)
 	if err != nil {
@@ -183,14 +222,23 @@ func (s *Service) BackfillFK(ctx context.Context) (int, error) {
 		}
 		total := 0
 		for i := range actors {
+			if e = ctx.Err(); e != nil {
+				return total, e
+			}
 			n, err := s.BackfillFK(context.WithValue(db.WithWorkspace(ctx, actors[i].WorkspaceID), auth.ClaimsContextKey, &actors[i]))
 			if err != nil {
-				return total, err
+				s.log.Debug("外键任务跳过当前无资格主体", "workspace_id", actors[i].WorkspaceID, "actor_id", actors[i].Subject)
+				continue
 			}
 			total += n
 		}
 		return total, nil
 	}
+	ctx, release, err := s.qualify(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
 	if s.meta == nil {
 		return 0, fmt.Errorf("meta repo is nil")
 	}
@@ -201,6 +249,9 @@ func (s *Service) BackfillFK(ctx context.Context) (int, error) {
 	// 预加载完整快照的 raw_keys
 	count := 0
 	for i := range snaps {
+		if err := s.users.IAMCurrent(ctx); err != nil {
+			return count, err
+		}
 		snap := &snaps[i]
 		full, err := s.meta.GetSnapshot(ctx, snap.ConnectionID, snap.DatabaseName, snap.SchemaName, snap.TableName)
 		if err != nil || full == nil || len(full.RawKeys) == 0 {
@@ -220,6 +271,9 @@ func (s *Service) BackfillFK(ctx context.Context) (int, error) {
 			continue
 		}
 		for _, k := range keys {
+			if err := s.users.IAMCurrent(ctx); err != nil {
+				return count, err
+			}
 			if k.Kind != "foreign_key" || k.RefTable == "" {
 				continue
 			}

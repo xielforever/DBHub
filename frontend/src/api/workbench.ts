@@ -5,7 +5,14 @@ import request from '../utils/request'
 import { newRequestId } from '../utils/request-id'
 import type { DbType } from './datasource'
 
+const configuredDatabaseListTimeout = Number(import.meta.env.VITE_DATABASE_LIST_TIMEOUT_MS)
+const databaseListTimeout = Number.isInteger(configuredDatabaseListTimeout)
+  && configuredDatabaseListTimeout >= 15_000 && configuredDatabaseListTimeout <= 300_000
+  ? configuredDatabaseListTimeout
+  : request.defaults.timeout
+
 export interface ExecResult {
+	contract_check?: import('./managed-report').ContractDiagnostics
   kind: 'query' | 'write'
   columns?: string[]
   rows?: unknown[][]
@@ -20,6 +27,7 @@ export interface ExecutionReceipt {
   connection_id: number
   database: string
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'rejected' | 'unknown'
+  cancellation_confirmed?: boolean
   transactional: boolean
   kind?: 'query' | 'write'
   affected_rows: number
@@ -113,33 +121,40 @@ export const workbenchApi = {
       signal, timeout: 8000, silentError: true,
     })
   },
-  databases(connectionId: number, signal?: AbortSignal) {
+  databases(connectionId: number, signal?: AbortSignal, silentError = false) {
     return request.get<unknown, { items: { name: string }[] }>('/metadata/databases', {
       params: { connection_id: connectionId },
       signal,
+      timeout: databaseListTimeout,
+      silentError,
     })
   },
-  schemas(connectionId: number, database?: string) {
-    return request.get<unknown, { items: string[] }>('/metadata/schemas', {
+  schemas(connectionId: number, database?: string, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, { items: string[] | null }>('/metadata/schemas', {
       params: { connection_id: connectionId, database },
+      ...options,
     })
   },
-  tables(connectionId: number, params: { database?: string; schema?: string }) {
+  tables(connectionId: number, params: { database?: string; schema?: string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, { items: TableInfo[] }>('/metadata/tables', {
       params: { connection_id: connectionId, ...params },
+      ...options,
     })
   },
-  columns(connectionId: number, params: { database?: string; schema?: string; table: string }) {
+  columns(connectionId: number, params: { database?: string; schema?: string; table: string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, { items: ColumnInfo[] }>('/metadata/columns', {
       params: { connection_id: connectionId, ...params },
+      ...options,
     })
   },
   preview(
     connectionId: number,
     params: { database?: string; schema?: string; table: string; page: number; page_size: number },
+    options?: { signal?: AbortSignal; silentError?: boolean },
   ) {
     return request.get<unknown, PreviewResult>('/data/preview', {
       params: { connection_id: connectionId, ...params },
+      ...options,
     })
   },
   history(params: { connection_id?: number; status?: string; keyword?: string; q?: string; page: number; page_size: number }) {
@@ -156,19 +171,22 @@ export const workbenchApi = {
   clearHistory() {
     return request.delete<unknown, { ok: boolean }>('/query/history')
   },
-  redisOverview(connectionId: number) {
+  redisOverview(connectionId: number, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, RedisOverview>('/redis/overview', {
       params: { connection_id: connectionId },
+      ...options,
     })
   },
-  redisKeys(connectionId: number, pattern = '*', limit = 200, type = 'all') {
-    return request.get<unknown, { items: RedisKey[]; returned: number; total: number }>('/redis/keys', {
+  redisKeys(connectionId: number, pattern = '*', limit = 200, type = 'all', options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, { items: RedisKey[]; returned: number; total?: number }>('/redis/keys', {
       params: { connection_id: connectionId, pattern, limit, type },
+      ...options,
     })
   },
-  redisValue(connectionId: number, key: string) {
+  redisValue(connectionId: number, key: string, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, RedisValue>('/redis/value', {
       params: { connection_id: connectionId, key },
+      ...options,
     })
   },
   redisDeleteKey(connectionId: number, key: string) {

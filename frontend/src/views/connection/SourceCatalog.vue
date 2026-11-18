@@ -1,79 +1,6 @@
-<template>
-  <section class="space-y-4" aria-label="数据源目录">
-    <p class="text-sm text-white/50">目录共享连接目标。添加到我的连接后，使用你自己的数据库账号操作。</p>
-    <div class="flex flex-wrap gap-3"><input v-model="keyword" class="glass-input max-w-md" aria-label="搜索数据源目录" placeholder="搜索名称、主机或数据库" /><button class="liquid-button text-xs" @click="openDefinition">新建数据源定义</button><button class="ghost-button text-xs" :disabled="loading" @click="load">刷新</button></div>
-    <div class="flex flex-wrap gap-3">
-      <el-select v-model="view" aria-label="目录视图" class="!w-40"><el-option label="全部可见" value="all" /><el-option label="我的收藏" value="favorites" /><el-option label="最近使用" value="recent" /></el-select>
-      <el-select v-model="category" aria-label="目录分组筛选" class="!w-44"><el-option label="全部分组" value="" /><el-option v-for="c in categories" :key="c" :value="c" :label="c" /></el-select>
-    </div>
-    <div v-loading="loading" class="min-h-32 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-      <article v-for="d in filtered" :key="d.id" class="glass-card p-5 space-y-3">
-        <div class="flex justify-between items-start gap-2"><h2 class="font-medium break-words">{{ d.name }}</h2><span class="text-xs text-white/50 shrink-0">{{ d.visibility === 'global' ? (d.access_mode === 'restricted' ? '指定范围' : '空间共享') : '个人' }} · 修订 {{ d.revision }}</span></div>
-        <p class="text-xs text-white/55 break-all">{{ endpoint(d) }}</p>
-        <p class="text-xs text-white/45">{{ d.config.type === 'jdbc' ? '自定义 JDBC' : d.config.type }} · {{ d.config.environment || 'dev' }}</p>
-        <p v-if="d.description" class="text-sm text-white/60 break-words">{{ d.description }}</p>
-        <div v-if="d.category || d.tags?.length" class="flex flex-wrap gap-2 text-xs text-indigo-200"><span v-if="d.category">{{ d.category }}</span><span v-for="tag in d.tags" :key="tag" class="rounded bg-white/5 px-2">{{ tag }}</span></div>
-        <p v-if="d.maintainer || d.contact" class="text-xs text-white/50 break-words">负责人：{{ d.maintainer || '待填写' }}<span v-if="d.contact"> · {{ d.contact }}</span></p>
-        <p v-if="d.last_used_at && view === 'recent'" class="text-xs text-white/40">最近连接：{{ new Date(d.last_used_at).toLocaleString() }}</p>
-        <p v-if="!d.enabled" class="text-xs text-amber-200">此修订已停用</p>
-        <p v-else-if="d.my_connection_id && d.my_revision_id !== d.id" class="text-xs text-amber-200">有新修订，现有连接仍使用你已确认的目标。</p>
-        <div class="flex flex-wrap gap-2">
-          <button v-if="!d.my_connection_id" class="liquid-button text-xs" :disabled="!d.enabled" @click="openIdentity(d)">添加到我的连接</button>
-          <button v-else-if="d.my_revision_id !== d.id" class="liquid-button text-xs" :disabled="!d.enabled" @click="openIdentity(d)">查看并切换修订</button>
-          <button v-else class="ghost-button text-xs" :disabled="!d.enabled" @click="openConnection(d)">打开我的连接</button>
-          <button class="ghost-button text-xs" @click="openHistory(d)">修订记录</button>
-          <button class="ghost-button text-xs" :aria-label="`收藏 ${d.name}`" :aria-pressed="d.favorite" :disabled="favoriteBusy.has(d.id)" @click="toggleFavorite(d)">{{ d.favorite ? '★ 已收藏' : '☆ 收藏' }}</button>
-          <el-dropdown v-if="canManage(d)" trigger="click"><button class="ghost-button text-xs" :aria-label="`管理 ${d.name}`">管理</button><template #dropdown><el-dropdown-menu><el-dropdown-item @click="openRevision(d)">新修订</el-dropdown-item><el-dropdown-item @click="manageSource = d; manageOpen = true">资料与发布范围</el-dropdown-item></el-dropdown-menu></template></el-dropdown>
-        </div>
-      </article>
-    </div>
-    <p v-if="!loading && !filtered.length" class="glass-card p-8 text-center text-sm text-white/45">暂无可见的数据源定义。你可以新建个人数据源，或等待管理员发布。</p>
-    <div class="flex flex-wrap items-center justify-between gap-3 text-xs text-white/50"><span>共 {{ total }} 个数据源</span><div class="flex gap-3"><button class="ghost-button text-xs" :disabled="page <= 1 || loading" @click="page--">上一页</button><span class="self-center">第 {{ page }} 页</span><button class="ghost-button text-xs" :disabled="page * pageSize >= total || loading" @click="page++">下一页</button></div></div>
-    <SourceManageDialog v-model="manageOpen" :source="manageSource" @changed="load" />
-    <SourceRevisionDialog v-model="historyOpen" :source="historySource" @changed="load" />
-
-    <el-dialog v-model="identityOpen" :title="selected?.my_connection_id ? '确认新修订与个人身份' : '添加到我的连接'" width="min(92vw, 560px)" :close-on-click-modal="false" class="glass-dialog" @closed="clearIdentity">
-      <div v-if="selected" class="space-y-4">
-        <div class="rounded-xl bg-white/5 p-4 space-y-2"><p>{{ selected.name }} · 修订 {{ selected.revision }}</p><p class="text-xs text-white/60 break-all">{{ endpoint(selected) }}</p><p class="text-xs text-white/50">TLS：{{ selected.config.ssl_mode }}。请核实目标后填写自己的数据库账号。</p><p v-if="selected.my_connection_id" class="text-xs text-amber-200">保存后将切换此个人连接的修订，并清理此前采集的结构。请重新输入密码。</p></div>
-        <el-form label-position="top">
-          <el-form-item label="我的连接名称"><el-input v-model="identity.name" maxlength="100" /></el-form-item>
-          <el-form-item label="我的数据库账号"><el-input v-model="identity.username" autocomplete="off" aria-label="我的数据库账号" /></el-form-item>
-          <el-form-item label="我的数据库密码"><el-input v-model="identity.password" type="password" show-password autocomplete="new-password" aria-label="我的数据库密码" /></el-form-item>
-        </el-form>
-        <el-checkbox v-model="identity.confirmed" class="identity-confirm" aria-label="确认连接目标">我已确认地址、数据库和修订，使用自己的数据库账号</el-checkbox>
-        <p v-if="testText" role="status" class="text-sm break-words" :class="testOK ? 'text-emerald-300' : 'text-rose-300'">{{ testText }}</p>
-        <ConnectionDiagnosis :diagnostic="testDiagnostic" />
-      </div>
-      <template #footer><div class="flex flex-wrap justify-between gap-2"><button class="ghost-button" :disabled="busy || !identityReady" @click="testIdentity">{{ busy ? '处理中…' : '测试我的连接' }}</button><button class="liquid-button" :disabled="busy || !identityReady" @click="saveIdentity">{{ selected?.my_connection_id ? '确认并切换' : '保存我的连接' }}</button></div></template>
-    </el-dialog>
-
-    <el-dialog v-model="revisionOpen" :title="revisionId ? '发布数据源新修订' : '新建数据源定义'" width="min(92vw, 620px)" :close-on-click-modal="false" class="glass-dialog source-definition-dialog">
-      <p class="text-xs text-white/50 mb-4">只发布连接目标。现有使用者确认新修订后才会切换，个人账号密码不会随定义发布。</p>
-      <el-form label-position="top">
-        <el-form-item label="数据源名称"><el-input v-model="revision.name" maxlength="100" /></el-form-item>
-        <el-form-item label="说明"><el-input v-model="revision.description" type="textarea" maxlength="1000" /></el-form-item>
-        <el-form-item label="可见范围"><el-select v-model="revision.visibility" class="w-full"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="工作空间共享" value="global" /></el-select></el-form-item>
-        <el-form-item v-if="revision.visibility === 'global' && !revisionId" label="初始发布范围"><el-select v-model="revision.access_mode" class="w-full" aria-label="初始发布范围"><el-option label="全体用户" value="global" /><el-option label="指定用户或用户组（保存后设置）" value="restricted" /></el-select></el-form-item>
-        <el-form-item label="类型"><el-select v-model="revision.config.type" class="w-full" @change="resetType"><el-option label="PostgreSQL" value="postgres" /><el-option label="MySQL" value="mysql" /><el-option label="Redis" value="redis" /><el-option label="自定义 JDBC" value="jdbc" /></el-select></el-form-item>
-        <template v-if="revision.config.type === 'jdbc'">
-          <el-form-item label="驱动连接规则"><el-select v-model="revision.config.template_revision_id" class="w-full" @change="resetFields"><el-option v-for="t in eligibleTemplates" :key="t.id" :value="t.id" :label="`${t.name} · 修订 ${t.revision}`" /></el-select></el-form-item>
-          <el-form-item v-for="f in revisionTemplate?.fields || []" :key="f.name" :label="f.label"><el-input v-model="revisionParameters[f.name]" :type="f.type === 'integer' ? 'number' : 'text'" /></el-form-item>
-        </template>
-        <template v-else>
-          <el-form-item label="主机"><el-input v-model="revision.config.host" /></el-form-item>
-          <el-form-item label="端口"><el-input v-model.number="revision.config.port" type="number" /></el-form-item>
-          <el-form-item label="数据库"><el-input v-model="revision.config.database" /></el-form-item>
-        </template>
-        <el-form-item label="TLS"><el-select v-model="revision.config.ssl_mode" class="w-full"><el-option label="验证服务器证书" value="verify-full" /><el-option label="禁用" value="disable" /></el-select></el-form-item>
-        <el-form-item label="环境"><el-select v-model="revision.config.environment" class="w-full"><el-option label="开发" value="dev" /><el-option label="测试" value="test" /><el-option label="生产" value="prod" /></el-select></el-form-item>
-      </el-form>
-      <template #footer><button class="liquid-button" :disabled="busy || !revision.name.trim()" @click="saveRevision">{{ revisionId ? '发布新修订' : '保存数据源定义' }}</button></template>
-    </el-dialog>
-  </section>
-</template>
-
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import {featureAllowed} from '../../utils/permission'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { sourceCatalogApi, type DefinitionPayload, type PersonalIdentity, type SourceDefinition } from '../../api/source-catalog'
@@ -82,20 +9,26 @@ import { useUserStore } from '../../stores/user'
 import SourceRevisionDialog from './SourceRevisionDialog.vue'
 import SourceManageDialog from './SourceManageDialog.vue'
 import ConnectionDiagnosis from './ConnectionDiagnosis.vue'
+import LoadingState from '../../components/base/LoadingState.vue'
+import PageState from '../../components/base/PageState.vue'
 import { ApiRequestError } from '../../utils/request'
-import type { ConnectionDiagnostic, TestResult } from '../../api/datasource'
+import type { TestResult } from '../../api/datasource'
 
 const emit = defineEmits<{ added: [] }>()
-const user = useUserStore(), router = useRouter()
-const isAdmin = computed(() => user.role === 'admin')
+const user = useUserStore()
+const canBind=computed(()=>featureAllowed(user,'connection.manage',true)),canUse=computed(()=>featureAllowed(user,'connection.use',true)), router = useRouter()
+const isAdmin = computed(() => user.hasCapability('datasource_manage'))
 const canManage = (d: SourceDefinition) => d.visibility === 'private' && d.owner_id === user.user?.id || d.visibility === 'global' && isAdmin.value
-const items = ref<SourceDefinition[]>([]), keyword = ref(''), loading = ref(false), busy = ref(false)
+const filterId = `source-catalog-${useId()}`
+const items = ref<SourceDefinition[]>([]), keyword = ref(''), loading = ref(true), busy = ref(false)
 const total = ref(0), page = ref(1), pageSize = 12, category = ref(''), view = ref('all'), categories = ref<string[]>([])
+const loadFailed = ref(false)
+const hasFilters = computed(() => !!keyword.value.trim() || category.value !== '' || view.value !== 'all')
 const manageOpen = ref(false), manageSource = ref<SourceDefinition>(), favoriteBusy = reactive(new Set<number>())
 let loadGeneration = 0, searchTimer: ReturnType<typeof setTimeout> | undefined
-watch([keyword, category, view], () => {page.value = 1; clearTimeout(searchTimer); searchTimer = setTimeout(() => {void load().catch(() => {})}, 250)})
-watch(page, () => {void load().catch(() => {})})
-onBeforeUnmount(() => {clearTimeout(searchTimer); loadGeneration++})
+watch([keyword, category, view], () => {page.value = 1; clearTimeout(searchTimer); searchTimer = setTimeout(refreshCatalog, 250)})
+watch(page, refreshCatalog)
+onBeforeUnmount(() => {clearTimeout(searchTimer); loadGeneration++; clearIdentityCheck()})
 async function toggleFavorite(d: SourceDefinition) {if (favoriteBusy.has(d.id)) return; favoriteBusy.add(d.id); try {await sourceCatalogApi.favorite(d.id, !d.favorite); await load()} catch { /* API displays failure */ } finally {favoriteBusy.delete(d.id)}}
 const templates = ref<DatasourceTemplate[]>([])
 const historyOpen = ref(false), historySource = ref<SourceDefinition>()
@@ -104,28 +37,66 @@ const filtered = computed(() => items.value)
 const endpoint = (d: SourceDefinition) => `${d.config.host}${d.config.port ? ':' + d.config.port : ''} / ${d.config.database || d.config.parameters?.database || ''}`
 async function load() {
  const current = ++loadGeneration; loading.value = true
- try {const [r, facets] = await Promise.all([sourceCatalogApi.list({keyword: keyword.value, category: category.value, view: view.value, page: page.value, page_size: pageSize}), sourceCatalogApi.categories()]); if (current === loadGeneration) {items.value = r.items; total.value = r.total; categories.value = facets.items}}
+ try {
+   const [r, facets] = await Promise.all([sourceCatalogApi.list({keyword: keyword.value, category: category.value, view: view.value, page: page.value, page_size: pageSize}), sourceCatalogApi.categories()])
+   if (current === loadGeneration) {
+     items.value = r.items
+     total.value = r.total
+     categories.value = facets.items
+     loadFailed.value = false
+   }
+ } catch (error) {
+   if (current === loadGeneration) loadFailed.value = true
+   throw error
+ }
  finally {if (current === loadGeneration) loading.value = false}
 }
-onMounted(() => { void load().catch(() => {}); void connectorApi.templates().then(r => { templates.value = r.items }).catch(() => {}) })
-const selected = ref<SourceDefinition>(), identityOpen = ref(false), testText = ref(''), testOK = ref(false)
-const testDiagnostic = ref<ConnectionDiagnostic>()
+function refreshCatalog() { void load().catch(() => {}) }
+onMounted(() => { refreshCatalog(); void connectorApi.templates().then(r => { templates.value = r.items }).catch(() => {}) })
+const selected = ref<SourceDefinition>(), identityOpen = ref(false)
+const identityCheck = ref<TestResult>()
+const identityCheckError = ref('')
+const testingIdentity = ref(false)
+let identityRequest: AbortController | undefined
 const emptyIdentity = (): PersonalIdentity => ({ name: '', username: '', password: '', confirmed: false })
 const identity = reactive(emptyIdentity())
 const identityReady = computed(() => identity.confirmed && !!identity.name.trim() && !!selected.value && (selected.value.config.type === 'redis' || !!identity.username.trim() && !!identity.password))
-watch(() => JSON.stringify(identity), () => { testText.value = ''; testDiagnostic.value = undefined })
-function clearIdentity() { Object.assign(identity, emptyIdentity()); selected.value = undefined; testText.value = ''; testDiagnostic.value = undefined }
+function clearIdentityCheck() {
+  identityRequest?.abort()
+  identityRequest = undefined
+  testingIdentity.value = false
+  identityCheck.value = undefined
+  identityCheckError.value = ''
+}
+watch(() => JSON.stringify(identity), clearIdentityCheck, { flush: 'sync' })
+watch(identityOpen, open => { if (!open) clearIdentityCheck() }, { flush: 'sync' })
+function clearIdentity() { Object.assign(identity, emptyIdentity()); selected.value = undefined; clearIdentityCheck() }
 function openIdentity(d: SourceDefinition) { clearIdentity(); selected.value = d; identity.name = d.name; identityOpen.value = true }
 function openConnection(d: SourceDefinition) { if (d.my_connection_id) void router.push({ path: '/query', query: { connection: String(d.my_connection_id) } }) }
 async function testIdentity() {
-  if (!selected.value || busy.value) return
-  busy.value = true; testDiagnostic.value = undefined; const snapshot = JSON.stringify(identity), id = selected.value.id
-  try { const result = await sourceCatalogApi.test(id, { ...identity }); if (snapshot === JSON.stringify(identity) && selected.value?.id === id && identityOpen.value) { testOK.value = result.ok; testText.value = result.ok ? '个人连接测试成功' : result.error || '测试失败' } }
-  catch (error) { if (snapshot === JSON.stringify(identity) && selected.value?.id === id && identityOpen.value) { const result = error instanceof ApiRequestError ? error.data as TestResult | undefined : undefined; testOK.value = false; testText.value = result?.error || '个人连接测试失败，请检查账号、密码和目标地址'; testDiagnostic.value = result?.diagnostic } }
-  finally { busy.value = false }
+  if (!selected.value || busy.value || testingIdentity.value) return
+  clearIdentityCheck()
+  const current = new AbortController()
+  identityRequest = current
+  testingIdentity.value = true
+  try {
+    const result = await sourceCatalogApi.test(selected.value.id, { ...identity }, { signal: current.signal, silentError: true })
+    if (!current.signal.aborted) identityCheck.value = result
+  } catch (error) {
+    if (!current.signal.aborted) {
+      const result = error instanceof ApiRequestError ? error.data as TestResult | undefined : undefined
+      if (result?.ok === false) identityCheck.value = result
+      else identityCheckError.value = error instanceof ApiRequestError ? error.message : '未能取得连接检查回执，请稍后手动测试。'
+    }
+  } finally {
+    if (!current.signal.aborted) {
+      identityRequest = undefined
+      testingIdentity.value = false
+    }
+  }
 }
 async function saveIdentity() {
-  if (!selected.value || busy.value) return
+  if (!selected.value || busy.value || testingIdentity.value) return
   busy.value = true
   try { const d = selected.value; if (d.my_connection_id) await sourceCatalogApi.upgrade(d.my_connection_id, d.id, { ...identity }); else await sourceCatalogApi.add(d.id, { ...identity }); identityOpen.value = false; await load(); ElMessage.success('我的连接已保存'); emit('added') }
   catch { /* API displays the failure */ } finally { busy.value = false }
@@ -146,6 +117,109 @@ async function saveRevision() {
   catch { /* API displays the failure */ } finally { busy.value = false }
 }
 </script>
+
+<template>
+  <section class="space-y-4" aria-label="数据源目录">
+    <p class="text-sm text-muted">目录共享连接目标。添加到我的连接后，使用你自己的数据库账号操作。</p>
+    <div class="flex flex-wrap gap-3">
+      <button class="liquid-button ui-control-target" @click="openDefinition">新建数据源定义</button>
+      <button class="ghost-button ui-control-target" :disabled="loading" @click="refreshCatalog">刷新</button>
+    </div>
+    <div class="ui-filter-bar max-w-3xl" role="search" aria-label="数据源目录筛选">
+      <div class="ui-filter-field ui-filter-search">
+        <label :for="`${filterId}-keyword`" class="text-sm text-muted">搜索数据源目录</label>
+        <input :id="`${filterId}-keyword`" v-model="keyword" class="glass-input" placeholder="搜索名称、主机或数据库" />
+      </div>
+      <div class="ui-filter-field">
+        <label :for="`${filterId}-view`" class="text-sm text-muted">目录视图</label>
+        <el-select :id="`${filterId}-view`" v-model="view">
+          <el-option label="全部可见" value="all" />
+          <el-option label="我的收藏" value="favorites" />
+          <el-option label="最近使用" value="recent" />
+        </el-select>
+      </div>
+      <div class="ui-filter-field">
+        <label :for="`${filterId}-category`" class="text-sm text-muted">目录分组</label>
+        <el-select :id="`${filterId}-category`" v-model="category" :empty-values="[null, undefined]">
+          <el-option label="全部分组" value="" />
+          <el-option v-for="c in categories" :key="c" :value="c" :label="c" />
+        </el-select>
+      </div>
+    </div>
+    <div class="min-h-32" :aria-busy="loading">
+      <LoadingState v-if="loading" label="正在读取数据源目录…" />
+      <div v-else-if="!loadFailed && filtered.length" class="editorial-directory">
+        <article v-for="d in filtered" :key="d.id" class="glass-card space-y-3 ui-card-padding">
+          <div class="flex justify-between items-start gap-2"><h2 class="font-medium break-words">{{ d.name }}</h2><span class="text-xs text-muted shrink-0">{{ d.visibility === 'global' ? (d.access_mode === 'restricted' ? '指定范围' : '空间共享') : '个人' }} · 修订 {{ d.revision }}</span></div>
+          <p class="text-xs text-muted break-all">{{ endpoint(d) }}</p>
+          <p class="text-xs text-muted">{{ d.config.type === 'jdbc' ? '自定义 JDBC' : d.config.type }} · {{ d.config.environment || 'dev' }}</p>
+          <p v-if="d.description" class="text-sm text-muted break-words">{{ d.description }}</p>
+          <div v-if="d.category || d.tags?.length" class="flex flex-wrap gap-2 text-xs text-accent"><span v-if="d.category">{{ d.category }}</span><span v-for="tag in d.tags" :key="tag" class="rounded bg-surface-muted px-2">{{ tag }}</span></div>
+          <p v-if="d.maintainer || d.contact" class="text-xs text-muted break-words">负责人：{{ d.maintainer || '待填写' }}<span v-if="d.contact"> · {{ d.contact }}</span></p>
+          <p v-if="d.last_used_at && view === 'recent'" class="text-xs text-subtle">最近连接：{{ new Date(d.last_used_at).toLocaleString() }}</p>
+          <p v-if="!d.enabled" class="text-xs text-warning">此修订已停用</p>
+          <p v-else-if="d.my_connection_id && d.my_revision_id !== d.id" class="text-xs text-warning">有新修订，现有连接仍使用你已确认的目标。</p>
+          <div class="flex flex-wrap gap-2">
+            <button v-if="canBind && !d.my_connection_id" class="liquid-button text-xs ui-control-target" :disabled="!d.enabled" @click="openIdentity(d)">添加到我的连接</button>
+            <button v-else-if="canBind && d.my_revision_id !== d.id" class="liquid-button text-xs ui-control-target" :disabled="!d.enabled" @click="openIdentity(d)">查看并切换修订</button>
+            <button v-else-if="canUse" class="ghost-button text-xs ui-control-target" :disabled="!d.enabled" @click="openConnection(d)">打开我的连接</button>
+            <button class="ghost-button text-xs ui-control-target" @click="openHistory(d)">修订记录</button>
+            <button v-if="canBind" class="ghost-button text-xs ui-control-target" :aria-label="`收藏 ${d.name}`" :aria-pressed="d.favorite" :disabled="favoriteBusy.has(d.id)" @click="toggleFavorite(d)">{{ d.favorite ? '★ 已收藏' : '☆ 收藏' }}</button>
+            <el-dropdown v-if="canManage(d)" trigger="click"><button class="ghost-button text-xs ui-control-target" :aria-label="`管理 ${d.name}`">管理</button><template #dropdown><el-dropdown-menu><el-dropdown-item @click="openRevision(d)">新修订</el-dropdown-item><el-dropdown-item @click="manageSource = d; manageOpen = true">资料与发布范围</el-dropdown-item></el-dropdown-menu></template></el-dropdown>
+          </div>
+        </article>
+      </div>
+      <PageState v-else-if="!loading && loadFailed" title="无法读取数据源目录" description="请重试，或稍后刷新目录。" tone="danger">
+        <template #actions><button class="ghost-button ui-control-target" @click="refreshCatalog">重试</button></template>
+      </PageState>
+      <PageState v-else-if="!loading && hasFilters" title="没有匹配的数据源" description="请调整搜索词、目录视图或分组后再试。" />
+      <PageState v-else-if="!loading" title="暂无可见的数据源定义" description="你可以新建个人数据源，或等待管理员发布。" />
+    </div>
+    <div v-if="!loadFailed && total > 0" class="flex flex-wrap items-center justify-between gap-3 text-xs text-muted"><span>共 {{ total }} 个数据源</span><div class="flex gap-3"><button class="ghost-button text-xs ui-control-target" :disabled="page <= 1 || loading" @click="page--">上一页</button><span class="self-center">第 {{ page }} 页</span><button class="ghost-button text-xs ui-control-target" :disabled="page * pageSize >= total || loading" @click="page++">下一页</button></div></div>
+    <SourceManageDialog v-model="manageOpen" :source="manageSource" @changed="load" />
+    <SourceRevisionDialog v-model="historyOpen" :source="historySource" @changed="load" />
+
+    <el-dialog v-model="identityOpen" :title="selected?.my_connection_id ? '确认新修订与个人身份' : '添加到我的连接'" width="min(92vw, 560px)" :close-on-click-modal="false" class="glass-dialog" @closed="clearIdentity">
+      <div v-if="selected" class="space-y-4">
+        <div class="rounded-xl bg-surface-muted p-4 space-y-2"><p>{{ selected.name }} · 修订 {{ selected.revision }}</p><p class="text-xs text-muted break-all">{{ endpoint(selected) }}</p><p class="text-xs text-muted">TLS：{{ selected.config.ssl_mode }}。请核实目标后填写自己的数据库账号。</p><p v-if="selected.my_connection_id" class="text-xs text-warning">保存后将切换此个人连接的修订，并清理此前采集的结构。请重新输入密码。</p></div>
+        <el-form label-position="top">
+          <el-form-item label="我的连接名称"><el-input v-model="identity.name" maxlength="100" /></el-form-item>
+          <el-form-item label="我的数据库账号"><el-input v-model="identity.username" autocomplete="off" aria-label="我的数据库账号" /></el-form-item>
+          <el-form-item label="我的数据库密码"><el-input v-model="identity.password" type="password" show-password autocomplete="new-password" aria-label="我的数据库密码" /></el-form-item>
+        </el-form>
+        <el-checkbox v-model="identity.confirmed" class="identity-confirm" aria-label="确认连接目标">我已确认地址、数据库和修订，使用自己的数据库账号</el-checkbox>
+        <p v-if="identityCheck?.ok" role="status" class="text-sm text-success">个人连接测试成功</p>
+        <ConnectionDiagnosis :result="identityCheck" :error="identityCheckError" />
+      </div>
+      <template #footer><div class="flex flex-wrap justify-between gap-2"><button class="ghost-button ui-control-target" :disabled="busy || testingIdentity || !identityReady" @click="testIdentity">{{ testingIdentity ? '测试中…' : '测试我的连接' }}</button><button class="liquid-button ui-control-target" :disabled="busy || testingIdentity || !identityReady" @click="saveIdentity">{{ selected?.my_connection_id ? '确认并切换' : '保存我的连接' }}</button></div></template>
+    </el-dialog>
+
+    <el-dialog v-model="revisionOpen" :title="revisionId ? '发布数据源新修订' : '新建数据源定义'" width="min(92vw, 620px)" :close-on-click-modal="false" class="glass-dialog source-definition-dialog">
+      <p class="text-xs text-muted mb-4">只发布连接目标。现有使用者确认新修订后才会切换，个人账号密码不会随定义发布。</p>
+      <el-form label-position="top">
+        <el-form-item label="数据源名称"><el-input v-model="revision.name" maxlength="100" /></el-form-item>
+        <el-form-item label="说明"><el-input v-model="revision.description" type="textarea" maxlength="1000" /></el-form-item>
+        <el-form-item label="可见范围"><el-select v-model="revision.visibility" class="w-full"><el-option label="仅自己" value="private" /><el-option v-if="isAdmin" label="工作空间共享" value="global" /></el-select></el-form-item>
+        <el-form-item v-if="revision.visibility === 'global' && !revisionId" label="初始发布范围"><el-select v-model="revision.access_mode" class="w-full" aria-label="初始发布范围"><el-option label="全体用户" value="global" /><el-option label="指定用户或用户组（保存后设置）" value="restricted" /></el-select></el-form-item>
+        <el-form-item label="类型"><el-select v-model="revision.config.type" class="w-full" @change="resetType"><el-option label="PostgreSQL" value="postgres" /><el-option label="MySQL" value="mysql" /><el-option label="Redis" value="redis" /><el-option label="自定义 JDBC" value="jdbc" /></el-select></el-form-item>
+        <template v-if="revision.config.type === 'jdbc'">
+          <el-form-item label="驱动连接规则"><el-select v-model="revision.config.template_revision_id" class="w-full" @change="resetFields"><el-option v-for="t in eligibleTemplates" :key="t.id" :value="t.id" :label="`${t.name} · 修订 ${t.revision}`" /></el-select></el-form-item>
+          <el-form-item v-for="f in revisionTemplate?.fields || []" :key="f.name" :label="f.label"><el-input v-model="revisionParameters[f.name]" :type="f.type === 'integer' ? 'number' : 'text'" /></el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="主机"><el-input v-model="revision.config.host" /></el-form-item>
+          <el-form-item label="端口"><el-input v-model.number="revision.config.port" type="number" /></el-form-item>
+          <el-form-item label="数据库"><el-input v-model="revision.config.database" /></el-form-item>
+        </template>
+        <el-form-item label="TLS"><el-select v-model="revision.config.ssl_mode" class="w-full"><el-option label="验证服务器证书" value="verify-full" /><el-option label="禁用" value="disable" /></el-select></el-form-item>
+        <el-form-item label="环境"><el-select v-model="revision.config.environment" class="w-full"><el-option label="开发" value="dev" /><el-option label="测试" value="test" /><el-option label="生产" value="prod" /></el-select></el-form-item>
+      </el-form>
+      <template #footer><button class="liquid-button ui-control-target" :disabled="busy || !revision.name.trim()" @click="saveRevision">{{ revisionId ? '发布新修订' : '保存数据源定义' }}</button></template>
+    </el-dialog>
+  </section>
+</template>
+
+
 
 <style scoped>
 :global(.source-definition-dialog) {max-height: calc(100dvh - 32px); display: flex; flex-direction: column; margin-top: 16px !important;}

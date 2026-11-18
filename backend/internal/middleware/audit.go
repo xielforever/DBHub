@@ -200,6 +200,40 @@ func classify(method, path string) (action, resource, name string) {
 	resource, name = strings.ToUpper(firstOr(parts, 0)), firstOr(parts, 1)
 	last := firstOr(parts, len(parts)-1)
 	switch {
+	case len(parts) == 5 && parts[0] == "business-identities" && parts[2] == "datasets" && last == "output-plan":
+		return "BUSINESS_OUTPUT_PLAN", "BUSINESS_OUTPUT_PLAN", name + "/" + parts[3]
+	case len(parts) == 3 && parts[0] == "business-datasets" && last == "output-policy":
+		return "BUSINESS_OUTPUT_POLICY_" + strings.ToUpper(method), "BUSINESS_OUTPUT_POLICY", name
+	case len(parts) == 3 && parts[0] == "business-datasets" && last == "reveal-requests":
+		return "BUSINESS_REVEAL_REQUEST", "BUSINESS_REVEAL", name
+	case len(parts) == 3 && parts[0] == "business-reveal-requests":
+		return "BUSINESS_REVEAL_" + strings.ToUpper(last), "BUSINESS_REVEAL", name
+	case len(parts) == 5 && parts[0] == "business-identities" && parts[2] == "datasets" && last == "row-column-plan":
+		return "BUSINESS_ROW_COLUMN_PLAN", "BUSINESS_ROW_COLUMN_PLAN", name + "/" + parts[3]
+	case len(parts) == 3 && parts[0] == "business-datasets" && last == "row-column-policy":
+		return "BUSINESS_ROW_COLUMN_POLICY_" + strings.ToUpper(method), "BUSINESS_ROW_COLUMN_POLICY", name
+	case len(parts) == 5 && parts[0] == "business-identities" && parts[2] == "datasets" && last == "organization-scope":
+		return "BUSINESS_ORGANIZATION_SCOPE_" + strings.ToUpper(method), "BUSINESS_ORGANIZATION_SCOPE", name + "/" + parts[3]
+	case parts[0] == "business-identities":
+		return "BUSINESS_IDENTITY_" + strings.ToUpper(method), "BUSINESS_IDENTITY", name
+	case parts[0] == "business-datasets":
+		return "BUSINESS_DATASET_" + strings.ToUpper(method), "BUSINESS_DATASET", name
+	case parts[0] == "business-operations":
+		return "BUSINESS_OPERATION_" + strings.ToUpper(method) + "_" + strings.ToUpper(last), "BUSINESS_OPERATION", name
+	case parts[0] == "report-subscriptions" && method != http.MethodGet:
+		return "REPORT_SUBSCRIPTION_MANAGE", "REPORT_SUBSCRIPTION", name
+	case parts[0] == "report-deliveries" && method == http.MethodGet && len(parts) > 1:
+		return "REPORT_SUBSCRIPTION_VIEW", "REPORT_SUBSCRIPTION", name
+	case parts[0] == "metric-incidents":
+		return "METRIC_INCIDENT_" + strings.ToUpper(method), "METRIC_INCIDENT", name
+	case parts[0] == "published-reports" && last == "exports" && method == http.MethodPost:
+		return "REPORT_EXPORT_CREATE", "REPORT_EXPORT", name
+	case parts[0] == "report-exports" && last == "download" && method == http.MethodGet:
+		return "REPORT_EXPORT_DOWNLOAD", "REPORT_EXPORT", name
+	case parts[0] == "report-exports" && last == "preview" && method == http.MethodGet:
+		return "REPORT_EXPORT_PREVIEW", "REPORT_EXPORT", name
+	case parts[0] == "report-exports" && method == http.MethodPost:
+		return "REPORT_EXPORT_REVIEW", "REPORT_EXPORT", name
 	case parts[0] == "source-tasks" && method != http.MethodGet && method != http.MethodHead:
 		return "SOURCE_TASK_" + strings.ToUpper(last), "SOURCE_TASK", name
 	case parts[0] == "source-schedules" && method != http.MethodGet && method != http.MethodHead:
@@ -229,6 +263,10 @@ func classify(method, path string) (action, resource, name string) {
 		return "REPORT_VERSION_VIEW", "REPORT", name
 	case parts[0] == "published-reports" && last == "execute" && method == http.MethodPost:
 		return "REPORT_PUBLISHED_EXECUTE", "REPORT", name
+	case parts[0] == "published-reports" && last == "policy-verification" && method == http.MethodPost:
+		return "REPORT_POLICY_VERIFICATION", "REPORT", name
+	case parts[0] == "report-reviews" && last == "data-review":
+		return "REPORT_DATA_REVIEW_" + strings.ToUpper(method), "REPORT", name
 	case parts[0] == "report-reviews" && method == http.MethodPost:
 		if last == "validate" {
 			return "REPORT_REVIEW_VALIDATE", "REPORT", name
@@ -262,6 +300,12 @@ func classify(method, path string) (action, resource, name string) {
 		return "LOGOUT", "AUTH", ""
 	case body == "auth/change-password":
 		return "CHANGE_PASSWORD", "AUTH", ""
+	case strings.HasPrefix(body, "auth/mfa/") && method == http.MethodPost:
+		return "MFA_" + strings.ToUpper(last), "AUTH", ""
+	case strings.HasPrefix(body, "auth/sso/"):
+		return "SSO_" + strings.ToUpper(last), "AUTH", ""
+	case body == "platform/sso-bindings" && method == http.MethodPost:
+		return "SSO_BINDING_SAVE", "AUTH", ""
 	case body == "query/transaction/begin":
 		return "TRANSACTION_BEGIN", "TRANSACTION", ""
 	case body == "query/transaction/commit":

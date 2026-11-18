@@ -53,8 +53,11 @@ func TestQueryMetricsRealHTTP(t *testing.T) {
 	a.call("POST", "/query/execute", a.admin, body, 409)
 	a.call("POST", "/query/execute", a.admin, map[string]any{"request_id": id, "connection_id": a.connID, "sql": "SELECT 2"}, 409)
 	a.exec(a.admin, "SELECT FROM", 400)
-	a.exec(a.admin, "SELECT nonexistent_metrics_column FROM "+a.table, 400)
-	a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": a.connID, "sql": "SELECT pg_sleep(3)", "timeout_ms": 1000}, 400)
+	failed := a.exec(a.admin, "SELECT nonexistent_metrics_column FROM "+a.table, 400)
+	timedOut := a.call("POST", "/query/execute", a.admin, map[string]any{"connection_id": a.connID, "sql": "SELECT pg_sleep(3)", "timeout_ms": 1000}, 400)
+	if failed["cancellation_confirmed"] != nil || timedOut["cancellation_confirmed"] != nil {
+		t.Fatal("statement error or timeout was incorrectly classified as cancellation")
+	}
 	after := drain()
 	for outcome, delta := range map[string]uint64{"succeeded": 1, "duplicate": 1, "conflict": 1, "rejected": 1, "failed": 1, "unknown": 1} {
 		if after.Requests.Completed[outcome].Count-before.Requests.Completed[outcome].Count != delta {
@@ -80,29 +83,41 @@ func TestQueryMetricsRealHTTP(t *testing.T) {
 		}
 	}
 
-	// 真实 HTTP 取消应产生取消原因，不能混入超时计数。
-	cancelCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan executionResponse, 1)
-	go func() {
-		done <- executionRequestContext(cancelCtx, client, a.server.URL, "POST", "/query/execute", a.admin, map[string]any{"request_id": testRequestID(), "connection_id": a.connID, "sql": "SELECT pg_sleep(10)"})
-	}()
-	deadline := time.Now().Add(2 * time.Second)
-	for read().Executions.InFlight == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("cancel probe did not start")
+	// 只读请求可确认取消，允许写入的请求仍按未知结果处理。
+	for _, probe := range []struct {
+		token, status string
+		confirmed     bool
+	}{{a.admin, "unknown", false}, {a.readonly, "failed", true}} {
+		cancelCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		cancelID := testRequestID()
+		done := make(chan executionResponse, 1)
+		go func() {
+			done <- executionRequestContext(cancelCtx, client, a.server.URL, "POST", "/query/execute", probe.token, map[string]any{"request_id": cancelID, "connection_id": a.connectionFor(probe.token), "sql": "SELECT pg_sleep(10)"})
+		}()
+		deadline := time.Now().Add(2 * time.Second)
+		for read().Executions.InFlight == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("cancel probe did not start")
+			}
+			time.Sleep(5 * time.Millisecond)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("HTTP cancel did not return")
-	}
-	canceled := drain()
-	if canceled.Counters.Canceled-after.Counters.Canceled != 1 || canceled.Counters.Timeouts != after.Counters.Timeouts {
-		t.Fatal("cancellation reason was lost")
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("HTTP cancel did not return")
+		}
+		canceled := drain()
+		if canceled.Counters.Canceled-after.Counters.Canceled != 1 || canceled.Counters.Timeouts != after.Counters.Timeouts {
+			t.Fatal("cancellation reason was lost")
+		}
+		after = canceled
+		canceledReceipt := a.call("GET", "/query/executions/"+cancelID, probe.token, nil, 200)
+		confirmed, _ := canceledReceipt["cancellation_confirmed"].(bool)
+		if canceledReceipt["status"] != probe.status || confirmed != probe.confirmed {
+			t.Fatal("unexpected cancellation outcome on the original execution receipt", canceledReceipt)
+		}
 	}
 
 	// 只保留聚合状态；过期 running 展示为 unknown，24 小时之外不纳入该窗口。

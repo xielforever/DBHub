@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,11 @@ func TestSecurityUpgradePreservesHistoryAndInvalidatesUnsafeApprovals(t *testing
 	exec(`INSERT INTO sys_export_requests(user_id,connection_id,format,row_count,reason,payload,status,reviewed_by)
  VALUES(1,1,'json',1,'self','{}','approved',1),(1,1,'json',1,'independent','{}','approved',2)`)
 	applied, err := Migrate(ctx, pool)
-	if err != nil || len(applied) != 1 || applied[0] != "0037_security_execution_boundaries.sql" {
+	// The old assertion predated the 0038–0046 baseline additions. Keep an
+	// independent explicit list; all historical approval checks below remain.
+	expected := []string{"0037_security_execution_boundaries.sql", "0038_report_parameters.sql", "0039_dashboard_filter_values.sql", "0040_report_exports.sql", "0041_report_chart_types.sql", "0042_workspace_capabilities.sql", "0043_identity_security.sql", "0044_external_identity_revocation.sql", "0045_report_subscriptions.sql", "0046_business_operations.sql", "0047_iam_foundation.sql", "0048_iam_runtime_bridge.sql", "0049_iam_governance.sql", "0050_iam_execution_versions.sql", "0051_iam_shadow.sql", "0052_iam_worker_qualification.sql", "0053_iam_legacy_mutation_barrier.sql", "0054_iam_restriction_settlement.sql", "0055_iam_current_action_lookup.sql", "0056_iam_identity_lookup.sql", "0057_iam_dependency_filter.sql", "0058_iam_private_identity.sql", "0059_iam_task_version_guard.sql", "0060_iam_reuse_checked_plans.sql", "0061_iam_task_retry_guard.sql", "0062_iam_disabled_future_actions.sql", "0063_iam_workspace_read_plans.sql", "0064_iam_binding_read_plan.sql", "0065_iam_action_release_approval.sql", "0066_iam_current_read_plans.sql", "0067_iam_single_statement_binding.sql", "0068_iam_exact_governance_denials.sql", "0069_iam_inbox_read_plan.sql", "0070_iam_connection_visibility_plan.sql", "0071_iam_admission_read_plan.sql", "0072_iam_target_current_plan.sql", "0073_iam_identity_directory_join.sql", "0074_iam_generic_read_plans.sql", "0075_iam_direct_binding_context.sql", "0076_iam_restricted_runtime_fence.sql", "0077_iam_parameterized_connection_plans.sql"}
+	expected = append(expected, "0078_iam_relational_navigation.sql", "0079_iam_navigation_read_plan.sql", "0080_iam_compact_navigation_read.sql", "0081_iam_navigation_directory_plan.sql", "0082_query_execution_cancellation.sql", "0083_business_identity_datasets.sql", "0084_business_organization_scopes.sql", "0085_business_row_column_policies.sql", "0086_business_output_policies.sql", "0087_isolated_business_reports.sql", "0088_isolated_report_reviews.sql", "0089_isolated_dashboard_reviews.sql", "0090_isolated_content_availability.sql", "0091_isolated_content_custody.sql", "0092_isolated_custody_rejoins.sql", "0093_isolated_formal_exports.sql", "0094_isolated_subscription_reviews.sql", "0095_isolated_recipient_delivery.sql", "0096_delivery_retention_schedule.sql", "0097_dashboard_delivery.sql")
+	if err != nil || !slices.Equal(applied, expected) {
 		t.Fatal("security upgrade failed", applied, err)
 	}
 	var records, invalidated, historical int

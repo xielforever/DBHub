@@ -82,8 +82,17 @@ func TestIntegrationRealSQLAndTransactions(t *testing.T) {
 				t.Fatal("write count must come from database")
 			}
 			values, e := ExecuteWithOptions(ctx, r, "SELECT id,note FROM dbhub_probe ORDER BY id", false, ExecuteOptions{MaxRows: 1})
-			if e != nil || len(values.Rows) != 1 || !values.Truncated || str(values.Rows[0][1]) != "alpha" {
+			if e != nil || len(values.Rows) != 1 || !values.Truncated || str(values.Rows[0][1]) != "alpha" || values.AffectedRows != 0 {
 				t.Fatalf("actual row/limit failed: %v", e)
+			}
+			if dialect == "postgres" {
+				returning, err := ExecuteWithOptions(ctx, r, "UPDATE dbhub_probe SET note=note WHERE id IN (1,2) RETURNING id", false, ExecuteOptions{MaxRows: 1})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if returning.Kind != "query" || len(returning.Rows) != 1 || !returning.Truncated || returning.AffectedRows != 2 {
+					t.Fatalf("expected one visible result row and two affected rows, got %+v", returning)
+				}
 			}
 			if _, e = Execute(ctx, r, "SELECT missing_column FROM dbhub_probe", false); e == nil {
 				t.Fatal("invalid SQL returned fabricated success")

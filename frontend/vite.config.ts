@@ -10,10 +10,14 @@ export default defineConfig(({ mode }) => {
   const port = Number(env.VITE_PORT) || 5173
 
   return {
+    cacheDir: env.VITE_CACHE_DIR || 'node_modules/.vite',
     plugins: [vue(), tailwindcss()],
     server: {
       host: true,
       port,
+      // Windows sources mounted through WSL do not reliably emit inotify events.
+      // Explicit polling keeps served modules consistent with the current files.
+      watch: env.VITE_USE_POLLING === 'true' ? { usePolling: true, interval: 500 } : undefined,
       // 容器/沙箱预览环境会通过任意主机名反代访问，开发环境放行全部主机
       allowedHosts: true,
       proxy: {

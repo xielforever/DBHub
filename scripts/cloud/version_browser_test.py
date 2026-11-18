@@ -55,7 +55,7 @@ try:
         with page.expect_response(lambda r:r.url.endswith('/auth/login')) as login:
             page.locator('button[type=submit]').click()
         browser_token = login.value.json()['data']['access_token']
-        page.wait_for_url('**/dashboard')
+        page.wait_for_url('**/home')
         page.goto(frontend+'/connections',wait_until='networkidle')
         for item in created:
             card = page.locator('article').filter(has=page.get_by_role('heading',name=item['name'],exact=True))

@@ -1,0 +1,2891 @@
+{
+  "version": "DBH-UX-IAM-D1.0",
+  "routes": [
+    {
+      "pattern": "/",
+      "scope": "public",
+      "any": [],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/connections/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/connector-drivers/{id}",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/dashboards/{id}",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/datasource-templates/{id}",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/proxies/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/query/history",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/query/history/{id}",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/query/policies/{id}",
+      "scope": "workspace",
+      "any": [
+        "source.policy.map"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/query/shares/{id}",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/redis/hash/field",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/redis/key",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/redis/set/member",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/redis/zset/member",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/reports/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/shares/{id}",
+      "scope": "blocked",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/snippets/{id}",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/ssh-tunnels/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/user-groups/{id}",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "DELETE /api/v1/users/{id}",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/health",
+      "scope": "public",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/ready",
+      "scope": "public",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/access-requests",
+      "scope": "workspace",
+      "any": [
+        "task.page",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/ai/status",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/assets/lineage",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/assets/overview",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/assets/search",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/assets/table",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/assets/tables",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/assets/tree",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/audience-groups",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "dashboard.design",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/audit-logs",
+      "scope": "workspace",
+      "any": [
+        "audit.page"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/audit-logs/delivery",
+      "scope": "workspace",
+      "any": [
+        "audit.page"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/auth/me",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/auth/mfa",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/auth/sso",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/auth/sso/callback",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/auth/sso/start",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-datasets/{key}",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-datasets/{key}/output-policy",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-datasets/{key}/row-column-policy",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-identities/{user}",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-identities/{user}/datasets/{key}/organization-scope",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-operations/accounts",
+      "scope": "workspace",
+      "any": [
+        "operation.account.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-operations/requests",
+      "scope": "workspace",
+      "any": [
+        "operation.page",
+        "operation.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-operations/requests/{id}",
+      "scope": "workspace",
+      "any": [
+        "operation.page",
+        "operation.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/business-operations/templates",
+      "scope": "workspace",
+      "any": [
+        "operation.page",
+        "operation.template.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/connections",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/connections/compatibility",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/connections/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/connections/{id}/capabilities",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/connector-drivers",
+      "scope": "workspace",
+      "any": [
+        "connection.manage",
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/connector-drivers/available",
+      "scope": "workspace",
+      "any": [
+        "connection.manage",
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-refreshes/{refresh}/tiles/{tile}/receipt",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view",
+        "dashboard.design",
+        "dashboard.review"
+      ],
+      "selector": "dashboard_receipt_mode",
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-report-catalog",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-reviews/{id}/data-review",
+      "scope": "workspace",
+      "any": ["dashboard.page"],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-reviews/{id}/summary",
+      "scope": "workspace",
+      "any": [
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboards",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboards/{id}",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/data/preview",
+      "scope": "workspace",
+      "any": [
+        "catalog.preview"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/datasource-definitions",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/datasource-definitions/categories",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/datasource-definitions/{id}/access",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/datasource-definitions/{id}/revisions",
+      "scope": "workspace",
+      "any": [
+        "connection.page",
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/datasource-templates",
+      "scope": "workspace",
+      "any": [
+        "connection.manage",
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam-command-status",
+      "scope": "identity",
+      "any": [],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam-command-status/{workspace}/{request}",
+      "scope": "identity",
+      "any": [],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam-recovery",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/assignable-roles",
+      "scope": "workspace",
+      "any": [
+        "space.assign.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/assignment-targets",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/assignments",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/bundles",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/catalog",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/custody-items",
+      "scope": "workspace",
+      "any": ["space.members.view"],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/custody-nominations",
+      "scope": "workspace",
+      "any": [],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/custody",
+      "scope": "workspace",
+      "any": [
+        "space.members.view",
+        "space.menus.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/delegations",
+      "scope": "workspace",
+      "any": [
+        "space.roles.manage",
+        "space.assign.manage",
+        "space.members.manage",
+        "space.policy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/effective",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/foundation",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/groups",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/members",
+      "scope": "workspace",
+      "any": [
+        "space.members.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/menus",
+      "scope": "workspace",
+      "any": [
+        "space.menus.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/migration",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/migration/bridge",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/own-proposals",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/policy",
+      "scope": "workspace",
+      "any": [
+        "space.policy.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/proposals",
+      "scope": "workspace",
+      "any": [
+        "space.roles.manage",
+        "space.assign.manage",
+        "space.members.manage",
+        "space.policy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/resources",
+      "scope": "workspace",
+      "any": [
+        "space.resources.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/roles",
+      "scope": "workspace",
+      "any": [
+        "space.roles.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/routes",
+      "scope": "workspace",
+      "any": [
+        "space.members.view",
+        "space.menus.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/inbox",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/inbox/delivery/{id}",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/inbox/todos",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-dashboards",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design",
+        "dashboard.review",
+        "dashboard.publish",
+        "dashboard.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-dashboards/{id}",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design",
+        "dashboard.review",
+        "dashboard.publish",
+        "dashboard.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-dashboards/{id}/current-audience",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design",
+        "dashboard.review",
+        "dashboard.publish",
+        "dashboard.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-dashboards/{id}/versions",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design",
+        "dashboard.review",
+        "dashboard.publish",
+        "dashboard.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports/{id}/current-audience",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports/{id}/dashboard-dependencies",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports/{id}/dashboard-impact",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports/{id}/releases",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/managed-reports/{id}/versions",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "report.review",
+        "report.publish",
+        "report.offline"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metadata/columns",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metadata/databases",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metadata/schemas",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metadata/tables",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metric-catalog",
+      "scope": "workspace",
+      "any": [
+        "report.page",
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metric-incidents",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metric-incidents/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metrics/overview",
+      "scope": "workspace",
+      "any": [
+        "source.runtime.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/metrics/query",
+      "scope": "workspace",
+      "any": [
+        "source.runtime.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/platform/audit-logs",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/platform/operations",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/platform/sso-bindings",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/platform/status",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/proxies",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/public/query-shares/{token}",
+      "scope": "public",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/public/s/{token}",
+      "scope": "public",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/published-dashboards/{id}/delivery-plans",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-delivery-plans/{id}/review",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-delivery-plans/{id}/review",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-delivery-plans/{id}/recipient-access",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-delivery-plans/{id}/runs",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-deliveries",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-deliveries/{id}",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-deliveries/{id}/credential",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-deliveries/{id}/redeem",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/dashboard-delivery-plans/{id}/alerts",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-delivery-plans/{id}/alerts/{event}/disposition",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/published-dashboards",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/published-dashboards/{id}",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/published-reports",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/published-reports/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/executions/{id}",
+      "scope": "workspace",
+      "any": [
+        "query.reconcile"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/exports",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/exports/{id}/download",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/history",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/jobs",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/policies",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/presence",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/settings",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/shares",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/query/transaction/status",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/redis/keys",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/redis/overview",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/redis/value",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-accounts",
+      "scope": "workspace",
+      "any": [
+        "source.account.manage",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-deliveries",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-deliveries/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-exports",
+      "scope": "workspace",
+      "any": [
+        "report.export",
+        "report.exportReview"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-exports/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.export",
+        "report.exportReview"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-exports/{id}/download",
+      "scope": "workspace",
+      "any": [
+        "report.export",
+        "report.exportReview"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-exports/{id}/preview",
+      "scope": "workspace",
+      "any": [
+        "report.export",
+        "report.exportReview"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-reviews/{id}/data-review",
+      "scope": "workspace",
+      "any": ["report.page"],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-team-subscriptions/{id}/periods/{period}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-team-deliveries",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-team-deliveries/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-team-subscriptions/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-team-subscriptions/{id}/review",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/report-subscriptions",
+      "scope": "workspace",
+      "any": [
+        "report.view",
+        "report.subscribe"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/reports",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/reports/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/roles",
+      "scope": "workspace",
+      "any": [
+        "space.members.view",
+        "source.definition.manage",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/shares",
+      "scope": "blocked",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/snippets",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/source-check-history",
+      "scope": "workspace",
+      "any": [
+        "connection.task.view",
+        "source.task.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/source-schedules",
+      "scope": "workspace",
+      "any": [
+        "connection.task.view",
+        "source.task.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/source-tasks",
+      "scope": "workspace",
+      "any": [
+        "connection.task.view",
+        "source.task.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/source-tasks/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.task.view",
+        "source.task.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/ssh-tunnels",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/tickets",
+      "scope": "workspace",
+      "any": [
+        "change.page"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/tickets/{id}",
+      "scope": "workspace",
+      "any": [
+        "change.page"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/user-groups",
+      "scope": "workspace",
+      "any": [
+        "space.members.view",
+        "source.definition.manage",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/users",
+      "scope": "workspace",
+      "any": [
+        "space.members.view",
+        "source.definition.manage",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/users/brief",
+      "scope": "workspace",
+      "any": [
+        "report.design",
+        "dashboard.design",
+        "report.review",
+        "dashboard.review",
+        "space.members.view",
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/workspaces",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/workspaces/{workspace}/members",
+      "scope": "workspace",
+      "any": [
+        "space.members.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/connector-drivers/{id}/status",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/datasource-definitions/{id}/status",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/datasource-templates/{id}/status",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/report-accounts/{id}",
+      "scope": "workspace",
+      "any": [
+        "source.account.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/users/{id}/status",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/workspaces/{workspace}/members/{member}",
+      "scope": "workspace",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PATCH /api/v1/workspaces/{workspace}/policy",
+      "scope": "workspace",
+      "any": [
+        "space.policy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/access-requests/{id}/assign",
+      "scope": "workspace",
+      "any": [
+        "task.page",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/access-requests/{id}/cancel",
+      "scope": "workspace",
+      "any": [
+        "task.page",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/access-requests/{id}/reject",
+      "scope": "workspace",
+      "any": [
+        "task.page",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/ai/complete",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/assets/lineage/refresh",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/assets/star",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/assets/sync",
+      "scope": "workspace",
+      "any": [
+        "catalog.metadata"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/change-password",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/login",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/logout",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/mfa/disable",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/mfa/enable",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/mfa/setup",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/mfa/verify",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/refresh",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/auth/sso/complete",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-datasets/{key}/reveal-requests",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-identities/{user}/datasets/{key}/output-plan",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-identities/{user}/datasets/{key}/row-column-plan",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-reveal-requests/{request}/approve",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-reveal-requests/{request}/revoke",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/accounts",
+      "scope": "workspace",
+      "any": [
+        "operation.account.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/previews",
+      "scope": "workspace",
+      "any": [
+        "operation.apply"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/requests",
+      "scope": "workspace",
+      "any": [
+        "operation.apply"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/requests/{id}/decision",
+      "scope": "workspace",
+      "any": [
+        "operation.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/requests/{id}/execute",
+      "scope": "workspace",
+      "any": [
+        "operation.execute"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/requests/{id}/reconcile",
+      "scope": "workspace",
+      "any": [
+        "operation.reconcile"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/requests/{id}/validate",
+      "scope": "workspace",
+      "any": [
+        "operation.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/business-operations/templates",
+      "scope": "workspace",
+      "any": [
+        "operation.template.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/connections",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/connections/test",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/connections/{id}/publish",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/connections/{id}/revision",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/connections/{id}/test",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/connector-drivers",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-refreshes/{refresh}/tiles/{tile}/execute",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view",
+        "dashboard.design",
+        "dashboard.review"
+      ],
+      "selector": "dashboard_receipt_mode",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-reviews/{id}/data-review",
+      "scope": "workspace",
+      "any": ["dashboard.page"],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-reviews/{id}/decision",
+      "scope": "workspace",
+      "any": [
+        "dashboard.review",
+        "dashboard.design"
+      ],
+      "selector": "review_decision",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-reviews/{id}/reassign",
+      "scope": "workspace",
+      "any": [
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboard-reviews/{id}/validate",
+      "scope": "workspace",
+      "any": [
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboards",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/dashboards/{id}/star",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/datasource-definitions",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/datasource-definitions/{id}/connections",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/datasource-definitions/{id}/revisions",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/datasource-templates",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam-recovery/requests",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam-recovery/verifications",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/bundles",
+      "scope": "workspace",
+      "any": [
+        "space.assign.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/bundles/rollback",
+      "scope": "workspace",
+      "any": [
+        "space.assign.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/migration/shadow",
+      "scope": "workspace",
+      "any": [
+        "space.assign.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/proposals",
+      "scope": "workspace",
+      "any": [
+        "space.roles.manage",
+        "space.assign.manage",
+        "space.members.manage",
+        "space.policy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/proposals/preview",
+      "scope": "workspace",
+      "any": [
+        "space.roles.manage",
+        "space.assign.manage",
+        "space.members.manage",
+        "space.policy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/proposals/review",
+      "scope": "workspace",
+      "any": [
+        "space.roles.manage",
+        "space.assign.manage",
+        "space.members.manage",
+        "space.policy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/custody-rejoins",
+      "scope": "workspace",
+      "any": ["space.assign.manage"],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/custody-items/{item}/handover",
+      "scope": "workspace",
+      "any": [],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/iam/restrictions",
+      "scope": "workspace",
+      "any": [
+        "space.members.exit",
+        "space.roles.manage",
+        "space.assign.manage",
+        "space.resources.revoke"
+      ],
+      "selector": "restriction_kind",
+      "known": true
+    },
+    {
+      "pattern": "GET /api/v1/iam/restrictions",
+      "scope": "workspace",
+      "any": ["space.assign.view"],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/inbox/read",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/access-requests",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/adopt-contract",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/archive",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/audience-changes",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/delete",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/availability",
+      "scope": "workspace",
+      "any": ["dashboard.page"],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/preflight",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/refreshes",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view",
+        "dashboard.design",
+        "dashboard.review"
+      ],
+      "selector": "dashboard_refresh_mode",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/releases",
+      "scope": "workspace",
+      "any": [
+        "dashboard.publish",
+        "dashboard.offline"
+      ],
+      "selector": "release_kind",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/restore",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/submit",
+      "scope": "workspace",
+      "any": [
+        "dashboard.submit"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-dashboards/{id}/transfer",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports/{id}/availability",
+      "scope": "workspace",
+      "any": ["report.page"],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports/{id}/audience-changes",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports/{id}/promote",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports/{id}/releases",
+      "scope": "workspace",
+      "any": [
+        "report.publish",
+        "report.offline"
+      ],
+      "selector": "release_kind",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports/{id}/submit",
+      "scope": "workspace",
+      "any": [
+        "report.submit"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/managed-reports/{id}/transfer",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/metric-incidents/{id}/actions",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/platform/sso-bindings",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/proxies",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/proxies/test",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/published-dashboards/{id}/access-requests",
+      "scope": "workspace",
+      "any": [
+        "dashboard.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/published-reports/{id}/execute",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/published-reports/{id}/exports",
+      "scope": "workspace",
+      "any": [
+        "report.export"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/published-reports/{id}/policy-verification",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "all": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/execute",
+      "scope": "workspace",
+      "any": [
+        "query.read",
+        "query.write"
+      ],
+      "selector": "query_execution",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/exports",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/exports/{id}/review",
+      "scope": "workspace",
+      "any": [
+        "source.account.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/jobs/{id}/cancel",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/presence",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/shares",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/transaction/begin",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/transaction/commit",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/query/transaction/rollback",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/redis/key",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/redis/list/pop",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/redis/list/push",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/redis/set/member",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/redis/zset/member",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-accounts",
+      "scope": "workspace",
+      "any": [
+        "source.account.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-accounts/{id}/test",
+      "scope": "workspace",
+      "any": [
+        "source.account.manage",
+        "report.review",
+        "dashboard.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-exports/{id}/credential",
+      "scope": "workspace",
+      "any": [
+        "report.export"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-exports/{id}/redeem",
+      "scope": "workspace",
+      "any": [
+        "report.export"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-exports/{id}/review",
+      "scope": "workspace",
+      "any": [
+        "report.exportReview"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-reviews/{id}/data-review",
+      "scope": "workspace",
+      "any": ["report.page"],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-reviews/{id}/decision",
+      "scope": "workspace",
+      "any": [
+        "report.review",
+        "report.design"
+      ],
+      "selector": "review_decision",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-reviews/{id}/validate",
+      "scope": "workspace",
+      "any": [
+        "report.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-team-subscriptions/{id}/recipient-access",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-team-subscriptions/{id}/periods",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-team-subscriptions",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-team-subscriptions/{id}/review",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-subscriptions",
+      "scope": "workspace",
+      "any": [
+        "report.subscribe"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-subscriptions/{id}/archive",
+      "scope": "workspace",
+      "any": [
+        "report.subscribe"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-subscriptions/{id}/confirm",
+      "scope": "workspace",
+      "any": [
+        "report.subscribe"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/report-subscriptions/{id}/runs",
+      "scope": "workspace",
+      "any": [
+        "report.subscribe"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/reports",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/reports/preview",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/reports/{id}/execute",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/reports/{id}/star",
+      "scope": "workspace",
+      "any": [
+        "report.view"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/shares",
+      "scope": "blocked",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/shares/{id}/revoke",
+      "scope": "blocked",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/snippets",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/source-tasks",
+      "scope": "workspace",
+      "any": [
+        "connection.use",
+        "connection.manage",
+        "source.definition.manage"
+      ],
+      "selector": "source_task_kind",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/source-tasks/{id}/cancel",
+      "scope": "workspace",
+      "any": [
+        "connection.use",
+        "connection.manage",
+        "source.definition.manage"
+      ],
+      "selector": "source_task_kind",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/source-tasks/{id}/retry",
+      "scope": "workspace",
+      "any": [
+        "connection.use",
+        "connection.manage",
+        "source.definition.manage"
+      ],
+      "selector": "source_task_kind",
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/ssh-tunnels",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/ssh-tunnels/test",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/tickets",
+      "scope": "workspace",
+      "any": [
+        "change.apply"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/tickets/{id}/execute",
+      "scope": "workspace",
+      "any": [
+        "change.execute"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/tickets/{id}/status",
+      "scope": "workspace",
+      "any": [
+        "change.review"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/user-groups",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/users",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/users/{id}/reset-password",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/workspaces",
+      "scope": "identity",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "POST /api/v1/workspaces/{workspace}/members",
+      "scope": "workspace",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/assets/annotations",
+      "scope": "workspace",
+      "any": [
+        "catalog.classify"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-datasets/{key}",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-datasets/{key}/output-policy",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-datasets/{key}/row-column-policy",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-identities/{user}",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-identities/{user}/datasets/{key}/organization-scope",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-operations/accounts/{id}",
+      "scope": "workspace",
+      "any": [
+        "operation.account.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/business-operations/templates/{id}",
+      "scope": "workspace",
+      "any": [
+        "operation.template.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/connections/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/dashboards/{id}",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/datasource-definitions/{id}/access",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/datasource-definitions/{id}/favorite",
+      "scope": "workspace",
+      "any": [
+        "connection.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/datasource-definitions/{id}/profile",
+      "scope": "workspace",
+      "any": [
+        "source.definition.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/datasource-templates/{id}",
+      "scope": "workspace",
+      "any": [
+        "source.driver.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/iam/home",
+      "scope": "own_space",
+      "any": null,
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/iam/menus",
+      "scope": "workspace",
+      "any": [
+        "space.menus.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/managed-dashboards/{id}/draft",
+      "scope": "workspace",
+      "any": [
+        "dashboard.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/managed-reports/{id}/draft",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/proxies/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/query/policies",
+      "scope": "workspace",
+      "any": [
+        "source.policy.map"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/query/settings",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/redis/hash/field",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/redis/key/ttl",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/redis/key/value",
+      "scope": "workspace",
+      "any": [
+        "query.write"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/report-subscriptions/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.subscribe"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/reports/{id}",
+      "scope": "workspace",
+      "any": [
+        "report.design"
+      ],
+      "all": [
+        "connection.use"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/snippets/{id}",
+      "scope": "workspace",
+      "any": [
+        "query.read"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/source-schedules",
+      "scope": "workspace",
+      "any": [
+        "connection.use",
+        "connection.manage"
+      ],
+      "selector": "source_task_kind",
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/ssh-tunnels/{id}",
+      "scope": "workspace",
+      "any": [
+        "connection.proxy.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/user-groups/{id}",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    },
+    {
+      "pattern": "PUT /api/v1/users/{id}",
+      "scope": "legacy_governance",
+      "any": [
+        "space.members.manage"
+      ],
+      "known": true
+    }
+  ]
+}

@@ -6,6 +6,7 @@ export interface ExecutionContext {
   connectionId: number
   connectionName: string
   database: string
+  dialect?: 'postgres' | 'mysql'
   sql: string
   selected: boolean
 }
@@ -28,6 +29,7 @@ interface ExecutionState {
 type Executor = (context: Readonly<ExecutionSnapshot>, signal: AbortSignal) => Promise<ExecResult>
 type Lookup = (id: string, signal: AbortSignal) => Promise<ExecutionReceipt>
 const unknownMessage = '执行结果待确认。取消、超时或断网不代表写入已回滚，请先核实目标数据库，再发起新的执行。'
+const queryDeliveryBlockedCode = 40902
 
 function receiptOf(value: unknown, id: string): ExecutionReceipt | null {
   if (!value || typeof value !== 'object') return null
@@ -57,7 +59,7 @@ export function useSqlExecution(execute: Executor, lookup: Lookup, recovery?: Ex
     state.value = { ...state.value, status, result, error }
   }
 
-  function applyReceipt(receipt: ExecutionReceipt, canceled: boolean) {
+  function applyReceipt(receipt: ExecutionReceipt) {
     state.value = { ...state.value, receipt }
     if (receipt.status === 'succeeded') {
       if (receipt.kind === 'write' && !receipt.transactional) {
@@ -68,7 +70,7 @@ export function useSqlExecution(execute: Executor, lookup: Lookup, recovery?: Ex
           : '服务端已确认执行完成。查询结果未保存，本次不会重新执行 SQL。')
       }
     } else if (receipt.status === 'rejected' || receipt.status === 'failed') {
-      settle(canceled ? 'canceled' : 'error', null, receipt.message || '服务端已确认本次执行未完成。')
+      settle(receipt.cancellation_confirmed === true ? 'canceled' : 'error', null, receipt.message || '服务端已确认本次执行未完成。')
     } else {
       settle('unknown', null, (receipt.status === 'running' || receipt.status === 'queued')
         ? '服务端仍在处理本次请求。请稍后核实状态，当前不会重新发送 SQL。' : unknownMessage)
@@ -78,12 +80,12 @@ export function useSqlExecution(execute: Executor, lookup: Lookup, recovery?: Ex
   async function resolveOutcome(id: string, canceled: boolean) {
     const controller = new AbortController()
     active = { controller, canceled }
-    state.value = { ...state.value, status: 'checking' }
+    state.value = { ...state.value, status: canceled ? 'canceling' : 'checking' }
     const timer = setTimeout(() => controller.abort(), 8000)
     try {
       const receipt = receiptOf(await lookup(id, controller.signal), id)
       if (disposed) return
-      if (receipt) applyReceipt(receipt, canceled)
+      if (receipt) applyReceipt(receipt)
       else settle('unknown', null, unknownMessage)
     } catch {
       // 404 也不能证明未执行：原请求可能仍在登记或回执服务暂时不可达。
@@ -116,10 +118,12 @@ export function useSqlExecution(execute: Executor, lookup: Lookup, recovery?: Ex
       else settle('success', result)
     } catch (error: unknown) {
       if (disposed) return true
-      const failure = error as { message?: string; status?: number; data?: unknown } | null
+      const failure = error as { message?: string; status?: number; code?: number; data?: unknown } | null
       const receipt = receiptOf(failure?.data, snapshot.requestId)
-      if (receipt) {
-        applyReceipt(receipt, request.canceled)
+      if (failure?.code === queryDeliveryBlockedCode) {
+        settle('unknown', null, failure.message || unknownMessage)
+      } else if (receipt) {
+        applyReceipt(receipt)
         if (state.value.status === 'error' && failure?.message) {
           state.value = { ...state.value, error: failure.message }
         }
@@ -139,6 +143,16 @@ export function useSqlExecution(execute: Executor, lookup: Lookup, recovery?: Ex
     try { await resolveOutcome(state.value.requestId, false) } finally { active = null }
   }
 
+  function adoptReceipt(id: string, value: unknown): boolean {
+    if (active || disposed || needsReview.value) return false
+    const receipt = receiptOf(value, id)
+    if (!receipt) return false
+    recovery?.write(id)
+    state.value = { status: 'idle', requestId: id, context: null, result: null, receipt: null, error: '' }
+    applyReceipt(receipt)
+    return true
+  }
+
   /** 页面须在用户明确确认已核实后调用；这不声明目标写入已回滚。 */
   function acknowledge() {
     if (active || disposed || !needsReview.value) return
@@ -152,11 +166,18 @@ export function useSqlExecution(execute: Executor, lookup: Lookup, recovery?: Ex
     active.controller.abort()
   }
 
+  /** 仅在目标切换且无在途/未知执行时清理展示，不取消或重发执行。 */
+  function reset() {
+    if (active || disposed || needsReview.value) return false
+    state.value = { status: 'idle', requestId: null, context: null, result: null, receipt: null, error: '' }
+    return true
+  }
+
   onScopeDispose(() => {
     disposed = true
     active?.controller.abort()
     active = null
   })
 
-  return { state, busy, needsReview, run, cancel, check, acknowledge }
+  return { state, busy, needsReview, run, cancel, check, adoptReceipt, acknowledge, reset }
 }

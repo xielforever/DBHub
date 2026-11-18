@@ -35,24 +35,38 @@ def capture(args):
         raise RuntimeError('无法读取 Docker/Git 状态')
     return result.stdout.strip()
 
-def source_fingerprint():
+def file_fingerprint(paths):
     digest = hashlib.sha256()
-    for path in sorted((ROOT/'backend').rglob('*.go')):
-        if 'vendor' in path.parts:
-            continue
-        digest.update(str(path.relative_to(ROOT)).encode())
-        digest.update(path.read_bytes())
-    for name in ('go.mod', 'go.sum', 'vendor/modules.txt'):
-        digest.update((ROOT/'backend'/name).read_bytes())
-    # 兼容矩阵 JSON 是运行结果的记录，最终才填入实测补丁号，不参与协议实现指纹。
+    for name, path in sorted((p.relative_to(ROOT).as_posix(), p) for p in paths):
+        contents = path.read_bytes()
+        for value in (name.encode('utf-8'), contents):
+            digest.update(len(value).to_bytes(8, 'big'))
+            digest.update(value)
     return digest.hexdigest()
 
-def migration_fingerprint():
-    digest = hashlib.sha256()
-    for path in sorted((ROOT/'backend/internal/db/migrations').glob('*.sql')):
-        digest.update(path.name.encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
+def source_fingerprints():
+    backend = ROOT/'backend'
+    migrations = backend/'internal/db/migrations'
+    migration_files = set(migrations.glob('*.sql'))
+    # 版本表由验收报告更新。其余源码资源和仓内依赖是测试构建的输入。
+    excluded = migration_files | {backend/'internal/target/compatibility_matrix.json'}
+    source_files = [backend/'go.mod', backend/'go.sum']
+    for directory in ('cmd', 'internal', 'pkg', 'vendor'):
+        source_files.extend(
+            path for path in (backend/directory).rglob('*')
+            if path.is_file() and path not in excluded
+        )
+    return {
+        'backend_source_sha256': file_fingerprint(source_files),
+        'backend_migrations_sha256': file_fingerprint(migration_files),
+    }
+
+def same_source(report, fingerprints):
+    return all(report.get(key) == value for key, value in fingerprints.items())
+
+def require_unchanged_source(fingerprints):
+    if source_fingerprints() != fingerprints:
+        raise RuntimeError('运行期间后端输入改变，本轮结果无效')
 
 def save_json(path, value):
     with open(path, 'w', opener=lambda p, flags: os.open(p, flags, 0o600)) as stream:
@@ -66,8 +80,8 @@ def completed_target(target):
 
 def record_verified(path):
     report = json.loads(path.read_text())
-    if not report.get('valid') or report.get('backend_go_sha256') != source_fingerprint() or report.get('backend_migrations_sha256') != migration_fingerprint():
-        raise RuntimeError('报告无效或后端实现已变化，不能更新已验证版本')
+    if not report.get('valid') or not same_source(report, source_fingerprints()):
+        raise RuntimeError('报告无效或后端输入指纹缺失、不一致，不能更新已验证版本')
     targets = report['targets']
     expected = {(kind, branch) for kind, branch, _ in TARGETS}
     if {(t['engine'], t['branch']) for t in targets} != expected or len(targets) != len(expected):
@@ -79,7 +93,7 @@ def record_verified(path):
     (ROOT/'backend/internal/target/compatibility_matrix.json').write_text(json.dumps(matrix, indent=2)+'\n')
     print('已按完整报告更新 12 个实测版本；请审核并提交记录。', flush=True)
 
-def exercise(kind, branch, image, out, base, fingerprint, migration_hash, keep_images):
+def exercise(kind, branch, image, out, base, fingerprints, keep_images):
     label = kind+'-'+branch
     name = 'dbhub-compat-'+secrets.token_hex(6)
     log = out/(label+'.log')
@@ -154,10 +168,10 @@ def exercise(kind, branch, image, out, base, fingerprint, migration_hash, keep_i
             print(f'验证 {kind} {branch}：真实目标操作和 HTTP 契约', flush=True)
             server_pattern = '^(TestVersionCompatibilityHTTP|TestRealHTTPBackend'+('|TestDatasourceReliability|TestMetadataSyncReliability' if kind == 'postgres' else '')+')$'
             for package, pattern in [('./internal/target','^(TestVersionMatrixTarget|TestIntegrationRealSQLAndTransactions)$'),('./internal/server',server_pattern)]:
-                if source_fingerprint() != fingerprint or migration_fingerprint() != migration_hash:
-                    raise RuntimeError('运行期间后端源文件改变，本轮结果无效')
+                require_unchanged_source(fingerprints)
                 if command(exec_args+[package,'-run',pattern], env=test_env, stdout=logs, stderr=logs).returncode:
                     raise RuntimeError('真实兼容测试失败')
+                require_unchanged_source(fingerprints)
         events = []
         for line in log.read_text().splitlines():
             if line.startswith('{'):
@@ -194,6 +208,7 @@ def main():
     if opts.record_from:
         record_verified(opts.record_from)
         return 0
+    fingerprints = source_fingerprints()
     previous = None
     if opts.resume_from:
         if opts.engine or opts.branch:
@@ -201,7 +216,7 @@ def main():
         previous = json.loads(opts.resume_from.read_text())
         expected = {(kind, branch, image) for kind, branch, image in TARGETS}
         actual = {(t['engine'], t['branch'], t['image']) for t in previous['targets']}
-        if previous.get('backend_go_sha256') != source_fingerprint() or previous.get('backend_migrations_sha256') != migration_fingerprint() or actual != expected or len(previous['targets']) != len(TARGETS):
+        if not same_source(previous, fingerprints) or actual != expected or len(previous['targets']) != len(TARGETS):
             raise RuntimeError('只能恢复同一后端实现的完整矩阵报告')
     targets = [t for t in TARGETS if (not opts.engine or t[0]==opts.engine) and (not opts.branch or t[1]==opts.branch)]
     if not targets:
@@ -211,9 +226,7 @@ def main():
         raise RuntimeError('先启动 Cloud 开发服务并准备真实测试连接')
     out = STATE/'compatibility-artifacts'/datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     out.mkdir(parents=True, mode=0o700, exist_ok=False)
-    fingerprint = source_fingerprint()
-    migration_hash = migration_fingerprint()
-    report = {'started_at':datetime.now(timezone.utc).isoformat(), 'source_revision':capture(['git','-C',ROOT,'rev-parse','HEAD']), 'source_dirty':bool(capture(['git','-C',ROOT,'status','--porcelain'])), 'backend_go_sha256':fingerprint, 'backend_migrations_sha256':migration_hash, 'runner_go_version':capture([WRAPPER,'exec','-T','backend','go','version']), 'metadata_postgres_version':capture([WRAPPER,'exec','-T','postgres','sh','-ec','psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SHOW server_version"']), 'targets':[]}
+    report = {'started_at':datetime.now(timezone.utc).isoformat(), 'source_revision':capture(['git','-C',ROOT,'rev-parse','HEAD']), 'source_dirty':bool(capture(['git','-C',ROOT,'status','--porcelain'])), **fingerprints, 'runner_go_version':capture([WRAPPER,'exec','-T','backend','go','version']), 'metadata_postgres_version':capture([WRAPPER,'exec','-T','postgres','sh','-ec','psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SHOW server_version"']), 'targets':[]}
     if previous:
         report['resumed_from'] = opts.resume_from.parent.name+'/'+opts.resume_from.name
         report['previous_report_sha256'] = hashlib.sha256(opts.resume_from.read_bytes()).hexdigest()
@@ -224,10 +237,10 @@ def main():
             save_json(out/(target[0]+'-'+target[1]+'.json'), result)
             print(f'复用 PASS {target[0]} {target[1]} {result["version"]}（同一后端实现）', flush=True)
         else:
-            result = exercise(*target,out,base,fingerprint,migration_hash,opts.keep_images)
+            result = exercise(*target,out,base,fingerprints,opts.keep_images)
         report['targets'].append(result)
     report['finished_at'] = datetime.now(timezone.utc).isoformat()
-    report['valid'] = all(t['valid'] for t in report['targets']) and source_fingerprint()==fingerprint and migration_fingerprint()==migration_hash
+    report['valid'] = all(t['valid'] for t in report['targets']) and source_fingerprints() == fingerprints
     save_json(out/'matrix.json', report)
     print(f'矩阵 {len(targets)} 项，整体有效={report["valid"]}；{out/"matrix.json"}', flush=True)
     return 0 if report['valid'] else 1

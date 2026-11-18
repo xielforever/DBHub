@@ -1,0 +1,11 @@
+<script setup lang="ts">
+import LoadingState from '../../components/base/LoadingState.vue'
+import {onMounted,ref} from 'vue'
+import {iamApi} from '../../api/iam'
+interface Migration {state:string;config_version:number;authorization_epoch:number;inventory_unknown_count:number;principals:{user_id:number;mode:string;legacy_data_role:string;confirmed:boolean}[]}
+const state=ref<Migration>(),error=ref(''),busy=ref(false),modeLabels:Record<string,string>={LEGACY_GUARDED:'旧权限兼容',SHADOW:'只读对照',COMPAT_ACTIVE:'按主体采用角色权限'}
+async function load(){busy.value=true;error.value='';try{state.value=await iamApi.read<Migration>('migration')}catch(e){state.value=undefined;error.value=e instanceof Error?e.message:'迁移状态不可用'}finally{busy.value=false}}
+onMounted(()=>void load())
+</script>
+
+<template><section class="ui-page-stack"><header class="flex flex-wrap justify-between gap-3"><div><h3 class="text-lg">迁移与回退</h3><p class="text-sm text-muted mt-2">逐主体核对旧权限和目标角色。未确认主体始终使用完整旧权限路径。</p></div><button class="ghost-button ui-control-target" :disabled="busy" @click="load">刷新检查</button></header><p v-if="error" role="alert" class="text-danger">{{error}}</p><LoadingState v-if="busy" label="正在读取迁移状态…" /><section v-else-if="state" class="glass-card space-y-3 ui-card-padding"><p>当前方案：{{modeLabels[state.state]||state.state}}</p><p class="text-xs text-muted">配置版本 {{state.config_version}} · 授权代次 {{state.authorization_epoch}} · 未确认约束 {{state.inventory_unknown_count}} 项</p><p class="text-sm text-muted">真实空间切换未开放。仅隔离验收部署可以提交启用申请；仍需当前委派、独立复核、完整约束证据和运行桥接检查。</p><div class="overflow-x-auto"><table class="w-full text-sm whitespace-nowrap"><thead class="text-left text-muted"><tr><th class="py-3 pr-5">主体</th><th class="pr-5">选择方案</th><th class="pr-5">原数据身份</th><th>确认状态</th></tr></thead><tbody><tr v-for="p in state.principals" :key="p.user_id" class="border-t border-stroke"><td class="py-3">成员 #{{p.user_id}}</td><td>{{p.mode==='TARGET'?'目标角色权限':'完整旧权限'}}</td><td>{{p.legacy_data_role}}</td><td>{{p.confirmed?'已确认':'保持旧模式'}}</td></tr></tbody></table></div><p v-if="!state.principals.length" class="text-sm text-muted">尚未选择迁移主体，所有成员保持旧模式。</p></section><section class="glass-card space-y-3 ui-card-padding"><h4>回退约束</h4><p class="text-sm text-muted">仅回退配置指针，并推进授权代次。撤权、冻结、到期、原业务签名、发布号、7天文件期限及待核实回执持续有效。新模式独有任务暂停，不重新执行写操作。</p></section></section></template>

@@ -76,6 +76,20 @@ func (h *Handler) Inbox(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.OK(w, out)
 }
+func (h *Handler) NotificationDelivery(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		fail(w, db.ErrAutomationInput)
+		return
+	}
+	out, err := h.Repo.NotificationDelivery(r.Context(), id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.OK(w, out)
+}
 func (h *Handler) Todos(w http.ResponseWriter, r *http.Request) {
 	size, offset, e := page(r)
 	if e != nil {
