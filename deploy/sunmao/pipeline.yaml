@@ -6,8 +6,9 @@ env:
   NAMESPACE: dbhub
   RELEASE: dbhub
   KUBECONFIG_CRED: dbhub-kubeconfig
-  ELB_ID: "<现有 CCE ELB ID>"
-  TARGET_ALLOWLIST: "<数据源目标地址白名单>"
+  ELB_ID: "80bf4df4-0b7c-459d-9539-fbd2242ce2a7"
+  TARGET_ALLOWLIST: "10.240.0.0/16,dbhub-report44-fixture.dbhub.svc:5432"
+  TAG: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
 
 params:
   - name: DEPLOY
@@ -31,21 +32,21 @@ steps:
     name: build-backend
     dockerfile: backend/Dockerfile.kaniko
     context: backend
-    destination: ${REGISTRY}/dbhub-backend:${COMMIT_SHA_SHORT}-${BUILD_NUMBER}
+    destination: ${REGISTRY}/dbhub-backend:${TAG}
     credential: swr-auth
     workspace: true
     timeout_secs: 1800
-    resources: {cpu: "4", memory: 8Gi}
+    resources: {cpu: "4", memory: 8Gi, requests_cpu: "1", requests_memory: "2Gi"}
 
   - type: kaniko_build
     name: build-frontend
     dockerfile: frontend/Dockerfile.kaniko
     context: frontend
-    destination: ${REGISTRY}/dbhub-frontend:${COMMIT_SHA_SHORT}-${BUILD_NUMBER}
+    destination: ${REGISTRY}/dbhub-frontend:${TAG}
     credential: swr-auth
     workspace: true
     timeout_secs: 1800
-    resources: {cpu: "2", memory: 4Gi}
+    resources: {cpu: "2", memory: 4Gi, requests_cpu: "500m", requests_memory: "1Gi"}
 
   - type: helm_deploy
     name: render-check
@@ -54,7 +55,7 @@ steps:
     namespace: ${NAMESPACE}
     chart: deploy/helm/dbhub
     workspace: true
-    kubeconfig_credential: ${KUBECONFIG_CRED}
+    helm_version: "3.17"
     when: '${DEPLOY} != "true"'
     values_inline: |
       imagePullSecrets:
@@ -71,7 +72,7 @@ steps:
         replicas: 1
         image:
           repository: ${REGISTRY}/dbhub-backend
-          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          tag: "${TAG}"
           pullPolicy: IfNotPresent
         audit:
           size: 2Gi
@@ -96,7 +97,7 @@ steps:
         replicas: 1
         image:
           repository: ${REGISTRY}/dbhub-frontend
-          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          tag: "${TAG}"
           pullPolicy: IfNotPresent
         service:
           type: LoadBalancer
@@ -123,6 +124,7 @@ steps:
     chart: deploy/helm/dbhub
     workspace: true
     kubeconfig_credential: ${KUBECONFIG_CRED}
+    helm_version: "3.17"
     when: '${DEPLOY} == "true"'
     atomic: true
     wait: true
@@ -142,7 +144,7 @@ steps:
         replicas: 1
         image:
           repository: ${REGISTRY}/dbhub-backend
-          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          tag: "${TAG}"
           pullPolicy: IfNotPresent
         audit:
           size: 2Gi
@@ -167,7 +169,7 @@ steps:
         replicas: 1
         image:
           repository: ${REGISTRY}/dbhub-frontend
-          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          tag: "${TAG}"
           pullPolicy: IfNotPresent
         service:
           type: LoadBalancer

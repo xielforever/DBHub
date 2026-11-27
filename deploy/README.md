@@ -130,7 +130,7 @@ python scripts/deploy/xyc_release.py --apply --docker-wsl Ubuntu-24.04 `
 
 目标为 CCE 集群 `xyc` 的 `dbhub` 命名空间。流水线从 Gitee 镜像仓检出源码，在集群内用 kaniko 构建前后端镜像并推送 SWR，再通过 kubeconfig 凭证执行 Helm 发布，最后做 HTTP 就绪探测。webhook 触发时只构建并渲染校验；正式发布需手动触发并传 `DEPLOY=true`。
 
-前置条件与操作步骤见 [sunmao/README.md](sunmao/README.md)，流水线定义见 [sunmao/pipeline.yaml](sunmao/pipeline.yaml)。该通道不提供镜像摘要固定、流水线内迁移比对与 `helm lint`，这些仍由 `scripts/deploy/xyc_release.py` 覆盖。
+流水线样例已内置当前 CCE 的 ELB ID、节点端口、目标白名单与 Nacos 地址（非凭据）；更换环境时需同步修改。前置条件、平台能力与操作步骤见 [sunmao/README.md](sunmao/README.md)，流水线定义见 [sunmao/pipeline.yaml](sunmao/pipeline.yaml)。该通道不提供镜像摘要固定、流水线内迁移比对与 `helm lint`，这些仍由 `scripts/deploy/xyc_release.py` 覆盖。
 
 ## 源码 / systemd
 
