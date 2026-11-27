@@ -2,6 +2,12 @@
 existingSecret: dbhub-runtime
 config:
   DBHUB_TARGET_ALLOWLIST: inventory.example.com:5432
+  # Nacos 配置源（可选）：凭据放 existingSecret 的 DBHUB_NACOS_USERNAME/PASSWORD。
+  DBHUB_NACOS_ENABLED: "false"
+  DBHUB_NACOS_SERVER_ADDR: ""
+  DBHUB_NACOS_NAMESPACE: ""
+  DBHUB_NACOS_GROUP: DEFAULT_GROUP
+  DBHUB_NACOS_DATA_ID: ""
 backend:
   image: {repository: registry.example.com/dbhub/backend, tag: YOUR_RELEASE}
   audit: {size: 2Gi}

@@ -90,6 +90,43 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) ([]string, error) {
 	return applied, nil
 }
 
+// LatestMigrationVersion 返回内嵌迁移脚本中版本号最大的文件名。
+func LatestMigrationVersion() (string, error) {
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		return "", fmt.Errorf("读取内嵌迁移文件失败: %w", err)
+	}
+	latest := ""
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		if entry.Name() > latest {
+			latest = entry.Name()
+		}
+	}
+	if latest == "" {
+		return "", errors.New("内嵌迁移目录为空")
+	}
+	return latest, nil
+}
+
+// CurrentSchemaVersion 返回目标库 schema_migrations 的最大版本；表不存在时返回空字符串。
+func CurrentSchemaVersion(ctx context.Context, pool *pgxpool.Pool) (string, error) {
+	var exists bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('schema_migrations') IS NOT NULL`).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		return "", nil
+	}
+	var version string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(MAX(version), '') FROM schema_migrations`).Scan(&version); err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
 func migrateLocked(ctx context.Context, pool *pgxpool.Conn) ([]string, error) {
 	_, err := pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS schema_migrations (

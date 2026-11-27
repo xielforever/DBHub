@@ -63,6 +63,38 @@
         "DBHUB_BACKUP_EXPECTED_HOURS": {
           "type": "string"
         },
+        "DBHUB_NACOS_ENABLED": {
+          "type": "string",
+          "enum": ["true", "false"]
+        },
+        "DBHUB_NACOS_SERVER_ADDR": {
+          "type": "string"
+        },
+        "DBHUB_NACOS_NAMESPACE": {
+          "type": "string"
+        },
+        "DBHUB_NACOS_GROUP": {
+          "type": "string"
+        },
+        "DBHUB_NACOS_DATA_ID": {
+          "type": "string"
+        },
+        "DBHUB_NACOS_FORMAT": {
+          "type": "string",
+          "enum": ["properties"]
+        },
+        "DBHUB_NACOS_POLL_SECONDS": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "DBHUB_NACOS_TIMEOUT_MS": {
+          "type": "string",
+          "pattern": "^[0-9]+$"
+        },
+        "DBHUB_NACOS_REQUIRED": {
+          "type": "string",
+          "enum": ["true", "false"]
+        },
         "DBHUB_LOGIN_MAX_ATTEMPTS": {
           "type": "string"
         },

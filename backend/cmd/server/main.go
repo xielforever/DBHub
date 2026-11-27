@@ -4,11 +4,14 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -162,6 +165,38 @@ func main() {
 		}
 	}()
 
+	var configRestart atomic.Bool
+	if cfg.Nacos.Enabled {
+		log.Info("Nacos 配置源已启用",
+			"server", cfg.Nacos.ServerAddr,
+			"namespace", cfg.Nacos.Namespace,
+			"group", cfg.Nacos.Group,
+			"data_id", cfg.Nacos.DataID,
+			"poll", cfg.Nacos.PollInterval.String(),
+		)
+		if cfg.NacosLoadError != "" {
+			log.Warn("首次读取 Nacos 失败，已回退环境变量", "error", cfg.NacosLoadError)
+		}
+		go config.WatchNacos(ctx, cfg.Nacos, cfg.NacosInitialHash, func(values map[string]string, hash string) bool {
+			if err := validateNacosChange(ctx, cfg, values); err != nil {
+				log.Error("Nacos 配置变更未通过校验，保持当前配置", "error", err)
+				return false
+			}
+			keys := make([]string, 0, len(values))
+			for key := range values {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			log.Warn("Nacos 配置变更已通过校验，准备重启应用以便生效",
+				"keys", keys, "hash", hash[:8])
+			configRestart.Store(true)
+			stop()
+			return true
+		}, func(err error) {
+			log.Warn("Nacos 配置监听失败", "error", err.Error())
+		})
+	}
+
 	<-ctx.Done()
 	log.Info("收到关停信号，正在优雅停机...")
 	if deps != nil && deps.Queries != nil {
@@ -185,5 +220,56 @@ func main() {
 		db.CloseScopedRuntime(pgPool)
 		pgPool.Close()
 	}
+	if configRestart.Load() {
+		// 受控重启：非零退出让 systemd（Restart=on-failure）与容器编排重新启动进程。
+		log.Info("Nacos 配置变更触发受控重启", "exit_code", 75)
+		os.Exit(75)
+	}
 	log.Info("服务已安全退出")
+}
+
+// validateNacosChange 在重启前校验新的连接配置：目标库 schema 版本必须与程序
+// 内置迁移一致，Redis 必须可连接。错误消息已移除 DSN 与口令。
+func validateNacosChange(ctx context.Context, cfg *config.Config, values map[string]string) error {
+	if dsn := values["DATABASE_URL"]; dsn != "" && dsn != cfg.DatabaseURL {
+		checkCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		pool, err := db.Connect(checkCtx, dsn, 2)
+		if err == nil {
+			latest, latestErr := db.LatestMigrationVersion()
+			if latestErr != nil {
+				err = latestErr
+			} else {
+				current, currentErr := db.CurrentSchemaVersion(checkCtx, pool)
+				switch {
+				case currentErr != nil:
+					err = currentErr
+				case current == "":
+					err = errors.New("目标库缺少 schema_migrations，拒绝切换")
+				case current != latest:
+					err = fmt.Errorf("目标库 schema 版本 %q 与程序内置 %q 不一致", current, latest)
+				}
+			}
+			pool.Close()
+		}
+		cancel()
+		if err != nil {
+			return errors.New(config.RedactNacosMessage("新 DATABASE_URL 校验失败: "+err.Error(), values))
+		}
+	}
+	if raw := values["REDIS_URL"]; raw != "" && raw != cfg.RedisURL {
+		options, err := redis.ParseURL(raw)
+		if err != nil {
+			return errors.New("新 REDIS_URL 格式无效")
+		}
+		options.ContextTimeoutEnabled = true
+		client := redis.NewClient(options)
+		checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err = client.Ping(checkCtx).Err()
+		cancel()
+		_ = client.Close()
+		if err != nil {
+			return errors.New(config.RedactNacosMessage("新 REDIS_URL 校验失败: "+err.Error(), values))
+		}
+	}
+	return nil
 }

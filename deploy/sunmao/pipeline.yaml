@@ -62,6 +62,12 @@ steps:
       existingSecret: dbhub-runtime
       config:
         DBHUB_TARGET_ALLOWLIST: "${TARGET_ALLOWLIST}"
+        # Nacos 配置源（先在 Secret 增加 DBHUB_NACOS_USERNAME/PASSWORD，再取消注释）
+        # DBHUB_NACOS_ENABLED: "true"
+        # DBHUB_NACOS_SERVER_ADDR: "infra-core-nacos-headless.infra.svc.cluster.local:8848"
+        # DBHUB_NACOS_NAMESPACE: "dbhub"
+        # DBHUB_NACOS_GROUP: "DEFAULT_GROUP"
+        # DBHUB_NACOS_DATA_ID: "dbhub.properties"
       backend:
         replicas: 1
         image:
@@ -128,6 +134,12 @@ steps:
       existingSecret: dbhub-runtime
       config:
         DBHUB_TARGET_ALLOWLIST: "${TARGET_ALLOWLIST}"
+        # Nacos 配置源（先在 Secret 增加 DBHUB_NACOS_USERNAME/PASSWORD，再取消注释）
+        # DBHUB_NACOS_ENABLED: "true"
+        # DBHUB_NACOS_SERVER_ADDR: "infra-core-nacos-headless.infra.svc.cluster.local:8848"
+        # DBHUB_NACOS_NAMESPACE: "dbhub"
+        # DBHUB_NACOS_GROUP: "DEFAULT_GROUP"
+        # DBHUB_NACOS_DATA_ID: "dbhub.properties"
       backend:
         replicas: 1
         image:

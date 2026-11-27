@@ -2,6 +2,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -44,6 +45,12 @@ type Config struct {
 
 	// DatabaseURL PostgreSQL 元数据库 DSN
 	DatabaseURL string
+	// Nacos 配置源参数；启用后白名单键优先于环境变量。
+	Nacos NacosOptions
+	// NacosInitialHash 首次读取的配置内容哈希，用于监听变化。
+	NacosInitialHash string
+	// NacosLoadError 记录 REQUIRED=false 时首次读取失败的原因（不含凭据）。
+	NacosLoadError string
 	// MetaDBMaxConns 元数据库连接池上限（单会话线协议代理应设为 1）
 	MetaDBMaxConns int32
 	// MigrationTimeout 启动迁移及运行账号初始化总时限。
@@ -105,6 +112,30 @@ func Load() (*Config, error) {
 			Username: getenv("APP_ADMIN_USERNAME", "admin"),
 			Password: getenv("APP_ADMIN_PASSWORD", "admin123"),
 		},
+	}
+	nacosOpts, err := loadNacosOptions()
+	if err != nil {
+		return nil, err
+	}
+	cfg.Nacos = nacosOpts
+	if nacosOpts.Enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), nacosOpts.Timeout*2)
+		values, hash, fetchErr := FetchNacosValues(ctx, nacosOpts)
+		cancel()
+		if fetchErr != nil {
+			if nacosOpts.Required {
+				return nil, fmt.Errorf("读取 Nacos 配置失败: %w", fetchErr)
+			}
+			cfg.NacosLoadError = fetchErr.Error()
+		} else {
+			if v := values["DATABASE_URL"]; v != "" {
+				cfg.DatabaseURL = v
+			}
+			if v := values["REDIS_URL"]; v != "" {
+				cfg.RedisURL = v
+			}
+			cfg.NacosInitialHash = hash
+		}
 	}
 	if raw := os.Getenv("DBHUB_MIGRATION_TIMEOUT_SECONDS"); raw != "" {
 		seconds, err := strconv.Atoi(raw)
