@@ -1,23 +1,3 @@
-<template>
-  <div class="redis-key-tree text-xs">
-    <div v-for="node in tree" :key="node.name" class="pl-2">
-      <div class="flex items-center gap-1.5 py-1 hover:bg-white/5 rounded px-1 cursor-pointer" @click="toggle(node)">
-        <ChevronRight v-if="node.children.length" class="w-3 h-3 text-white/30 transition-transform" :class="{ 'rotate-90': expanded.has(node.path) }" />
-        <span v-else class="w-3" />
-        <Folder v-if="node.children.length" class="w-3.5 h-3.5 text-amber-300/70" />
-        <KeyRound v-else class="w-3.5 h-3.5" :class="typeColor(node.type)" />
-        <span class="font-mono" :class="node.children.length ? 'text-white/60' : 'text-white/80 hover:text-indigo-300'" @click.stop="node.children.length ? toggle(node) : emit('select', node.fullKey)">{{ node.name }}</span>
-        <span v-if="!node.children.length" class="px-1 py-0.5 rounded-full text-[10px] ml-1" :class="typeBadge(node.type)">{{ node.type }}</span>
-        <span v-if="node.children.length" class="text-[10px] text-white/25 ml-1">{{ node.count }} keys</span>
-        <span v-if="!node.children.length && node.ttl !== undefined" class="text-[10px] text-white/30 ml-1">{{ node.ttl === -1 ? '永久' : node.ttl + 's' }}</span>
-      </div>
-      <div v-if="node.children.length && expanded.has(node.path)" class="border-l border-white/5 ml-2">
-        <RedisKeyTree :items="flattenChildren(node)" :selected="selected" :expanded="expanded" @select="emit('select', $event)" @toggle="emit('toggle', $event)" />
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ChevronRight, Folder, KeyRound } from 'lucide-vue-next'
@@ -130,23 +110,43 @@ function toggle(node: TreeNode) {
 }
 function typeBadge(t: string) {
   const map: Record<string, string> = {
-    string: 'bg-emerald-400/15 text-emerald-300',
-    hash: 'bg-indigo-400/15 text-indigo-300',
-    list: 'bg-amber-400/15 text-amber-300',
-    set: 'bg-violet-400/15 text-violet-300',
-    zset: 'bg-rose-400/15 text-rose-300',
-    folder: 'bg-white/10 text-white/40',
+    string: 'bg-success-soft text-success',
+    hash: 'bg-accent-soft text-accent',
+    list: 'bg-warning-soft text-warning',
+    set: 'bg-accent-soft text-accent',
+    zset: 'bg-danger-soft text-danger',
+    folder: 'bg-surface-muted text-subtle',
   }
-  return map[t] || 'bg-white/10 text-white/50'
+  return map[t] || 'bg-surface-muted text-muted'
 }
 function typeColor(t: string) {
   const map: Record<string, string> = {
-    string: 'text-emerald-300/70',
-    hash: 'text-indigo-300/70',
-    list: 'text-amber-300/70',
-    set: 'text-violet-300/70',
-    zset: 'text-rose-300/70',
+    string: 'text-success',
+    hash: 'text-accent',
+    list: 'text-warning',
+    set: 'text-accent',
+    zset: 'text-danger',
   }
-  return map[t] || 'text-white/40'
+  return map[t] || 'text-subtle'
 }
 </script>
+
+<template>
+  <div class="redis-key-tree text-xs">
+    <div v-for="node in tree" :key="node.name" class="pl-2">
+      <button type="button" class="w-full text-left flex items-center gap-1.5 py-1 hover:bg-interactive rounded px-1 aria-pressed:bg-accent-soft ui-control-target" :aria-expanded="node.children.length ? expanded.has(node.path) : undefined" :aria-pressed="!node.children.length ? (selected?.has(node.fullKey) ?? false) : undefined" :aria-label="node.children.length ? (expanded.has(node.path) ? '折叠 ' : '展开 ') + node.path : '选择键 ' + node.fullKey" @click="node.children.length ? toggle(node) : emit('select', node.fullKey)">
+        <ChevronRight v-if="node.children.length" class="w-3 h-3 text-subtle transition-transform" :class="{ 'rotate-90': expanded.has(node.path) }" aria-hidden="true" />
+        <span v-else class="w-3" />
+        <Folder v-if="node.children.length" class="w-3.5 h-3.5 text-warning" aria-hidden="true" />
+        <KeyRound v-else class="w-3.5 h-3.5" :class="typeColor(node.type)" aria-hidden="true" />
+        <span class="font-mono" :class="node.children.length ? 'text-muted' : 'text-content hover:text-accent'">{{ node.name }}</span>
+        <span v-if="!node.children.length" class="px-1 py-0.5 rounded-full text-xs ml-1" :class="typeBadge(node.type)">{{ node.type }}</span>
+        <span v-if="node.children.length" class="text-xs text-subtle ml-1">{{ node.count }} keys</span>
+        <span v-if="!node.children.length && node.ttl !== undefined" class="text-xs text-subtle ml-1">{{ node.ttl === -1 ? '永久' : node.ttl + 's' }}</span>
+      </button>
+      <div v-if="node.children.length && expanded.has(node.path)" class="border-l border-stroke ml-2">
+        <RedisKeyTree :items="flattenChildren(node)" :selected="selected" :expanded="expanded" @select="emit('select', $event)" @toggle="emit('toggle', $event)" />
+      </div>
+    </div>
+  </div>
+</template>

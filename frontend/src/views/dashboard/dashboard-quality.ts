@@ -15,6 +15,7 @@ export interface TileState {
     | 'restricted'
     | 'contract_changed'
   result?: DashboardTileResult
+  receiptId?: string
   message?: string
   cycle?: string
   retained?: boolean

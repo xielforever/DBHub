@@ -6,11 +6,12 @@ export interface TemplateField {name:string;label:string;type:'string'|'integer'
 export interface TemplatePayload {visibility?:'private'|'global';template_key:string;name:string;product:string;driver_id:number;dialect:''|'mysql'|'postgres';url_template:string;fields:TemplateField[]}
 export interface DatasourceTemplate extends TemplatePayload {id:number;created_by:number;revision:number;driver:JDBCDriver;enabled:boolean;created_at:string}
 interface List<T>{items:T[];total:number}
+type ReadOptions = { signal?: AbortSignal; silentError?: boolean }
 export const connectorApi={
- artifacts:()=>request.get<unknown,List<DriverArtifact>>('/connector-drivers/available',{silentError:true}),
- drivers:()=>request.get<unknown,List<JDBCDriver>>('/connector-drivers'),
+ artifacts:(options?: ReadOptions)=>request.get<unknown,List<DriverArtifact>>('/connector-drivers/available',{silentError:true,...options}),
+ drivers:(options?: ReadOptions)=>request.get<unknown,List<JDBCDriver>>('/connector-drivers',options),
  register:(artifact_id:string,name:string,visibility:'private'|'global'='private')=>request.post<unknown,JDBCDriver>('/connector-drivers',{artifact_id,name,visibility}),
- templates:()=>request.get<unknown,List<DatasourceTemplate>>('/datasource-templates'),
+ templates:(options?: ReadOptions)=>request.get<unknown,List<DatasourceTemplate>>('/datasource-templates',options),
  publish:(payload:TemplatePayload,id?:number)=>id?request.put<unknown,DatasourceTemplate>(`/datasource-templates/${id}`,payload):request.post<unknown,DatasourceTemplate>('/datasource-templates',payload),
  status:(kind:'driver'|'template',id:number,enabled:boolean)=>request.patch(`/`+(kind==='driver'?'connector-drivers':'datasource-templates')+`/${id}/status`,{enabled}),
  remove:(kind:'driver'|'template',id:number)=>request.delete(`/`+(kind==='driver'?'connector-drivers':'datasource-templates')+`/${id}`),

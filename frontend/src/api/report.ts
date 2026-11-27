@@ -7,6 +7,7 @@ import type { ExecResult } from './workbench'
 import type { ChartKind, ChartConfig } from '../components/business/chart/ChartCard.vue'
 
 export interface ReportItem {
+	parameters?: import('../views/report/reportParameters').ReportParameter[]
   id: number
   name: string
   description: string
@@ -30,6 +31,8 @@ export interface ReportItem {
 }
 
 export interface ReportPayload {
+	export_policy?: import('./report-exports').ReportExportPolicy
+	parameters?: import('../views/report/reportParameters').ReportParameter[]
   data_contract?:import('./managed-report').DataContract
   request_id?: string
   name: string
@@ -46,25 +49,25 @@ export const reportApi = {
   create(payload: ReportPayload) {
     return request.post<unknown, ReportItem>('/reports', { ...payload, request_id: payload.request_id ?? newRequestId() }, { silentError: true })
   },
-  list(params: { q?: string; scope?: 'mine' | 'starred' | 'shared' | 'all'; connection_id?: number; page?: number; page_size?: number }, signal?: AbortSignal) {
-    return request.get<unknown, { items: ReportItem[]; total: number; page: number; page_size: number }>('/reports', { params, signal })
+  list(params: { q?: string; scope?: 'mine' | 'starred' | 'shared' | 'all'; connection_id?: number; page?: number; page_size?: number }, signal?: AbortSignal, silentError = false) {
+    return request.get<unknown, { items: ReportItem[]; total: number; page: number; page_size: number }>('/reports', { params, signal, silentError })
   },
-  get(id: number, signal?: AbortSignal) {
-    return request.get<unknown, ReportItem>(`/reports/${id}`, { signal })
+  get(id: number, signal?: AbortSignal, silentError = false) {
+    return request.get<unknown, ReportItem>(`/reports/${id}`, { signal, silentError })
   },
   update(id: number, payload: Partial<ReportPayload> & { version: number }) {
     return request.put<unknown, ReportItem>(`/reports/${id}`, payload, { silentError: true })
   },
-  preview(payload: { connection_id: number; database: string; sql: string }, signal?: AbortSignal) {
+  preview(payload: { connection_id: number; database: string; sql: string; data_contract?: import('./managed-report').DataContract; parameters?: import('../views/report/reportParameters').ReportParameter[]; params?: import('../views/report/reportParameters').ParameterValues }, signal?: AbortSignal) {
     return request.post<unknown, ExecResult>('/reports/preview', { ...payload, request_id: newRequestId() }, { signal, timeout: 90000, silentError: true })
   },
-  execute(id: number, version: number, signal?: AbortSignal) {
-    return request.post<unknown, ExecResult>(`/reports/${id}/execute`, { version, request_id: newRequestId() }, { signal, timeout: 90000, silentError: true })
+  execute(id: number, version: number, signal?: AbortSignal, params?: import('../views/report/reportParameters').ParameterValues) {
+    return request.post<unknown, ExecResult>(`/reports/${id}/execute`, { version, request_id: newRequestId(), params }, { signal, timeout: 90000, silentError: true })
   },
   remove(id: number) {
     return request.delete<unknown, { id: number }>(`/reports/${id}`)
   },
-  star(id: number, star: boolean) {
-    return request.post<unknown, { starred: boolean }>(`/reports/${id}/star`, { star })
+  star(id: number, star: boolean, signal?: AbortSignal, silentError = false) {
+    return request.post<unknown, { starred: boolean }>(`/reports/${id}/star`, { star }, { signal, silentError })
   },
 }

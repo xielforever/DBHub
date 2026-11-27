@@ -15,20 +15,30 @@ export interface ProxyItem {
   updated_at: string
 }
 
+export interface ProxyInput {
+  name: string
+  type: ProxyItem['type']
+  host: string
+  port: number
+  username?: string
+  password?: string
+  description?: string
+}
+
 export const proxyApi = {
-  list() {
-    return request.get<unknown, { items: ProxyItem[]; total: number; note?: string }>('/proxies')
+  list(silentError = false) {
+    return request.get<unknown, { items: ProxyItem[]; total: number; note?: string }>('/proxies', { silentError })
   },
-  create(payload: { name: string; type: string; host: string; port: number; username?: string; password?: string; description?: string }) {
-    return request.post<unknown, ProxyItem>('/proxies', payload)
+  create(payload: ProxyInput) {
+    return request.post<unknown, ProxyItem>('/proxies', payload, { silentError: true })
   },
-  update(id: number, payload: Partial<{ name: string; type: string; host: string; port: number; username: string; password: string; description: string; status: string }>) {
-    return request.put<unknown, ProxyItem>(`/proxies/${id}`, payload)
+  update(id: number, payload: Partial<ProxyInput & { status: ProxyItem['status'] }>) {
+    return request.put<unknown, ProxyItem>(`/proxies/${id}`, payload, { silentError: true })
   },
   remove(id: number) {
-    return request.delete<unknown, { id: number }>(`/proxies/${id}`)
+    return request.delete<unknown, { id: number }>(`/proxies/${id}`, { silentError: true })
   },
   test(payload: { id?: number; target_host?: string; target_port?: number; type: string; host: string; port: number; username?: string; password?: string }) {
-    return request.post<unknown, { ok: boolean; latency_ms: number }>('/proxies/test', payload)
+    return request.post<unknown, { ok: boolean; latency_ms: number }>('/proxies/test', payload, { silentError: true })
   },
 }

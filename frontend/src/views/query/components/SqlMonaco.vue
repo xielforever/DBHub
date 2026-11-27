@@ -1,39 +1,16 @@
-<template>
-  <div class="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <div v-show="!fallback" ref="container" class="min-h-0 flex-1" />
-    <p v-if="!ready && !fallback" class="absolute inset-0 flex items-center justify-center text-xs text-white/50" role="status">编辑器加载中…</p>
-    <template v-if="fallback">
-      <p class="px-4 pt-2 text-[11px] text-amber-200/80">高级编辑器加载失败，已切换为基础编辑器。</p>
-      <textarea
-        ref="textarea"
-        :value="modelValue"
-        aria-label="SQL 编辑器"
-        placeholder="在此输入 SQL，例如 SELECT 1;"
-        spellcheck="false"
-        class="min-h-0 flex-1 resize-none bg-transparent p-4 font-mono text-[13px] leading-6 text-indigo-100 outline-none"
-        @input="onInput"
-        @select="updateSelection"
-        @keyup="updateSelection"
-        @click="updateSelection"
-        @keydown.ctrl.enter.prevent="emit('run')"
-        @keydown.meta.enter.prevent="emit('run')"
-        @keydown.ctrl.shift.f.prevent="emit('format')"
-        @keydown.meta.shift.f.prevent="emit('format')"
-      />
-    </template>
-    <p v-if="ready && !modelValue" class="pointer-events-none absolute left-[68px] top-3 text-[13px] text-white/40" aria-hidden="true">在此输入 SQL，例如 SELECT 1;</p>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import LoadingState from '../../../components/base/LoadingState.vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type * as Monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+import { useTheme } from '../../../utils/theme'
 
 ;(self as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
 }
-const props = defineProps<{ modelValue: string }>()
+const props = defineProps<{ modelValue: string; readOnly?: boolean; language?: 'sql' | 'plaintext' }>()
+const editorLabel = computed(() => props.language === 'plaintext' ? 'Redis 脚本编辑器' : 'SQL 编辑器')
+const editorPlaceholder = computed(() => props.language === 'plaintext' ? '在此输入 Redis 脚本文本' : '在此输入 SQL，例如 SELECT 1;')
 const emit = defineEmits<{
   (event: 'update:modelValue', value: string): void
   (event: 'run'): void
@@ -44,8 +21,10 @@ const textarea = ref<HTMLTextAreaElement | null>(null)
 const ready = ref(false)
 const fallback = ref(false)
 const selectedLength = ref(0)
+const { resolvedTheme } = useTheme()
 let disposed = false
 let editor: Monaco.editor.IStandaloneCodeEditor | null = null
+let monacoModule: typeof Monaco | null = null
 let observer: ResizeObserver | null = null
 const subscriptions: Monaco.IDisposable[] = []
 
@@ -60,6 +39,42 @@ function getSelection(): string {
 function updateSelection() { selectedLength.value = getSelection().length }
 function onInput(event: Event) { emit('update:modelValue', (event.target as HTMLTextAreaElement).value) }
 
+function applyEditorTheme() {
+  if (!monacoModule) return
+  const style = getComputedStyle(document.documentElement)
+  const color = (name: string) => style.getPropertyValue(`--db-editor-${name}`).trim()
+  const token = (name: string) => color(name).replace('#', '')
+  const name = `dbhub-${resolvedTheme.value}`
+  monacoModule.editor.defineTheme(name, {
+    base: resolvedTheme.value === 'dark' ? 'vs-dark' : 'vs', inherit: true,
+    rules: [
+      { token: 'keyword', foreground: token('keyword') },
+      { token: 'keyword.sql', foreground: token('keyword') },
+      { token: 'predefined.sql', foreground: token('keyword') },
+      { token: 'string', foreground: token('string') },
+      { token: 'string.sql', foreground: token('string') },
+      { token: 'number', foreground: token('number') },
+      { token: 'number.sql', foreground: token('number') },
+      { token: 'comment', foreground: token('comment') },
+      { token: 'comment.sql', foreground: token('comment') },
+      { token: 'comment.quote.sql', foreground: token('comment') },
+      { token: 'delimiter.sql', foreground: token('text') },
+      { token: 'operator.sql', foreground: token('text') },
+      { token: 'identifier.quote.sql', foreground: token('text') },
+    ],
+    colors: {
+      'editor.background': color('bg'), 'editor.foreground': color('text'),
+      'editorLineNumber.foreground': color('muted'), 'editorLineNumber.activeForeground': color('text'),
+      'editor.selectionBackground': color('selection'), 'editor.lineHighlightBackground': color('line'),
+      'editorCursor.foreground': color('keyword'), 'editorGutter.background': color('bg'),
+      'editorWidget.background': color('bg'), 'editorWidget.foreground': color('text'),
+      'editorSuggestWidget.background': color('bg'), 'editorSuggestWidget.foreground': color('text'),
+      'editorSuggestWidget.selectedBackground': color('selection'),
+    },
+  })
+  monacoModule.editor.setTheme(name)
+}
+
 function disposeEditor() {
   observer?.disconnect()
   subscriptions.splice(0).forEach(subscription => subscription.dispose())
@@ -73,24 +88,11 @@ onMounted(async () => {
   try {
     const monaco = await import('monaco-editor')
     if (disposed || !container.value) return
-    monaco.editor.defineTheme('dbhub-dark', {
-      base: 'vs-dark', inherit: true,
-      rules: [
-        { token: 'keyword', foreground: 'A78BFA' },
-        { token: 'string', foreground: '6EE7B7' },
-        { token: 'number', foreground: 'FBBF24' },
-        { token: 'comment', foreground: '8792A7' },
-      ],
-      colors: {
-        'editor.background': '#161a2c', 'editor.foreground': '#E0E7FF',
-        'editorLineNumber.foreground': '#8792A7', 'editorLineNumber.activeForeground': '#C4B5FD',
-        'editor.selectionBackground': '#6366F150', 'editor.lineHighlightBackground': '#FFFFFF08',
-        'editorCursor.foreground': '#C4B5FD', 'editorGutter.background': '#161a2c',
-      },
-    })
+    monacoModule = monaco
+    applyEditorTheme()
     editor = monaco.editor.create(container.value, {
-      value: props.modelValue, language: 'sql', theme: 'dbhub-dark', ariaLabel: 'SQL 编辑器',
-      fontSize: 13, lineHeight: 22, fontFamily: 'JetBrains Mono, Menlo, monospace',
+      value: props.modelValue, language: props.language ?? 'sql', readOnly: props.readOnly, theme: `dbhub-${resolvedTheme.value}`, ariaLabel: editorLabel.value,
+      fontSize: 14, lineHeight: 24, fontFamily: 'SFMono-Regular, Consolas, Menlo, monospace',
       minimap: { enabled: false }, wordWrap: 'on', scrollBeyondLastLine: false,
       tabSize: 2, padding: { top: 12, bottom: 12 }, automaticLayout: false,
     })
@@ -118,6 +120,10 @@ onMounted(async () => {
   }
 })
 
+// 切换外观仅更新绘制主题，保留模型、选区与撤销历史。
+watch(resolvedTheme, applyEditorTheme, { flush: 'post' })
+watch(() => props.readOnly, readOnly => editor?.updateOptions({ readOnly }))
+
 watch(() => props.modelValue, value => {
   if (!editor || value === editor.getValue()) return
   const model = editor.getModel()
@@ -134,3 +140,31 @@ onBeforeUnmount(() => {
 
 defineExpose({ getSelection, selectedLength })
 </script>
+
+<template>
+  <div class="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
+    <div v-show="!fallback" ref="container" class="min-h-0 flex-1" />
+    <LoadingState v-if="!ready && !fallback" variant="detail" label="编辑器加载中…" />
+    <template v-if="fallback">
+      <p class="px-4 pt-2 text-xs text-warning">高级编辑器加载失败，已切换为基础编辑器。</p>
+      <textarea
+        ref="textarea"
+        :value="modelValue"
+        :readonly="readOnly"
+        :aria-label="editorLabel"
+        :placeholder="editorPlaceholder"
+        spellcheck="false"
+        class="min-h-0 flex-1 resize-none bg-transparent p-4 font-mono text-sm leading-6 text-accent outline-none"
+        @input="onInput"
+        @select="updateSelection"
+        @keyup="updateSelection"
+        @click="updateSelection"
+        @keydown.ctrl.enter.prevent="emit('run')"
+        @keydown.meta.enter.prevent="emit('run')"
+        @keydown.ctrl.shift.f.prevent="emit('format')"
+        @keydown.meta.shift.f.prevent="emit('format')"
+      />
+    </template>
+    <p v-if="ready && !modelValue" class="pointer-events-none absolute left-[68px] top-3 text-sm text-subtle" aria-hidden="true">{{ editorPlaceholder }}</p>
+  </div>
+</template>

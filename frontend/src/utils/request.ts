@@ -4,13 +4,19 @@ import type { ApiResponse, LoginResult } from '../types/api'
 import { useUserStore } from '../stores/user'
 import { setAuthCookie } from './auth-cookie'
 import router from '../router'
-import {workspaceGeneration,workspaceSignal} from './workspace-context'
+import {changeWorkspaceContext,workspaceGeneration,workspaceSignal} from './workspace-context'
+import {iamUiEnabled} from './iam-mode'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
     /** 调用方自行展示错误和恢复操作时，避免重复弹窗。 */
     workspaceGeneration?: number
+    identityGeneration?: number
     silentError?: boolean
+    /** 仅允许原空间确认读取显式目标的有效权限。 */
+    workspacePermissionCheck?: boolean
+    /** 平台菜单编辑明确指定目标空间，限菜单写入及读取可配置角色。 */
+    platformWorkspaceMenu?: boolean
   }
 }
 
@@ -39,8 +45,23 @@ const request: AxiosInstance = axios.create({
   timeout: 15_000,
 })
 
+function permissionResponseChanged(config: {url?:string;workspaceGeneration?:number},headers:Record<string,unknown>):boolean {
+  if(!iamUiEnabled||config.workspaceGeneration===undefined||config.url?.endsWith('/iam/effective'))return false
+  const user=useUserStore(),state=String(headers['x-dbhub-permission-state']||'')
+  if(state==='invalid_membership'||state==='unavailable'){
+    changeWorkspaceContext();user.clearPermissions();user.permissionStatus='error';user.permissionError=state==='invalid_membership'?'当前工作空间成员资格已失效，请重新选择原空间。':'权限服务暂不可用，请稍后重试。';return true
+  }
+  const epoch=Number(headers['x-dbhub-iam-epoch']||0),version=Number(headers['x-dbhub-iam-config']||0),previous=user.effective?.snapshot
+  if(previous&&epoch&&version&&(previous.authorization_epoch!==epoch||previous.config_version!==version)){
+    changeWorkspaceContext();user.clearPermissions();void user.loadPermissions(true).catch(()=>{});return true
+  }
+  return false
+}
+
 request.interceptors.request.use((config) => {
   const userStore = useUserStore()
+  if(config.identityGeneration!==undefined&&config.identityGeneration!==userStore.identityEpoch())throw new axios.CanceledError('登录身份已变化')
+  config.identityGeneration=userStore.identityEpoch()
   if (userStore.token) {
     // 标准通道 + 自定义头兜底（部分网关会剥离 Authorization）
     config.headers.Authorization = `Bearer ${userStore.token}`
@@ -51,10 +72,19 @@ request.interceptors.request.use((config) => {
       setAuthCookie(userStore.token)
     }
   }
-  const global=/^\/(?:auth|platform)\//.test(config.url||'') || /^\/workspaces(?:$|\/\d+\/(?:members|policy)(?:$|\/))/.test(config.url||'')
+  const path = config.url ?? ''
+  const menuTarget = iamUiEnabled && config.platformWorkspaceMenu && (
+    config.method === 'get' && /^\/workspaces\/[1-9]\d*\/iam\/roles$/.test(path) ||
+    config.method === 'put' && /^\/workspaces\/[1-9]\d*\/iam\/menus$/.test(path)
+  )
+  const global=menuTarget || /^\/(?:auth|platform|role-assignments)\//.test(path) || /^\/(?:iam-recovery|iam-command-status)(?:$|\/)/.test(path) || (iamUiEnabled?path==='/workspaces':/^\/workspaces(?:$|\/\d+\/(?:members|policy)(?:$|\/))/.test(path))
   if(!global){
+    const explicitSpace=/^\/workspaces\/(\d+)\//.exec(config.url||'')
+    const permissionCheck = iamUiEnabled && config.workspacePermissionCheck && config.method === 'get' &&
+      /^\/workspaces\/[1-9]\d*\/iam\/effective$/.test(config.url ?? '')
+    if(iamUiEnabled&&explicitSpace&&Number(explicitSpace[1])!==userStore.workspaceId&&!permissionCheck)throw new axios.CanceledError('请求不属于当前工作空间')
     if(config.workspaceGeneration!==undefined&&config.workspaceGeneration!==workspaceGeneration())throw new axios.CanceledError('工作空间已切换')
-    if(!userStore.workspaceId)throw new axios.CanceledError('请选择工作空间')
+    if(!userStore.workspaceId&&!permissionCheck)throw new axios.CanceledError('请选择工作空间')
     config.workspaceGeneration=workspaceGeneration()
     config.signal=AbortSignal.any([...(config.signal?[config.signal as AbortSignal]:[]),workspaceSignal()])
     if(!config.url?.startsWith('/workspaces/'))config.url=`/workspaces/${userStore.workspaceId}${config.url}`
@@ -63,12 +93,13 @@ request.interceptors.request.use((config) => {
 })
 
 // ---- 静默刷新（单飞，避免多个并发请求同时刷新）----
-let refreshing: Promise<string | null> | null = null
+let refreshing: {identity:number;promise:Promise<string|null>} | null = null
 
 async function refreshAccessToken(): Promise<string | null> {
   const userStore = useUserStore()
   if (!userStore.refreshToken) return null
   const refreshAtStart=userStore.refreshToken
+  const identityAtStart=userStore.identityEpoch()
   try {
     // 用裸 axios 发刷新请求，绕过本实例拦截器，避免 401 递归
     const resp = await axios.post<ApiResponse<LoginResult>>(
@@ -77,7 +108,7 @@ async function refreshAccessToken(): Promise<string | null> {
       { timeout: 10_000 },
     )
     const data = resp.data?.data
-    if (!data?.access_token||userStore.refreshToken!==refreshAtStart) return null
+    if (!data?.access_token||userStore.refreshToken!==refreshAtStart||userStore.identityEpoch()!==identityAtStart) return null
     userStore.token = data.access_token
     userStore.refreshToken = data.refresh_token
     localStorage.setItem('dbhub_access_token', data.access_token)
@@ -114,7 +145,10 @@ function redirectToLogin() {
 
 request.interceptors.response.use(
   (response) => {
+    if(response.config.identityGeneration!==useUserStore().identityEpoch())return Promise.reject(new axios.CanceledError('登录身份已变化'))
     if(response.config.workspaceGeneration!==undefined&&response.config.workspaceGeneration!==workspaceGeneration())return Promise.reject(new axios.CanceledError('工作空间已切换'))
+    if(permissionResponseChanged(response.config,response.headers))return Promise.reject(new axios.CanceledError('权限已变化，旧结果已清理'))
+    if(response.config.responseType==='blob')return response.data
     const body = response.data as ApiResponse
     if (body.code === 0) {
       return body.data as never
@@ -123,26 +157,40 @@ request.interceptors.response.use(
     return Promise.reject(new ApiRequestError(body.message || '请求失败', response.status, body.code, body.data))
   },
   async (error: AxiosError<ApiResponse>) => {
+    if(error.config?.identityGeneration!==undefined&&error.config.identityGeneration!==useUserStore().identityEpoch())return Promise.reject(new axios.CanceledError('登录身份已变化'))
     if (axios.isCancel(error)||error.config?.workspaceGeneration!==undefined&&error.config.workspaceGeneration!==workspaceGeneration()) return Promise.reject(new axios.CanceledError('请求已取消或工作空间已切换'))
+    if(error.config&&error.response&&permissionResponseChanged(error.config,error.response.headers))return Promise.reject(new axios.CanceledError('当前权限需重新确认'))
     const status = error.response?.status
     const original = error.config as (InternalAxiosRequestConfig & { _retried?: boolean }) | undefined
 
     // 401：先尝试静默刷新令牌并重放原请求（登录/刷新接口自身除外，只重试一次）
     const url = error.config?.url || ''
-    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/refresh')
+    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/refresh') || url.includes('/auth/mfa/verify') || url.includes('/auth/sso/complete')
+    if (status === 401 && isAuthEndpoint) {
+      const message = error.response?.data?.message || '身份验证失败，请重试'
+      if (!original?.silentError) ElMessage.error(message)
+      return Promise.reject(new ApiRequestError(message,status,error.response?.data?.code))
+    }
     if (status === 401 && original && !original._retried && !isAuthEndpoint) {
       original._retried = true
-      if (!refreshing) refreshing = refreshAccessToken().finally(() => { refreshing = null })
+      const identity=useUserStore().identityEpoch()
+      if (!refreshing||refreshing.identity!==identity) {
+        const entry={identity,promise:Promise.resolve<string|null>(null)}
+        entry.promise=refreshAccessToken().finally(()=>{if(refreshing===entry)refreshing=null})
+        refreshing=entry
+      }
       let newToken: string | null
       try {
-        newToken = await refreshing
+        newToken = await refreshing.promise
       } catch (refreshError) {
+        if(original.identityGeneration!==useUserStore().identityEpoch())return Promise.reject(new axios.CanceledError('登录身份已变化'))
         // An expired access token plus a temporary refresh outage is not a
         // revoked session. Keep both tokens and allow an explicit later retry.
         if (!original.silentError)
           ElMessage.error(refreshError instanceof Error ? refreshError.message : '会话服务暂不可用')
         return Promise.reject(refreshError)
       }
+      if(original.identityGeneration!==useUserStore().identityEpoch())return Promise.reject(new axios.CanceledError('登录身份已变化'))
       if (newToken) {
         original.headers.Authorization = `Bearer ${newToken}`
         original.headers['X-Access-Token'] = newToken

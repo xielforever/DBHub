@@ -211,6 +211,52 @@ export interface BriefUser {
   role: string
 }
 
+export type TechnicalElementKind = 'database' | 'schema' | 'table' | 'view' | 'field' | 'index' | 'constraint'
+export type TechnicalElementLevel = Sensitivity | 'unclassified'
+
+export interface TechnicalElement {
+  kind: TechnicalElementKind
+  connection_id: number
+  connection_name: string
+  connection_type: string
+  database: string
+  schema: string
+  table: string
+  name: string
+  comment: string
+  level: TechnicalElementLevel
+  tags: string[]
+  owner_name: string
+  synced_at: string
+  properties: Partial<MetaColumn & MetaIndex & MetaKey> & {
+    schema_count?: number
+    object_count?: number
+    column_count?: number
+  }
+}
+
+export interface TechnicalElementQuery {
+  connection_id?: number
+  database?: string
+  schema?: string
+  table?: string
+  q?: string
+  type?: TechnicalElementKind[]
+  level?: TechnicalElementLevel[]
+  tag?: string[]
+  page: number
+  page_size: number
+}
+
+export interface TechnicalElementPage {
+  items: TechnicalElement[]
+  total: number
+  page: number
+  page_size: number
+  sources: { id: number; name: string; type: string }[]
+  available_tags: string[]
+}
+
 export interface TableListParams {
   connection_id?: number
   database?: string
@@ -237,6 +283,14 @@ export interface AnnotationPayload {
 }
 
 export const assetApi = {
+  elements(query: TechnicalElementQuery, signal: AbortSignal) {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query)) {
+      if (Array.isArray(value)) value.forEach(item => params.append(key, item))
+      else if (value !== undefined) params.set(key, String(value))
+    }
+    return request.get<unknown, TechnicalElementPage>('/assets/elements', { params, signal, silentError: true })
+  },
   /** 采集结构；body 为空同步全部关系型数据源，指定 connection_id 同步单源 */
   sync(connectionId?: number) {
     return request.post<unknown, SyncSummary>(
@@ -245,22 +299,23 @@ export const assetApi = {
       { timeout: 250_000 },
     )
   },
-  overview() {
-    return request.get<unknown, OverviewCounts>('/assets/overview')
+  overview(options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, OverviewCounts>('/assets/overview', options)
   },
-  tree(connectionId?: number) {
+  tree(connectionId?: number, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, { items: TreeConnection[] }>('/assets/tree', {
       params: connectionId ? { connection_id: connectionId } : {},
+      ...options,
     })
   },
-  tables(params: TableListParams) {
+  tables(params: TableListParams, options?: { signal?: AbortSignal; silentError?: boolean }) {
     return request.get<unknown, { items: TableAssetRow[]; total: number; page: number; page_size: number }>(
       '/assets/tables',
-      { params },
+      { params, ...options },
     )
   },
-  table(loc: { connection_id: number; database: string; schema: string; table: string }) {
-    return request.get<unknown, TableDetail>('/assets/table', { params: loc })
+  table(loc: { connection_id: number; database: string; schema: string; table: string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, TableDetail>('/assets/table', { params: loc, ...options })
   },
   putAnnotation(payload: AnnotationPayload) {
     return request.put<unknown, { ok: boolean }>('/assets/annotations', payload)
@@ -274,8 +329,8 @@ export const assetApi = {
   briefUsers() {
     return request.get<unknown, { items: BriefUser[] }>('/users/brief')
   },
-  lineage(params: { connection_id: number; database: string; schema: string; table: string; depth?: number | string }) {
-    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number>; cached?:boolean; parser?:string }>('/assets/lineage', { params })
+  lineage(params: { connection_id: number; database: string; schema: string; table: string; depth?: number | string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, { nodes: { id:string; name:string; type:string; db:string; desc:string }[]; edges: { from:string; to:string; kind:string }[]; upstream:number; downstream:number; impact: Record<string,number>; cached?:boolean; parser?:string }>('/assets/lineage', { params, ...options })
   },
   lineageRefresh() {
     return request.post<unknown, { parsed_edges:number; fk_edges:number; total:number }>('/assets/lineage/refresh')

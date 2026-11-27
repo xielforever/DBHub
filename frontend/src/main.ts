@@ -2,19 +2,23 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
-import 'element-plus/dist/index.css'
-// Element Plus 暗色模式变量（通过 <html class="dark"> 启用，覆盖弹窗/下拉等 Teleport 组件）
-import 'element-plus/theme-chalk/dark/css-vars.css'
 import './style.css'
+import { dataLoading } from './utils/data-loading'
 import App from './App.vue'
 import router from './router'
+import { initTheme } from './utils/theme'
+import { installButtonFeedback } from './utils/button-feedback'
 
-document.documentElement.classList.add('dark')
+initTheme()
 
 const app = createApp(App)
+const stopButtonFeedback = installButtonFeedback()
+app.onUnmount(stopButtonFeedback)
+if (import.meta.hot) import.meta.hot.dispose(stopButtonFeedback)
 
 app.use(createPinia())
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 
+app.directive('data-loading', dataLoading)
 app.mount('#app')

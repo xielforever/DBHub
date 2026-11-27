@@ -1,5 +1,4 @@
 import request from '../utils/request'
-import { newRequestId } from '../utils/request-id'
 import type { DataContract } from './managed-report'
 import type {
   ChartKind,
@@ -7,6 +6,7 @@ import type {
 } from '../components/business/chart/ChartCard.vue'
 import type { ExecResult } from './workbench'
 export interface DashboardTile {
+	parameter_bindings?: Record<string, string>
   key: string
   report_id: number
   required: boolean
@@ -21,6 +21,7 @@ export interface DashboardQuality {
   max_watermark_skew_seconds: number
 }
 export interface DashboardDefinition {
+	parameters?: import('../views/report/reportParameters').ReportParameter[]
   name: string
   description: string
   tiles: DashboardTile[]
@@ -31,10 +32,16 @@ export interface DashboardDefinition {
 export interface ManagedDashboard {
   review_status: string
   review_id: number
+  review_version?: number
   reviewer_id: number
+  reviewer_eligible?: boolean
+  review_requires_re_review?: boolean
+  dashboard_matrix_enabled?: boolean
+  can_archive_active?: boolean
   review_was_published: boolean
   id: number
   active_release_id: number | null
+  active_version?: number
   owner_id: number
   owner_name: string
   draft: DashboardDefinition
@@ -46,6 +53,7 @@ export interface ManagedDashboard {
   updated_at: string
 }
 export interface DashboardReport {
+	parameters?: import('../views/report/reportParameters').ReportParameter[]
   id: number
   name: string
   publication_no: number
@@ -62,6 +70,13 @@ export interface DashboardReview {
   submitted_by: number | null
   submitter_name: string
   reviewer_id: number
+  reviewer_eligible?: boolean
+  requires_re_review?: boolean
+  business_signer_id?: number
+  can_publish?: boolean
+  can_rollback?: boolean
+  can_reassign?: boolean
+  approval_stage?: 'data_review' | 'complete'
   status: string
   comment: string
   expires_at: string
@@ -75,6 +90,7 @@ export interface DashboardViewTile extends DashboardTile {
   execution_id?: string
 }
 export interface DashboardView {
+	parameters?: import('../views/report/reportParameters').ReportParameter[]
   id: number
   version: number
   name: string
@@ -179,15 +195,15 @@ export const managedDashboardApi = {
       `/dashboard-reviews/${id}/summary`,
       { ...options, signal },
     ),
-  list: (params: Record<string, unknown> = {}) =>
+  list: (params: Record<string, unknown> = {}, signal?: AbortSignal) =>
     request.get<unknown, { items: ManagedDashboard[]; total: number }>(
       '/managed-dashboards',
-      { params, ...options },
+      { params, ...options, signal },
     ),
-  get: (id: number) =>
+  get: (id: number, signal?: AbortSignal) =>
     request.get<unknown, ManagedDashboard>(
       `/managed-dashboards/${id}`,
-      options,
+      { ...options, signal },
     ),
   save: (
     id: number,
@@ -206,20 +222,29 @@ export const managedDashboardApi = {
           { request_id: key, definition },
           options,
         ),
-  catalog: () =>
+  catalog: (signal?: AbortSignal) =>
     request.get<unknown, { items: DashboardReport[] }>(
       '/dashboard-report-catalog',
-      options,
+      { ...options, signal },
     ),
-  reviews: (id: number) =>
+  reviews: (id: number, signal?: AbortSignal) =>
     request.get<unknown, { items: DashboardReview[] }>(
       `/managed-dashboards/${id}/versions`,
-      options,
+      { ...options, signal },
     ),
-  published: (params: Record<string, unknown> = {}) =>
+  async review(id: number, reviewId: number, signal?: AbortSignal) {
+    const response = await request.get<unknown, { items: DashboardReview[] }>(
+      `/managed-dashboards/${id}/versions`,
+      { params: { review_id: reviewId }, ...options, signal },
+    )
+    if (response.items.length !== 1 || response.items[0]?.id !== reviewId)
+      throw new Error('未读取到指定审批的冻结版本，请重试。')
+    return response.items[0]
+  },
+  published: (params: Record<string, unknown> = {}, signal?: AbortSignal) =>
     request.get<unknown, { items: DashboardView[]; total: number }>(
       '/published-dashboards',
-      { params, ...options },
+      { params, ...options, signal },
     ),
   publishedGet: (id: number, signal?: AbortSignal) =>
     request.get<unknown, DashboardView>(`/published-dashboards/${id}`, {
@@ -253,10 +278,11 @@ export const managedDashboardApi = {
     mode: 'published' | 'draft' | 'review',
     review_id: number,
     signal?: AbortSignal,
+    params?: import('../views/report/reportParameters').ParameterValues,
   ) =>
     request.post<unknown, DashboardRefresh>(
       `/managed-dashboards/${id}/refreshes`,
-      { mode, review_id },
+      { mode, review_id, params },
       { ...options, signal },
     ),
   execute: (id: string, tile: string, signal?: AbortSignal) =>
@@ -275,10 +301,10 @@ export const managedDashboardApi = {
       { ...payload, request_id: key },
       options,
     ),
-  requestAccess: (id: number, tile_key: string, reason: string) =>
-    request.post(
+  requestAccess: (id: number, tile_key: string, reason: string, request_id: string) =>
+    request.post<unknown, { id: number; version: number }>(
       `/published-dashboards/${id}/access-requests`,
-      { request_id: newRequestId(), tile_key, reason },
+      { request_id, tile_key, reason },
       options,
     ),
   accessRequests: () =>

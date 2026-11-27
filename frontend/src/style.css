@@ -1,298 +1,99 @@
+@layer theme, base, vendor, components, utilities;
+/* 第三方样式先分层，宽度工具类保留布局权；正式与预览共用此入口。 */
+/* 控件密度、卡片布局与分组日期导航通过同一入口更新，避免预览保留旧规则。 */
 @import "tailwindcss";
+@import "element-plus/dist/index.css" layer(vendor);
+@import "element-plus/theme-chalk/dark/css-vars.css" layer(vendor);
+@import "./styles/tokens.css";
+@import "./styles/components.css";
+@import "./styles/element-plus.css";
+@import "./styles/editorial.css";
 
-@theme {
-  --color-premium-dark: #0f172a;
-  --color-premium-darker: #0a0f1f;
-  --color-premium-glass: rgba(255, 255, 255, 0.08);
-  --color-premium-glass-strong: rgba(255, 255, 255, 0.14);
-  --color-premium-border: rgba(255, 255, 255, 0.16);
-  --color-accent-blue: #667eea;
-  --color-accent-purple: #764ba2;
-  --color-accent-pink: #ec4899;
-  --color-accent-emerald: #10b981;
-
-  --image-liquid-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --image-glass-gradient: linear-gradient(135deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
-
-  --shadow-glass: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+/* 页面通过用途选择颜色；旧 premium 名称仅映射同一组语义令牌。 */
+@theme inline {
+  --radius-sm: var(--db-radius-control);
+  --radius-md: var(--db-radius-control);
+  --radius-lg: var(--db-radius-control);
+  --radius-xl: var(--db-radius-control);
+  --radius-2xl: var(--db-radius-control);
+  --radius-3xl: var(--db-radius-control);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-xl: none;
+  --shadow-2xl: none;
+  --blur-sm: 0px;
+  --blur-md: 0px;
+  --blur-lg: 0px;
+  --blur-xl: 0px;
+  --blur-2xl: 0px;
+  --blur-3xl: 0px;
+  --font-editorial: var(--db-font-editorial);
+  --font-sans: var(--db-font-sans);
+  --font-mono: var(--db-font-mono);
+  --color-content: var(--db-text-primary);
+  --color-muted: var(--db-text-secondary);
+  --color-subtle: var(--db-text-tertiary);
+  --color-on-primary: var(--db-on-primary);
+  --color-accent: var(--db-accent);
+  --color-accent-soft: var(--db-accent-soft);
+  --color-success: var(--db-success);
+  --color-success-soft: var(--db-success-fill);
+  --color-warning: var(--db-warning);
+  --color-warning-soft: var(--db-warning-fill);
+  --color-danger: var(--db-danger);
+  --color-danger-soft: var(--db-danger-fill);
+  --color-focus: var(--db-focus);
+  --color-stroke: var(--db-border);
+  --color-divider: var(--db-divider);
+  --color-surface-soft: var(--db-surface-soft);
+  --color-surface-muted: var(--db-surface-muted);
+  --color-surface-inset: var(--db-surface-inset);
+  --color-surface-solid: var(--db-surface-solid);
+  --color-surface-data: var(--db-surface-data);
+  --color-surface-overlay: var(--db-surface-overlay);
+  --color-interactive: var(--db-interactive-hover);
+  --color-selected: var(--db-selected);
+  --color-overlay: var(--db-scrim);
+  --color-premium-dark: var(--db-surface-solid);
+  --color-premium-darker: var(--db-page-bg);
+  --color-premium-glass: var(--db-surface-glass);
+  --color-premium-glass-strong: var(--db-surface-data);
+  --color-premium-border: var(--db-glass-edge);
+  --color-accent-blue: var(--db-action-primary);
+  --color-accent-purple: var(--db-chart-2);
+  --color-accent-pink: var(--db-chart-5);
+  --color-accent-emerald: var(--db-chart-3);
+  --image-liquid-gradient: linear-gradient(var(--db-action-primary), var(--db-action-primary));
+  --image-glass-gradient: none;
+  --shadow-glass: var(--db-shadow-card);
 }
-
-@layer base {
-  body {
-    @apply m-0 p-0 font-sans text-white bg-premium-darker min-h-screen overflow-x-hidden;
-    background-image:
-      radial-gradient(at 0% 0%, rgba(102, 126, 234, 0.18) 0px, transparent 50%),
-      radial-gradient(at 100% 0%, rgba(118, 75, 162, 0.15) 0px, transparent 50%),
-      radial-gradient(at 100% 100%, rgba(102, 126, 234, 0.1) 0px, transparent 50%),
-      radial-gradient(at 0% 100%, rgba(118, 75, 162, 0.12) 0px, transparent 50%);
-    background-attachment: fixed;
-  }
+:root {
+  --db-loading-fill: var(--db-surface-inset);
+  --db-loading-edge: var(--db-border);
+  --db-loading-text: var(--db-text-secondary);
+  --db-loading-accent: var(--db-accent);
+  --db-loading-indicator-delay: 150ms;
+  --db-loading-long-wait: 5000ms;
 }
-
-@layer components {
-  .glass-card {
-    @apply bg-premium-glass backdrop-blur-xl border border-premium-border shadow-glass rounded-3xl;
-    transition:
-      transform 0.3s ease,
-      box-shadow 0.3s ease;
-  }
-
-  .glass-card:hover {
-    box-shadow: 0 12px 45px 0 rgba(31, 38, 135, 0.45);
-  }
-
-  /* 应用框架内的玻璃面板（不随悬停位移） */
-  .glass-panel {
-    @apply bg-premium-glass backdrop-blur-xl border border-premium-border rounded-2xl;
-  }
-
-  .glass-rail {
-    @apply bg-white/5 backdrop-blur-2xl border-r border-premium-border;
-  }
-
-  .glass-input {
-    @apply w-full bg-white/5 border border-premium-border rounded-xl px-4 py-2.5 text-sm
-      text-white placeholder-white/50 outline-none transition-all duration-200;
-  }
-  .glass-input:focus {
-    @apply border-accent-blue/70 bg-white/10;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.18);
-  }
-
-  .liquid-button {
-    @apply relative overflow-hidden px-6 py-2.5 rounded-xl text-white font-semibold
-      shadow-lg transition-all duration-200 active:scale-95 cursor-pointer
-      disabled:opacity-60 disabled:cursor-not-allowed;
-    background-image: var(--image-liquid-gradient);
-  }
-
-  .liquid-button::after {
-    content: '';
-    @apply absolute inset-0 bg-white opacity-0 transition-opacity duration-200;
-  }
-  .liquid-button:not(:disabled):hover::after {
-    @apply opacity-10;
-  }
-
-  .ghost-button {
-    @apply px-4 py-2.5 rounded-xl text-sm text-white/75 border border-premium-border
-      bg-white/5 transition-all duration-200 hover:bg-white/10 hover:text-white
-      active:scale-95 cursor-pointer;
-  }
-
-  .nav-item {
-    @apply flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm text-white/60
-      transition-all duration-200 cursor-pointer hover:text-white hover:bg-white/8;
-  }
-  .nav-item.router-link-active {
-    @apply text-white font-medium;
-    background-image: var(--image-liquid-gradient);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.35);
-  }
-
-  .rail-icon {
-    @apply w-11 h-11 flex items-center justify-center rounded-xl text-white/55
-      transition-all duration-200 cursor-pointer hover:text-white hover:bg-white/10;
-  }
-  .rail-icon.router-link-active {
-    @apply text-white;
-    background-image: var(--image-liquid-gradient);
-    box-shadow: 0 6px 18px rgba(102, 126, 234, 0.4);
-  }
-}
-
-#app {
-  @apply min-h-screen w-full;
-}
-
-/* 细滚动条，强化精致感 */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.22);
-}
-
-/* Element Plus 暗色玻璃化微调 */
-.el-input__wrapper {
-  background: rgba(255, 255, 255, 0.06) !important;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16) inset !important;
-  border-radius: 0.75rem !important;
-}
-.el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.7) inset, 0 0 0 3px rgba(102, 126, 234, 0.18) !important;
-}
-.el-input__inner {
-  color: #fff !important;
-}
-.el-input__inner::placeholder {
-  color: rgba(255, 255, 255, 0.5) !important;
-}
-.el-tabs__item {
-  color: rgba(255, 255, 255, 0.55) !important;
-}
-.el-tabs__item.is-active {
-  color: #fff !important;
-}
-.el-tabs__nav-wrap::after {
-  background-color: rgba(255, 255, 255, 0.1) !important;
-}
-
-/* 对话框玻璃化（暗色变量基础上叠加通透感） */html.dark {
-  --el-bg-color: rgba(20, 28, 48, 0.92);
-  --el-bg-color-overlay: rgba(24, 33, 56, 0.96);
-  --el-fill-color-blank: transparent;
-  --el-border-color: rgba(255, 255, 255, 0.14);
-  --el-border-color-light: rgba(255, 255, 255, 0.12);
-  --el-text-color-primary: #ffffff;
-  --el-text-color-regular: rgba(255, 255, 255, 0.75);
-}
-.el-overlay {
-  background-color: rgba(5, 8, 18, 0.55) !important;
-  backdrop-filter: blur(4px);
-}
-.glass-dialog {
-  background: rgba(20, 28, 48, 0.92) !important;
-  backdrop-filter: blur(28px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 1.25rem !important;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-}
-.glass-dialog .el-dialog__header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  margin-right: 0;
-  padding-bottom: 0.9rem;
-}
-.glass-dialog .el-dialog__body {
-  padding-top: 1.25rem;
-}
-
-/* ===== 下拉弹层 / 日期面板 / 用户菜单 玻璃化（teleport 到 body，需全局样式） =====
-   仅作用于 select / date-picker / dropdown 三类 popper，不影响 tooltip、popover 等 */
-.el-select__popper.el-popper,
-.el-picker__popper.el-popper,
-.el-dropdown__popper.el-popper {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
-}
-.el-select__popper .el-popper__arrow::before,
-.el-picker__popper .el-popper__arrow::before,
-.el-dropdown__popper .el-popper__arrow::before {
-  background: rgba(20, 28, 48, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.14) !important;
-}
-.el-select__popper .el-select-dropdown,
-.glass-popper .el-select-dropdown {
-  background: rgba(20, 28, 48, 0.94) !important;
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-radius: 0.9rem !important;
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45) !important;
-  padding: 0.35rem;
-}
-.el-select-dropdown__item {
-  color: rgba(255, 255, 255, 0.72);
-  border-radius: 0.6rem;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-.el-select-dropdown__item.is-hovering,
-.el-select-dropdown__item:hover {
-  background: rgba(255, 255, 255, 0.09) !important;
-  color: #fff;
-}
-.el-select-dropdown__item.is-selected {
-  color: #a5b4fc;
-  font-weight: 600;
-  background: rgba(102, 126, 234, 0.16) !important;
-}
-.el-select-dropdown__item.is-disabled {
-  color: rgba(255, 255, 255, 0.28);
-}
-.el-select-dropdown__empty {
-  color: rgba(255, 255, 255, 0.4);
-}
-
-/* el-select 收起态与玻璃输入框对齐 */
-.el-select {
-  --el-select-border-color-hover: rgba(102, 126, 234, 0.7);
-}
-.el-select .el-input__wrapper {
-  cursor: pointer;
-}
-
-/* 日期选择面板玻璃化 */
-.el-picker__popper .el-picker-panel {
-  background: rgba(20, 28, 48, 0.96) !important;
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-radius: 0.9rem !important;
-  color: rgba(255, 255, 255, 0.75);
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45) !important;
-}
-.el-date-table th {
-  color: rgba(255, 255, 255, 0.4);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-.el-date-table td .el-date-table-cell__text {
-  color: rgba(255, 255, 255, 0.75);
-}
-.el-date-table td.in-range .el-date-table-cell {
-  background: rgba(102, 126, 234, 0.18);
-}
-.el-date-table td.current:not(.disabled) .el-date-table-cell__text {
-  background-image: var(--image-liquid-gradient);
-  color: #fff;
-}
-.el-picker-panel .el-input__wrapper {
-  background: rgba(255, 255, 255, 0.06) !important;
-}
-
-/* 下拉菜单（用户头像菜单等）玻璃化 */
-.el-dropdown__popper .el-dropdown-menu {
-  background: rgba(20, 28, 48, 0.96) !important;
-  backdrop-filter: blur(28px);
-  -webkit-backdrop-filter: blur(28px);
-  border: 1px solid rgba(255, 255, 255, 0.14) !important;
-  border-radius: 0.9rem !important;
-  padding: 0.35rem;
-  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.45) !important;
-}
-.el-dropdown-menu__item {
-  color: rgba(255, 255, 255, 0.75);
-  border-radius: 0.6rem;
-}
-.el-dropdown-menu__item:not(.is-disabled):hover,
-.el-dropdown-menu__item:focus {
-  background: rgba(255, 255, 255, 0.09) !important;
-  color: #fff;
-}
-.el-dropdown-menu__item--divided {
-  border-top-color: rgba(255, 255, 255, 0.1);
-}
-
-/* 侧边抽屉玻璃化 */
-.glass-drawer .el-drawer {
-  background: rgba(15, 23, 42, 0.96);
-  backdrop-filter: blur(28px);
-}
-.glass-drawer .el-drawer__header {
-  margin-bottom: 0;
-  padding: 1rem 1.25rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  color: #fff;
-  font-weight: 600;
-}
-.glass-drawer .el-drawer__body {
-  padding: 0.75rem;
-}
+.db-loading-region { position: relative !important; min-height: var(--db-loading-region-height, 160px); }
+.db-loading-region > :not(.db-loading-region-status) { visibility: hidden !important; }
+.db-loading-region thead { visibility: visible !important; }
+.db-loading-region-status { position: absolute; inset: var(--db-loading-header-height, 0px) 0 0; overflow: auto; background: var(--db-surface-data); z-index: 1; }
+.db-loading-state { min-height: 160px; padding: 16px; color: var(--db-loading-text); width: 100%; }
+.db-loading-state--inline { min-height: 24px; padding: 4px 0; display: flex; gap: 8px; align-items: center; }
+.db-loading-state--inline .db-loading-spinner { width: 16px; height: 16px; }
+.db-loading-state--inline .db-loading-state__label { margin: 0; font-size: 12px; }
+.db-loading-state--detail { min-height: 96px; }
+.db-loading-state__visual { visibility: hidden; }
+.db-loading-state__visual.is-visible { visibility: visible; }
+.db-loading-state__label { font-size: 14px; line-height: 1.6; margin-top: 8px; min-height: 23px; }
+.db-loading-spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--db-loading-edge); border-top-color: var(--db-loading-accent); border-radius: 50%; animation: db-loading-turn .8s linear infinite; }
+.db-loading-skeleton { display: grid; gap: 0; margin-top: 8px; }
+.db-loading-skeleton__row { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 24px; padding: 12px 0; border-bottom: 1px solid var(--db-loading-edge); }
+.db-loading-skeleton__row i { height: 12px; border-radius: 3px; background: var(--db-loading-fill); }
+.db-loading-skeleton__row i:last-child { width: 60%; }
+.db-loading-chart { height: 160px; margin-top: 8px; border: 1px solid var(--db-loading-edge); background: var(--db-loading-fill); }
+@keyframes db-loading-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .db-loading-spinner, .el-icon.is-loading, .animate-spin { animation: none !important; } }
+@media (forced-colors: active) { .db-loading-skeleton__row i, .db-loading-chart { border: 1px solid CanvasText; } .db-loading-spinner { border-color: CanvasText; border-top-color: Highlight; } }

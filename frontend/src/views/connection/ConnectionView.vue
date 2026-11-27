@@ -1,262 +1,14 @@
-<template>
-  <div class="space-y-5">
-    <header class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-      <div>
-        <h1 class="text-xl font-semibold">数据源</h1>
-        <p class="text-sm text-white/45 mt-1">从目录添加数据源，使用自己的数据库账号连接；也可以创建个人数据源。</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-2"><RouterLink to="/source-tasks" class="ghost-button text-sm min-h-11 inline-flex items-center">巡检与采集任务</RouterLink><button class="liquid-button flex items-center justify-center gap-2 shrink-0" @click="openCreate">
-        <Plus class="w-4 h-4" />新建个人数据源
-      </button></div>
-    </header>
-
-    <div class="flex flex-wrap gap-2" role="tablist" aria-label="数据源范围">
-      <button id="my-connections-tab" role="tab" :aria-selected="activeTab === 'mine'" :class="activeTab === 'mine' ? 'liquid-button' : 'ghost-button'" @click="activeTab = 'mine'">我的连接</button>
-      <button id="source-catalog-tab" role="tab" :aria-selected="activeTab === 'catalog'" :class="activeTab === 'catalog' ? 'liquid-button' : 'ghost-button'" @click="activeTab = 'catalog'">数据源目录</button>
-    </div>
-    <SourceCatalog v-if="activeTab === 'catalog'" @added="addedFromCatalog" />
-    <div v-if="activeTab === 'mine'" class="flex flex-wrap items-center gap-3">
-      <div class="relative w-full sm:w-72 shrink-0">
-        <Search class="w-4 h-4 text-white/40 absolute left-3.5 top-1/2 -translate-y-1/2" />
-        <input
-          v-model.trim="keyword"
-          aria-label="搜索数据源名称或主机"
-          class="glass-input pl-10"
-          placeholder="搜索数据源名称或主机"
-          @input="fetchConnections"
-        />
-      </div>
-      <div class="w-full sm:w-44 shrink-0">
-        <el-select
-          v-model="typeFilter"
-          aria-label="按数据库类型筛选"
-          class="w-full"
-          popper-class="glass-popper"
-          @change="fetchConnections"
-        >
-          <el-option label="全部类型" value="all" />
-          <el-option label="MySQL" value="mysql" />
-          <el-option label="PostgreSQL" value="postgres" />
-          <el-option label="Redis" value="redis" />
-          <el-option label="自定义 JDBC" value="jdbc" />
-        </el-select>
-      </div>
-      <button class="ghost-button text-xs py-1.5 px-3 flex items-center gap-1" @click="goProxies">
-        <Waypoints class="w-3.5 h-3.5" />连接代理
-      </button>
-    </div>
-
-    <div v-if="activeTab === 'mine'" v-loading="connLoading" class="min-h-[160px]" role="tabpanel" aria-labelledby="my-connections-tab">
-      <section v-if="connections.length" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-        <article v-for="conn in connections" :key="conn.id" class="glass-card p-5 hover:-translate-y-1 flex flex-col gap-4">
-          <div class="flex items-start gap-3.5">
-            <div class="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" :style="{ background: (typeMeta[conn.type] || typeMeta.jdbc).tint }">
-              <component :is="(typeMeta[conn.type] || typeMeta.jdbc).icon" class="w-5 h-5" :style="{ color: (typeMeta[conn.type] || typeMeta.jdbc).color }" />
-            </div>
-            <div class="min-w-0 flex-1">
-              <h3 class="font-medium truncate">{{ conn.name }}</h3>
-              <p class="text-xs text-white/45 mt-0.5 truncate">{{ conn.port ? `${conn.host}:${conn.port}` : conn.database }}</p>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="px-2 py-0.5 rounded-full bg-white/8 text-white/60">{{ sourceLabel(conn) }}{{ conn.type === 'jdbc' ? ' · JDBC' : '' }}</span>
-            <span class="px-2 py-0.5 rounded-full" :class="envMeta[conn.environment || 'dev'].cls">
-              {{ envMeta[conn.environment || 'dev'].label }}
-            </span>
-            <span v-if="conn.database" class="px-2 py-0.5 rounded-full bg-white/8 text-white/50 max-w-[180px] truncate">{{ conn.database }}</span>
-            <span v-if="conn.proxy_name" class="px-2 py-0.5 rounded-full bg-violet-400/15 text-violet-300 flex items-center gap-1">
-              <Waypoints class="w-3 h-3" />{{ conn.proxy_name }}
-            </span>
-            <span v-if="conn.tunnel_name" class="px-2 py-0.5 rounded-full bg-sky-400/15 text-sky-300 flex items-center gap-1 opacity-60">
-              <Network class="w-3 h-3" />{{ conn.tunnel_name }}(废弃)
-            </span>
-            <span class="px-2 py-0.5 rounded-full" :class="conn.has_password ? 'bg-emerald-400/15 text-emerald-300' : 'bg-amber-400/15 text-amber-300'">
-              {{ conn.has_password ? '凭据已保存' : '无口令' }}
-            </span>
-          </div>
-
-          <p class="text-xs text-white/50 break-all">数据库账号：{{ conn.username || '未设置' }}<span v-if="conn.definition"> · 修订 {{ conn.definition.revision }}</span></p>
-          <p v-if="conn.capabilities?.reason" class="text-xs text-amber-200" role="status">{{ conn.capabilities.reason }}</p>
-          <p v-if="connectionChecks[conn.id]" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(connectionChecks[conn.id]!)">
-            最近检查：{{ compatibilityText(connectionChecks[conn.id]!) }}
-            <span v-if="connectionChecks[conn.id]!.checked_at" class="block text-white/40">{{ checkTime(connectionChecks[conn.id]!.checked_at) }} · {{ connectionChecks[conn.id]!.elapsed_ms }} ms</span>
-          </p>
-          <ConnectionDiagnosis :diagnostic="connectionChecks[conn.id]?.diagnostic" :can-update-credentials="canEdit(conn)" @recover="openCredentials(conn)" />
-
-          <button v-if="userStore.role === 'admin' && conn.definition?.visibility !== 'global' && !conn.proxy_id && !conn.ssh_tunnel_id" class="ghost-button text-xs" :disabled="publishing" @click="publishDefinition(conn)">发布数据源定义</button>
-          <div class="flex items-center gap-2 pt-2 border-t border-white/10">
-            <button class="ghost-button flex-1 text-xs py-2 flex items-center justify-center gap-1.5" @click="goQuery(conn)">
-              <SquareTerminal class="w-3.5 h-3.5" />打开
-            </button>
-            <button
-              class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-emerald-500/15 hover:text-emerald-300 transition-colors"
-              :aria-label="`测试连接 ${conn.name}`"
-              :disabled="!!testingSaved[conn.id]"
-              title="测试连接"
-              @click="testSaved(conn)"
-            >
-              <Zap class="w-4 h-4" />
-            </button>
-            <button
-              v-if="canEdit(conn)"
-              class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-white/10 hover:text-white transition-colors"
-              aria-label="编辑数据源"
-              title="编辑"
-              @click="openEdit(conn)"
-            >
-              <Pencil class="w-4 h-4" />
-            </button>
-            <button
-              v-if="canEdit(conn)"
-              class="w-9 h-9 rounded-lg flex items-center justify-center text-white/50 hover:bg-rose-500/20 hover:text-rose-300 transition-colors"
-              aria-label="删除数据源"
-              title="删除"
-              @click="remove(conn)"
-            >
-              <Trash2 class="w-4 h-4" />
-            </button>
-          </div>
-        </article>
-      </section>
-      <div v-else-if="!connLoading" class="glass-card p-12 flex flex-col items-center justify-center gap-3 text-center">
-        <Database class="w-10 h-10 text-white/20" />
-        <p class="text-white/55 text-sm">还没有个人连接。前往“数据源目录”添加，或新建个人数据源。</p>
-      </div>
-    </div>
-
-    <!-- 连接弹窗 -->
-    <el-dialog
-      v-model="connDialog"
-      :title="connForm.id ? '编辑数据源' : '新建数据源'"
-      :width="dialogWidth"
-      :close-on-click-modal="false"
-      class="glass-dialog"
-      @closed="clearFormSecrets"
-      @opened="focusRecoveryPassword"
-    >
-      <el-form label-position="top" class="space-y-1">
-        <p class="text-xs text-white/45 mb-3">基本信息</p>
-        <el-form-item label="数据源名称">
-          <el-input v-model="connForm.name" placeholder="例如：生产环境-订单库" />
-        </el-form-item>
-        <p v-if="publicTargetLocked" class="text-xs text-white/55 mb-3">连接目标来自共享定义，地址和驱动不可在这里覆盖。新修订请到数据源目录确认切换。</p>
-        <el-form-item v-if="!publicTargetLocked" label="数据源类型">
-          <el-select v-model="connForm.type" class="w-full" popper-class="glass-popper" @change="onTypeChange">
-            <el-option label="MySQL" value="mysql" />
-            <el-option label="PostgreSQL" value="postgres" />
-            <el-option label="Redis" value="redis" />
-            <el-option label="自定义 JDBC" value="jdbc" />
-          </el-select>
-        </el-form-item>
-        <p v-if="!publicTargetLocked" class="text-xs text-white/50 leading-relaxed" data-testid="version-support-hint">{{ versionHint }}</p>
-
-        <template v-if="!publicTargetLocked && connForm.type === 'jdbc'">
-          <el-form-item label="数据源模板">
-            <el-select v-model="connForm.template_revision_id" class="w-full" aria-label="数据源模板" placeholder="选择已发布模板" @change="onTemplateChange">
-              <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="`${t.name} · 修订 ${t.revision}`" :disabled="!t.enabled || !t.driver.enabled" />
-            </el-select>
-          </el-form-item>
-          <p v-if="!templates.length" class="text-xs text-amber-200">暂无已发布模板。<RouterLink v-if="userStore.role === 'admin'" to="/settings" class="underline">前往系统设置登记驱动并发布模板</RouterLink><span v-else>请联系管理员配置驱动与数据源模板。</span></p>
-          <p v-if="selectedTemplate" class="text-xs text-white/45">{{ selectedTemplate.product }} · {{ selectedTemplate.driver.name }} {{ selectedTemplate.driver.version }} · {{ selectedTemplate.dialect ? 'SQL 与结构浏览' : '仅结构浏览' }}</p>
-          <el-form-item v-for="field in selectedTemplate?.fields || []" :key="field.name" :label="field.label">
-            <el-input v-model="jdbcParameters[field.name]" :type="field.type === 'integer' ? 'number' : 'text'" :placeholder="field.default || field.label" />
-          </el-form-item>
-        </template>
-
-        <p class="text-xs text-white/45 mb-3 mt-4">连接信息</p>
-        <template v-if="!publicTargetLocked && connForm.type !== 'jdbc'">
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <el-form-item label="主机" class="sm:col-span-2">
-            <el-input v-model="connForm.host" placeholder="192.168.1.10" />
-          </el-form-item>
-          <el-form-item label="端口">
-            <el-input v-model.number="connForm.port" type="number" :min="1" :max="65535" />
-          </el-form-item>
-        </div>
-        <el-form-item :label="connForm.type === 'redis' ? '数据库编号（0-15，可选）' : '默认数据库（可选）'">
-          <el-input v-model="connForm.database" :placeholder="connForm.type === 'redis' ? '0' : '业务库名'" />
-        </el-form-item>
-        </template>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <el-form-item :label="connForm.type === 'redis' ? 'ACL 用户名（可选）' : '用户名'">
-            <el-input v-model="connForm.username" />
-          </el-form-item>
-          <el-form-item label="密码">
-            <el-input
-              ref="passwordInput"
-              v-model="connForm.password"
-              autocomplete="new-password"
-              type="password"
-              show-password
-              :placeholder="connForm.id && !connForm.password ? '已保存，留空表示不修改' : 'AES-256-GCM 加密存储'"
-            />
-            <p v-if="connForm.id" class="text-[11px] text-white/40 mt-1">留空使用已保存口令；修改连接目标、JDBC 模板或参数、账号、TLS 或代理后，测试需重新输入口令。</p>
-          </el-form-item>
-        </div>
-        <div v-if="!publicTargetLocked" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <el-form-item label="SSL 模式">
-            <el-select v-model="connForm.ssl_mode" class="w-full" popper-class="glass-popper">
-              <el-option label="禁用（内网明文）" value="disable" />
-              <el-option label="加密并验证证书" value="verify-full" :disabled="selectedTemplate && !['org.opengauss.Driver', 'org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.driver.class_name)" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="连接超时（秒）">
-            <el-input v-model.number="connForm.connection_timeout" type="number" :min="1" :max="30" />
-          </el-form-item>
-        </div>
-        <el-form-item v-if="!publicTargetLocked" label="所属环境（资产徽标与高危操作提示依据）">
-          <el-select v-model="connForm.environment" class="w-full" popper-class="glass-popper">
-            <el-option label="开发环境（dev）" value="dev" />
-            <el-option label="测试环境（test）" value="test" />
-            <el-option label="生产环境（prod）" value="prod" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="!publicTargetLocked && connForm.type !== 'jdbc'" label="代理（可选）">
-          <el-select v-model="connForm.proxy_id" class="w-full" popper-class="glass-popper" clearable placeholder="不使用代理">
-            <el-option label="不使用代理" :value="null" />
-            <el-option v-for="p in proxies" :key="p.id" :label="`${p.name}（${p.type} ${p.host}:${p.port}）`" :value="p.id" />
-          </el-select>
-          <p class="text-[11px] text-white/30 mt-1">在连接代理创建代理后在此选用，连接测试和查询均使用该代理。</p>
-        </el-form-item>
-        <p v-if="formTest" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(formTest)" data-testid="connection-version-result">
-          {{ compatibilityText(formTest) }}
-          <template v-if="formTest.ok">。{{ versionInfo(formTest).message }}
-            <span v-if="versionInfo(formTest).tested_version && versionInfo(formTest).status === 'branch_verified'">实测版本 {{ versionInfo(formTest).tested_version }}。</span>
-          </template>
-        </p>
-        <ConnectionDiagnosis :diagnostic="formTest?.diagnostic" />
-      </el-form>
-
-      <template #footer>
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <button class="ghost-button flex items-center gap-2" :disabled="testing" @click="testUnsaved">
-            <Zap class="w-4 h-4" /> {{ testing ? '测试中…' : '测试连接' }}
-          </button>
-          <div class="flex gap-2 ml-auto">
-            <button class="ghost-button" @click="connDialog = false">取消</button>
-            <button class="liquid-button" :disabled="saving" @click="saveConnection">{{ saving ? '保存中…' : '保存' }}</button>
-          </div>
-        </div>
-      </template>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Database,
-  Network,
-  Pencil,
+  Ellipsis,
+  Library,
   Plus,
-  Search,
-  Server,
+  Settings2,
   SquareTerminal,
-  Trash2,
-  Waypoints,
   Zap,
 } from 'lucide-vue-next'
 import {
@@ -272,36 +24,88 @@ import {
 } from '../../api/datasource'
 import { proxyApi, type ProxyItem } from '../../api/proxy'
 import { useUserStore } from '../../stores/user'
+import LoadingState from '../../components/base/LoadingState.vue'
+import PageHeader from '../../components/base/PageHeader.vue'
+import PageState from '../../components/base/PageState.vue'
+import { pageTitles } from '../../navigation'
 import { ApiRequestError } from '../../utils/request'
 import { connectorApi, type DatasourceTemplate } from '../../api/connector'
 import SourceCatalog from './SourceCatalog.vue'
 import { sourceCatalogApi } from '../../api/source-catalog'
 import ConnectionDiagnosis from './ConnectionDiagnosis.vue'
+import SourceTasksView from './SourceTasksView.vue'
+import ProxyView from '../proxy/ProxyView.vue'
+import { featureAllowed } from '../../utils/permission'
+import type { JobConnection } from '../../api/automation'
 
 const router = useRouter()
 const userStore = useUserStore()
-const canEdit = (c: ConnectionItem) => userStore.user?.id === c.user_id
-const activeTab = ref<'mine'|'catalog'>('mine')
+const canManage = computed(() => featureAllowed(userStore, 'connection.manage', true))
+const canUse = computed(() => featureAllowed(userStore, 'connection.use', true))
+const canManageProxy = computed(() => featureAllowed(userStore, 'connection.proxy.manage', userStore.role !== 'readonly'))
+const canViewTasks = computed(() => featureAllowed(userStore, 'connection.task.view', true))
+const canEdit = (c: ConnectionItem) => canManage.value && userStore.user?.id === c.user_id
+const id = useId()
+const addOpen = ref(false)
+const addStep = ref<'choice' | 'shared'>('choice')
+const addButton = ref<HTMLButtonElement>()
+const detailsID = ref<number>()
+const detailsOpen = ref(false)
+const taskConnection = ref<JobConnection>()
+const tasksOpen = ref(false)
+let taskTrigger: HTMLElement | null = null
 const publishing = ref(false)
-async function addedFromCatalog() { activeTab.value = 'mine'; await fetchConnections() }
+function openAdd() {
+  addStep.value = 'choice'
+  addOpen.value = true
+}
+async function addedFromCatalog() {
+  addOpen.value = false
+  await fetchConnections()
+}
+const canPublish = (c: ConnectionItem) => userStore.hasCapability('datasource_manage')
+  && featureAllowed(userStore, 'source.definition.manage', true)
+  && c.definition?.visibility !== 'global' && !c.proxy_id && !c.ssh_tunnel_id
 async function publishDefinition(c: ConnectionItem) {
  if (publishing.value) return
  try { await ElMessageBox.confirm(`发布「${c.name}」的地址、库名和驱动配置到当前工作空间目录？使用者需要填写自己的数据库账号。`, '发布数据源定义', { type:'info',confirmButtonText:'发布定义' }) } catch { return }
  publishing.value = true
- try { await sourceCatalogApi.publish(c.id,'global'); ElMessage.success('数据源定义已发布'); activeTab.value='catalog' } catch { /* API displays failure */ } finally { publishing.value=false }
+ try { await sourceCatalogApi.publish(c.id,'global'); ElMessage.success('数据源定义已发布'); await fetchConnections() } catch { /* API displays failure */ } finally { publishing.value=false }
 }
 const templates = ref<DatasourceTemplate[]>([])
 const jdbcParameters = reactive<Record<string,string>>({})
 
 const keyword = ref('')
-const typeFilter = ref('all')
+const typeFilter = ref<DbType | ''>('')
+const environmentFilter = ref<EnvKind | ''>('')
 const connections = ref<ConnectionItem[]>([])
 const proxies = ref<ProxyItem[]>([])
-const connLoading = ref(false)
+const connLoading = ref(true)
+const connError = ref('')
+const hasFilters = computed(() => !!(keyword.value.trim() || typeFilter.value || environmentFilter.value))
+const filteredConnections = computed(() => {
+  const search = keyword.value.trim().toLocaleLowerCase()
+  return connections.value.filter(conn =>
+    (!typeFilter.value || conn.type === typeFilter.value)
+    && (!environmentFilter.value || (conn.environment || 'dev') === environmentFilter.value)
+    && (!search || [conn.name, conn.host].some(value => value.toLocaleLowerCase().includes(search))),
+  )
+})
+const selectedConnection = computed(() => connections.value.find(conn => conn.id === detailsID.value))
+function resetFilters() {
+  keyword.value = ''
+  typeFilter.value = ''
+  environmentFilter.value = ''
+}
 const connectionChecks = ref<Record<number, TestResult>>({})
+const savedCheckErrors = ref<Record<number, string>>({})
 const formTest = ref<TestResult | null>(null)
+const formCheckError = ref('')
 const testedVersions = ref<TestedVersion[]>([])
 const testingSaved = ref<Record<number, boolean>>({})
+const savedChecks = new AbortController()
+const savedCheckVersions = new Map<number, number>()
+let draftCheck: AbortController | undefined
 
 function versionInfo(result: TestResult): VersionCompatibility {
   return result.compatibility ?? { engine: result.type, product: typeMeta[result.type as DbType]?.label || '数据库', version: '', branch: '', status: 'unknown', message: '当前服务未返回版本验证信息，兼容性尚未确认。' }
@@ -313,46 +117,57 @@ function compatibilityText(result: TestResult) {
   return `${info.product || result.type} ${info.version || '版本未知'} · ${label}`
 }
 function compatibilityClass(result: TestResult) {
-  if (!result.ok) return 'text-rose-300'
-  return versionInfo(result).status === 'verified' ? 'text-emerald-300' : 'text-amber-200'
+  if (!result.ok) return 'text-danger'
+  return versionInfo(result).status === 'verified' ? 'text-success' : 'text-warning'
 }
 function checkTime(value?: string) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : ''
-}
-function showTestMessage(result: TestResult) {
-  const text = `连接成功：${compatibilityText(result)}（${result.elapsed_ms} ms）`
-  if (versionInfo(result).status === 'verified') ElMessage.success(text)
-  else ElMessage.warning(text)
+  const date = value ? new Date(value) : undefined
+  return date && Number.isFinite(date.getTime()) ? date.toLocaleString('zh-CN', { hour12: false }) : ''
 }
 
-const typeMeta: Record<DbType, { label: string; color: string; tint: string; icon: unknown }> = {
-  mysql: { label: 'MySQL', color: '#60a5fa', tint: 'rgba(59,130,246,0.16)', icon: Database },
-  postgres: { label: 'PostgreSQL', color: '#a78bfa', tint: 'rgba(167,139,250,0.16)', icon: Database },
-  redis: { label: 'Redis', color: '#f472b6', tint: 'rgba(236,72,153,0.14)', icon: Server },
-  jdbc: { label: '自定义 JDBC', color: '#34d399', tint: 'rgba(52,211,153,0.14)', icon: Database },
+const typeMeta: Record<DbType, { label: string }> = {
+  mysql: { label: 'MySQL' },
+  postgres: { label: 'PostgreSQL' },
+  redis: { label: 'Redis' },
+  jdbc: { label: '自定义 JDBC' },
 }
 
 const envMeta: Record<EnvKind, { label: string; cls: string }> = {
-  dev: { label: '开发', cls: 'bg-sky-400/15 text-sky-300' },
-  test: { label: '测试', cls: 'bg-amber-400/15 text-amber-300' },
-  prod: { label: '生产', cls: 'bg-rose-400/15 text-rose-300' },
+  dev: { label: '开发', cls: 'bg-accent-soft text-accent' },
+  test: { label: '测试', cls: 'bg-warning-soft text-warning' },
+  prod: { label: '生产', cls: 'bg-danger-soft text-danger' },
 }
 
 async function fetchConnections() {
+  if (savedChecks.signal.aborted) return
+  const current = ++listVersion
   connLoading.value = true
+  connError.value = ''
+  const checkVersions = new Map(savedCheckVersions)
   try {
-    const res = await connectionApi.list({
-      type: typeFilter.value === 'all' ? '' : typeFilter.value,
-      keyword: keyword.value,
-    })
+    const res = await connectionApi.list(undefined, { signal: savedChecks.signal, silentError: true })
+    if (savedChecks.signal.aborted || current !== listVersion) return
+    const nextChecks: Record<number, TestResult> = {}
+    const nextErrors: Record<number, string> = {}
+    for (const item of res.items) {
+      const sameConfig = connections.value.some(current => current.id === item.id && current.updated_at === item.updated_at)
+      const keepLocal = sameConfig && (testingSaved.value[item.id] || checkVersions.get(item.id) !== savedCheckVersions.get(item.id))
+      const check = keepLocal ? connectionChecks.value[item.id] : item.last_check
+      if (check) nextChecks[item.id] = check
+      const localError = keepLocal ? savedCheckErrors.value[item.id] : undefined
+      if (localError) nextErrors[item.id] = localError
+    }
     connections.value = res.items
-    connectionChecks.value = Object.fromEntries(res.items.filter(item => item.last_check).map(item => [item.id, item.last_check!]))
-  } catch {
-    /* 拦截器已统一提示 */
+    connectionChecks.value = nextChecks
+    savedCheckErrors.value = nextErrors
+  } catch (error) {
+    if (savedChecks.signal.aborted || current !== listVersion) return
+    connError.value = error instanceof Error ? error.message : '请重试读取个人连接。'
   } finally {
-    connLoading.value = false
+    if (!savedChecks.signal.aborted && current === listVersion) connLoading.value = false
   }
 }
+let listVersion = 0
 async function fetchProxies() {
   try {
     const res = await proxyApi.list()
@@ -363,13 +178,30 @@ async function fetchProxies() {
 }
 onMounted(() => {
   fetchConnections()
-  fetchProxies()
-  void connectorApi.templates().then(result => { templates.value = result.items }).catch(() => {})
-  void connectionApi.compatibility().then(result => { testedVersions.value = result.items }).catch(() => { /* 拦截器已提示 */ })
 })
 
-function goProxies() {
-  router.push('/proxies')
+function loadFormOptions() {
+  if (canManageProxy.value) void fetchProxies()
+  void connectorApi.templates().then(result => { templates.value = result.items }).catch(() => {})
+  void connectionApi.compatibility().then(result => { testedVersions.value = result.items }).catch(() => {})
+}
+function runRowAction(action: string, conn: ConnectionItem) {
+  if (action === 'tasks' && canViewTasks.value) {
+    taskTrigger = document.getElementById(`${id}-more-${conn.id}`)
+    taskConnection.value = conn
+    tasksOpen.value = true
+  } else if (action === 'edit' && canEdit(conn)) {
+    openEdit(conn)
+  } else if (action === 'publish' && canPublish(conn)) {
+    void publishDefinition(conn)
+  } else if (action === 'remove' && canEdit(conn)) {
+    void remove(conn)
+  }
+}
+function closeTasks() {
+  taskConnection.value = undefined
+  taskTrigger?.focus({ preventScroll: true })
+  taskTrigger = null
 }
 
 // ---------- 连接表单 ----------
@@ -394,10 +226,17 @@ const emptyConnForm = (): ConnForm => ({
   template_revision_id: null,
 })
 const connDialog = ref(false)
+const advancedOpen = ref(false)
+const proxyDialog = ref(false)
 const connForm = reactive<ConnForm>(emptyConnForm())
 const passwordInput = ref<{focus: () => void}>()
 const focusPasswordOnOpen = ref(false)
-function clearFormSecrets() { connForm.password = ''; formTest.value = null; focusPasswordOnOpen.value = false }
+function clearFormSecrets() {
+  connForm.password = ''
+  clearDraftCheck()
+  focusPasswordOnOpen.value = false
+  if (!connForm.id) addButton.value?.focus()
+}
 function openCredentials(c: ConnectionItem) { openEdit(c); focusPasswordOnOpen.value = true }
 function focusRecoveryPassword() { if (focusPasswordOnOpen.value) passwordInput.value?.focus(); focusPasswordOnOpen.value = false }
 const publicTargetLocked = computed(() => connections.value.find(c => c.id === connForm.id)?.definition?.visibility === 'global')
@@ -408,8 +247,15 @@ const versionHint = computed(() => {
   const branches = testedVersions.value.filter(item => item.engine === connForm.type && item.tested_version).map(item => item.branch)
   return branches.length ? `已验证分支：${branches.join(' / ')}。测试连接可确认当前服务端版本。` : '测试连接后显示版本识别结果；其他版本的兼容性需要单独确认。'
 })
-// 编辑目标或凭据后不保留旧结果，较早发起的响应也不能覆盖当前表单。
-watch(() => JSON.stringify({ id: connForm.id, payload: payloadOf() }), () => { formTest.value = null })
+function clearDraftCheck() {
+  draftCheck?.abort()
+  draftCheck = undefined
+  testing.value = false
+  formTest.value = null
+  formCheckError.value = ''
+}
+watch(() => JSON.stringify({ id: connForm.id, payload: payloadOf() }), clearDraftCheck, { flush: 'sync' })
+watch(connDialog, open => { if (!open) clearDraftCheck() }, { flush: 'sync' })
 
 function onTypeChange(type: DbType) {
   connForm.port = { mysql: 3306, postgres: 5432, redis: 6379, jdbc: 0 }[type]
@@ -423,12 +269,14 @@ function onTemplateChange() {
   if (selectedTemplate.value && !['org.opengauss.Driver', 'org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.value.driver.class_name)) connForm.ssl_mode = 'disable'
 }
 function openCreate() {
+  addOpen.value = false
   focusPasswordOnOpen.value = false
-  activeTab.value = 'mine'
   formTest.value = null
   Object.assign(connForm, emptyConnForm())
   for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
+  advancedOpen.value = false
   connDialog.value = true
+  loadFormOptions()
 }
 function openEdit(c: ConnectionItem) {
   focusPasswordOnOpen.value = false
@@ -447,12 +295,14 @@ function openEdit(c: ConnectionItem) {
     color_label: c.color_label || '',
     environment: c.environment || 'dev',
     ssh_tunnel_id: c.ssh_tunnel_id,
-    proxy_id: (c as any).proxy_id ?? null,
+    proxy_id: c.proxy_id ?? null,
     template_revision_id: c.template_revision_id ?? null,
   })
   for (const key of Object.keys(jdbcParameters)) delete jdbcParameters[key]
   Object.assign(jdbcParameters, c.parameters || {})
+  advancedOpen.value = false
   connDialog.value = true
+  loadFormOptions()
 }
 
 function payloadOf(): ConnectionPayload {
@@ -469,7 +319,7 @@ function payloadOf(): ConnectionPayload {
     color_label: connForm.color_label || '',
     environment: connForm.environment || 'dev',
     ssh_tunnel_id: connForm.ssh_tunnel_id ?? null,
-    proxy_id: (connForm as any).proxy_id ?? null,
+    proxy_id: connForm.proxy_id ?? null,
     ...(connForm.type === 'jdbc' ? { template_revision_id: connForm.template_revision_id, parameters: {...jdbcParameters} } : {}),
   }
 }
@@ -504,56 +354,60 @@ async function testUnsaved() {
     ElMessage.warning('请先填写主机与端口')
     return
   }
+  clearDraftCheck()
+  const current = new AbortController()
+  draftCheck = current
   testing.value = true
-  formTest.value = null
   const id = connForm.id
-  const snapshot = JSON.stringify({ id, payload: payloadOf() })
+  const payload = payloadOf()
+  const options = { signal: current.signal, silentError: true }
   try {
-    const res = id ? await connectionApi.testSaved(id, payloadOf()) : await connectionApi.test(payloadOf())
-    if (!connDialog.value || snapshot !== JSON.stringify({ id: connForm.id, payload: payloadOf() })) return
-    formTest.value = res
-    showTestMessage(res)
+    const result = id ? await connectionApi.testSaved(id, payload, options) : await connectionApi.test(payload, options)
+    if (!current.signal.aborted) formTest.value = result
   } catch (error) {
-    if (connDialog.value && snapshot === JSON.stringify({ id: connForm.id, payload: payloadOf() }) && error instanceof ApiRequestError && error.data) {
-      formTest.value = error.data as TestResult
+    if (!current.signal.aborted) {
+      const result = error instanceof ApiRequestError ? error.data as TestResult | undefined : undefined
+      if (result?.ok === false) formTest.value = result
+      else formCheckError.value = error instanceof ApiRequestError ? error.message : '未能取得连接检查回执，请稍后手动测试。'
     }
-    /* 拦截器已提示 */
   } finally {
-    testing.value = false
+    if (!current.signal.aborted) {
+      draftCheck = undefined
+      testing.value = false
+    }
   }
 }
 
 async function testSaved(c: ConnectionItem) {
   if (testingSaved.value[c.id]) return
   testingSaved.value[c.id] = true
+  savedCheckVersions.set(c.id, (savedCheckVersions.get(c.id) ?? 0) + 1)
   delete connectionChecks.value[c.id]
+  delete savedCheckErrors.value[c.id]
+  const currentConnection = () => savedChecks.signal.aborted
+    ? undefined
+    : connections.value.find(item => item.id === c.id && item.updated_at === c.updated_at)
+  function record(result: TestResult) {
+    const current = currentConnection()
+    if (!current) return
+    if (result.recorded !== true) {
+      savedCheckErrors.value[c.id] = '服务端未确认保存本次检查结果，请刷新连接后核对。'
+      return
+    }
+    connectionChecks.value[c.id] = result
+    current.last_check = result
+  }
   try {
-    ElMessage.info({ message: `正在测试 ${c.name} …`, duration: 1200 })
-    const res = await connectionApi.testSaved(c.id)
-    const current = connections.value.find(item => item.id === c.id)
-    if (!current || current.updated_at !== c.updated_at) return
-    if (res.recorded === false) { await refreshSavedCheck(c.id); return }
-    connectionChecks.value[c.id] = res
-    current.last_check = res
-    showTestMessage(res)
-  } catch {
-    // 失败检查也已持久化；从服务端恢复最新结果，避免显示此前的成功状态。
-    await refreshSavedCheck(c.id)
+    record(await connectionApi.testSaved(c.id, undefined, { signal: savedChecks.signal, silentError: true }))
+  } catch (error) {
+    if (!currentConnection()) return
+    const result = error instanceof ApiRequestError ? error.data as TestResult | undefined : undefined
+    if (result?.ok === false) record(result)
+    else savedCheckErrors.value[c.id] = error instanceof ApiRequestError ? error.message : '未能取得连接检查回执，请稍后手动测试。'
   } finally {
+    savedCheckVersions.set(c.id, (savedCheckVersions.get(c.id) ?? 0) + 1)
     delete testingSaved.value[c.id]
   }
-}
-
-async function refreshSavedCheck(id: number) {
-  try {
-    const latest = await connectionApi.get(id)
-    const index = connections.value.findIndex(item => item.id === id)
-    if (index >= 0) {
-      connections.value[index] = latest
-      if (latest.last_check) connectionChecks.value[id] = latest.last_check
-      else delete connectionChecks.value[id]
-    }
-  } catch { /* 拦截器已提示 */ }
 }
 
 async function remove(c: ConnectionItem) {
@@ -582,5 +436,343 @@ function onResize() {
   viewportWidth.value = window.innerWidth
 }
 onMounted(() => window.addEventListener('resize', onResize))
-onBeforeUnmount(() => window.removeEventListener('resize', onResize))
+onBeforeUnmount(() => {
+  clearDraftCheck()
+  savedChecks.abort()
+  window.removeEventListener('resize', onResize)
+})
 </script>
+
+<template>
+  <div class="ui-page-stack">
+    <PageHeader :title="pageTitles.connections">
+      <template #actions>
+        <button v-if="canManage" ref="addButton" type="button" class="liquid-button inline-flex items-center gap-2 ui-control-target" @click="openAdd">
+          <Plus class="size-4" aria-hidden="true" />添加连接
+        </button>
+      </template>
+    </PageHeader>
+
+    <div class="ui-filter-bar" role="search" aria-label="筛选我的连接">
+      <div class="ui-filter-field ui-filter-search">
+        <label :for="id + '-keyword'" class="text-sm text-muted">搜索连接</label>
+        <input :id="id + '-keyword'" v-model="keyword" type="search" class="glass-input" placeholder="搜索连接名称或主机" />
+      </div>
+      <div class="ui-filter-field">
+        <label :for="id + '-type'" class="text-sm text-muted">数据库类型</label>
+        <select :id="id + '-type'" v-model="typeFilter" class="glass-input">
+          <option value="">全部类型</option>
+          <option v-for="(meta, kind) in typeMeta" :key="kind" :value="kind">{{ meta.label }}</option>
+        </select>
+      </div>
+      <div class="ui-filter-field">
+        <label :for="id + '-environment'" class="text-sm text-muted">环境</label>
+        <select :id="id + '-environment'" v-model="environmentFilter" class="glass-input">
+          <option value="">全部环境</option>
+          <option v-for="(meta, environment) in envMeta" :key="environment" :value="environment">{{ meta.label }}</option>
+        </select>
+      </div>
+    </div>
+
+    <section class="min-h-32 min-w-0" aria-label="我的连接列表" :aria-busy="connLoading">
+      <LoadingState v-if="connLoading" label="正在读取个人连接…" />
+      <PageState v-else-if="connError" title="无法读取个人连接" :description="connError" tone="danger">
+        <template #actions><button type="button" class="ghost-button ui-control-target" @click="fetchConnections">重试</button></template>
+      </PageState>
+      <PageState v-else-if="!filteredConnections.length" :title="hasFilters ? '没有匹配的连接' : '暂无个人连接'"
+        :description="hasFilters ? '请调整搜索词或筛选条件。' : canManage ? '通过页头的添加连接开始。' : '当前工作空间没有你的连接。'">
+        <template v-if="hasFilters" #actions>
+          <button type="button" class="ghost-button ui-control-target" @click="resetFilters">清除筛选</button>
+        </template>
+      </PageState>
+      <div v-else class="editorial-table-wrap">
+        <table class="editorial-table connections-table" aria-label="我的连接">
+          <thead><tr>
+            <th scope="col">连接名称</th><th scope="col">连接类型</th><th scope="col">环境</th>
+            <th scope="col">最近检查</th><th scope="col">操作</th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="conn in filteredConnections" :key="conn.id">
+              <th scope="row" class="connection-name">
+                <button type="button" class="connection-name-button ui-control-target"
+                  @click="detailsID = conn.id; detailsOpen = true">
+                  <Database class="size-4 shrink-0 text-accent" aria-hidden="true" />{{ conn.name }}
+                </button>
+                <p class="editorial-table__meta">{{ conn.host }}<template v-if="conn.port">:{{ conn.port }}</template><template v-if="conn.database"> / {{ conn.database }}</template></p>
+              </th>
+              <td><span class="connection-field-label" aria-hidden="true">连接类型</span><span class="[overflow-wrap:anywhere]">{{ sourceLabel(conn) }}</span></td>
+              <td>
+                <span class="connection-field-label" aria-hidden="true">环境</span>
+                <span class="rounded px-2 py-0.5 text-xs" :class="(envMeta[conn.environment] || envMeta.dev).cls">{{ (envMeta[conn.environment] || envMeta.dev).label }}</span>
+              </td>
+              <td>
+                <span class="connection-field-label" aria-hidden="true">最近检查</span>
+                <div role="status" class="text-sm">
+                  <span v-if="testingSaved[conn.id]" class="text-muted">检查中…</span>
+                  <button v-else-if="savedCheckErrors[conn.id] || connectionChecks[conn.id]?.ok === false"
+                    type="button" class="connection-name-button text-danger ui-control-target"
+                    @click="detailsID = conn.id; detailsOpen = true">{{ savedCheckErrors[conn.id] ? '未取得回执' : '检查失败' }}</button>
+                  <span v-else-if="connectionChecks[conn.id]?.ok" class="text-success">检查通过</span>
+                  <span v-else class="text-muted">未检查</span>
+                  <p v-if="!testingSaved[conn.id] && !savedCheckErrors[conn.id] && checkTime(connectionChecks[conn.id]?.checked_at)"
+                    class="editorial-table__meta">{{ checkTime(connectionChecks[conn.id]?.checked_at) }}</p>
+                </div>
+              </td>
+              <td class="connection-actions-cell">
+                <div class="flex flex-wrap items-center gap-2">
+                  <button v-if="canUse" type="button" class="ghost-button inline-flex items-center gap-1 ui-control-target"
+                    :aria-label="'打开工作台 ' + conn.name" @click="goQuery(conn)">
+                    <SquareTerminal class="size-4" aria-hidden="true" />打开工作台
+                  </button>
+                  <button v-if="canUse" type="button" class="ghost-button ui-control-target aria-disabled:opacity-50"
+                    :aria-label="'测试连接 ' + conn.name" :aria-disabled="testingSaved[conn.id] || undefined"
+                    :aria-busy="!!testingSaved[conn.id]" @click="testSaved(conn)">测试</button>
+                  <el-dropdown v-if="canViewTasks || canEdit(conn) || canPublish(conn)" trigger="click" @command="runRowAction($event, conn)">
+                    <button :id="id + '-more-' + conn.id" type="button" class="ghost-button ui-control-target ui-icon-button"
+                      :aria-label="'更多操作 ' + conn.name">
+                      <Ellipsis class="size-4" aria-hidden="true" />
+                    </button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-if="canViewTasks" command="tasks">任务与计划</el-dropdown-item>
+                        <el-dropdown-item v-if="canEdit(conn)" command="edit">编辑连接</el-dropdown-item>
+                        <el-dropdown-item v-if="canPublish(conn)" command="publish" :disabled="publishing">发布数据源定义</el-dropdown-item>
+                        <el-dropdown-item v-if="canEdit(conn)" command="remove" divided>删除连接</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <p v-if="!connLoading && !connError && filteredConnections.length" class="text-sm text-muted">共 {{ filteredConnections.length }} 条连接</p>
+
+    <el-dialog v-model="addOpen" :title="addStep === 'choice' ? '添加连接' : '选择共享数据源'"
+      width="min(92vw, 640px)" class="glass-dialog" destroy-on-close :close-on-click-modal="false"
+      @closed="!connDialog && addButton?.focus()">
+      <div v-if="addStep === 'choice'" class="grid gap-3">
+        <button type="button" class="ghost-button connection-entry-button ui-control-target" @click="addStep = 'shared'">
+          <Library class="size-5 shrink-0 text-accent" aria-hidden="true" />
+          <span><strong class="block">从共享数据源添加</strong><span class="block text-sm text-muted">选择已发布的连接目标，绑定自己的数据库账号。</span></span>
+        </button>
+        <button type="button" class="ghost-button connection-entry-button ui-control-target" @click="openCreate">
+          <Settings2 class="size-5 shrink-0 text-accent" aria-hidden="true" />
+          <span><strong class="block">手动配置连接</strong><span class="block text-sm text-muted">填写数据库地址、类型和账号。</span></span>
+        </button>
+      </div>
+      <template v-else>
+        <SourceCatalog shared-picker @added="addedFromCatalog" />
+        <button type="button" class="ghost-button mt-4 ui-control-target" @click="addStep = 'choice'">返回添加连接</button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="detailsOpen" :title="selectedConnection?.name || '连接详情'"
+      width="min(92vw, 640px)" class="glass-dialog" destroy-on-close>
+      <template v-if="selectedConnection">
+        <dl class="connection-facts">
+          <dt>连接类型</dt><dd>{{ sourceLabel(selectedConnection) }}</dd>
+          <dt>环境</dt><dd>{{ (envMeta[selectedConnection.environment] || envMeta.dev).label }}</dd>
+          <dt>连接目标</dt><dd>{{ selectedConnection.host }}<template v-if="selectedConnection.port">:{{ selectedConnection.port }}</template></dd>
+          <dt>默认数据库</dt><dd>{{ selectedConnection.database || '未设置' }}</dd>
+          <dt>数据库账号</dt><dd>{{ selectedConnection.username || '未设置' }}</dd>
+          <dt>连接来源</dt><dd>{{ selectedConnection.definition?.visibility === 'global' ? '共享数据源 · 修订 ' + selectedConnection.definition.revision : '个人连接' }}</dd>
+          <dt>代理</dt><dd>{{ selectedConnection.proxy_name || selectedConnection.tunnel_name || '不使用代理' }}</dd>
+        </dl>
+        <p v-if="selectedConnection.capabilities?.reason" class="mt-4 text-sm text-warning">{{ selectedConnection.capabilities.reason }}</p>
+        <section class="mt-4 border-t border-divider pt-3 space-y-2" aria-label="最近检查详情">
+          <h3 class="font-semibold">最近检查</h3>
+          <p v-if="testingSaved[selectedConnection.id]" role="status" class="text-sm text-muted">正在检查连接…</p>
+          <ConnectionDiagnosis v-else-if="savedCheckErrors[selectedConnection.id] || connectionChecks[selectedConnection.id]?.ok === false"
+            :result="savedCheckErrors[selectedConnection.id] ? undefined : connectionChecks[selectedConnection.id]"
+            :error="savedCheckErrors[selectedConnection.id]" :can-update-credentials="canEdit(selectedConnection)" @recover="openCredentials(selectedConnection)" />
+          <p v-else-if="connectionChecks[selectedConnection.id]?.ok" role="status" class="text-sm" :class="compatibilityClass(connectionChecks[selectedConnection.id]!)">
+            {{ compatibilityText(connectionChecks[selectedConnection.id]!) }}
+            <span v-if="checkTime(connectionChecks[selectedConnection.id]?.checked_at)" class="block text-muted">
+              {{ checkTime(connectionChecks[selectedConnection.id]?.checked_at) }} · {{ connectionChecks[selectedConnection.id]?.elapsed_ms }} ms
+            </span>
+          </p>
+          <p v-else class="text-sm text-muted">此连接尚无检查记录。</p>
+        </section>
+      </template>
+      <PageState v-else title="此连接已不可用" description="关闭详情后可查看当前连接列表。" />
+    </el-dialog>
+
+    <el-dialog v-model="tasksOpen" :title="(taskConnection?.name || '连接') + ' · 任务与计划'"
+      width="min(94vw, 1040px)" class="glass-dialog" destroy-on-close @closed="closeTasks">
+      <SourceTasksView v-if="taskConnection && canViewTasks" :key="taskConnection.id" embedded :scoped-connection="taskConnection" />
+    </el-dialog>
+
+    <!-- 连接弹窗 -->
+    <el-dialog
+      v-model="connDialog"
+      :title="connForm.id ? '编辑连接' : '手动配置连接'"
+      :width="dialogWidth"
+      :close-on-click-modal="false"
+      class="glass-dialog"
+      @closed="clearFormSecrets"
+      @opened="focusRecoveryPassword"
+    >
+      <el-form label-position="top" class="space-y-1">
+        <p class="text-xs text-muted mb-3">基本信息</p>
+        <el-form-item label="数据源名称">
+          <el-input v-model="connForm.name" placeholder="例如：生产环境-订单库" />
+        </el-form-item>
+        <p v-if="publicTargetLocked" class="text-xs text-muted mb-3">此连接使用共享数据源的地址和驱动。切换修订时，从「添加连接」选择「从共享数据源添加」。</p>
+        <el-form-item v-if="!publicTargetLocked" label="数据源类型">
+          <el-select v-model="connForm.type" class="w-full" popper-class="glass-popper" @change="onTypeChange">
+            <el-option label="MySQL" value="mysql" />
+            <el-option label="PostgreSQL" value="postgres" />
+            <el-option label="Redis" value="redis" />
+            <el-option label="自定义 JDBC" value="jdbc" />
+          </el-select>
+        </el-form-item>
+        <p v-if="!publicTargetLocked" class="text-xs text-muted leading-relaxed" data-testid="version-support-hint">{{ versionHint }}</p>
+
+        <template v-if="!publicTargetLocked && connForm.type === 'jdbc'">
+          <el-form-item label="数据源模板">
+            <el-select v-model="connForm.template_revision_id" class="w-full" aria-label="数据源模板" placeholder="选择已发布模板" @change="onTemplateChange">
+              <el-option v-for="t in templates" :key="t.id" :value="t.id" :label="`${t.name} · 修订 ${t.revision}`" :disabled="!t.enabled || !t.driver.enabled" />
+            </el-select>
+          </el-form-item>
+          <p v-if="!templates.length" class="text-xs text-warning">暂无已发布模板。<RouterLink v-if="featureAllowed(userStore, 'source.driver.manage', userStore.hasCapability('datasource_manage'))" :to="{ path: '/sources', query: { tab: 'drivers', workspace_id: userStore.workspaceId } }" class="underline">前往数据管理配置驱动与模板</RouterLink><span v-else>请联系管理员配置驱动与数据源模板。</span></p>
+          <p v-if="selectedTemplate" class="text-xs text-muted">{{ selectedTemplate.product }} · {{ selectedTemplate.driver.name }} {{ selectedTemplate.driver.version }} · {{ selectedTemplate.dialect ? 'SQL 与结构浏览' : '仅结构浏览' }}</p>
+          <el-form-item v-for="field in selectedTemplate?.fields || []" :key="field.name" :label="field.label">
+            <el-input v-model="jdbcParameters[field.name]" :type="field.type === 'integer' ? 'number' : 'text'" :placeholder="field.default || field.label" />
+          </el-form-item>
+        </template>
+
+        <p class="text-xs text-muted mb-3 mt-4">连接信息</p>
+        <template v-if="!publicTargetLocked && connForm.type !== 'jdbc'">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <el-form-item label="主机" class="sm:col-span-2">
+            <el-input v-model="connForm.host" placeholder="192.168.1.10" />
+          </el-form-item>
+          <el-form-item label="端口">
+            <el-input v-model.number="connForm.port" type="number" :min="1" :max="65535" />
+          </el-form-item>
+        </div>
+        <el-form-item :label="connForm.type === 'redis' ? '数据库编号（0-15，可选）' : '默认数据库（可选）'">
+          <el-input v-model="connForm.database" :placeholder="connForm.type === 'redis' ? '0' : '业务库名'" />
+        </el-form-item>
+        </template>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <el-form-item :label="connForm.type === 'redis' ? 'ACL 用户名（可选）' : '用户名'">
+            <el-input v-model="connForm.username" />
+          </el-form-item>
+          <el-form-item label="密码">
+            <el-input
+              ref="passwordInput"
+              v-model="connForm.password"
+              autocomplete="new-password"
+              type="password"
+              show-password
+              :placeholder="connForm.id && !connForm.password ? '已保存，留空表示不修改' : 'AES-256-GCM 加密存储'"
+            />
+            <p v-if="connForm.id" class="text-xs text-subtle mt-1">留空使用已保存口令；修改连接目标、JDBC 模板或参数、账号、TLS 或代理后，测试需重新输入口令。</p>
+          </el-form-item>
+        </div>
+        <el-form-item v-if="!publicTargetLocked" label="环境">
+          <el-select v-model="connForm.environment" class="w-full" popper-class="glass-popper">
+            <el-option label="开发" value="dev" />
+            <el-option label="测试" value="test" />
+            <el-option label="生产" value="prod" />
+          </el-select>
+        </el-form-item>
+        <div v-if="!publicTargetLocked" class="border-t border-divider pt-2 mb-3">
+          <button type="button" class="ghost-button ui-control-target"
+            :aria-expanded="advancedOpen" :aria-controls="id + '-advanced'"
+            @click="advancedOpen = !advancedOpen">高级设置</button>
+          <div v-show="advancedOpen" :id="id + '-advanced'" class="pt-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <el-form-item label="SSL 模式">
+            <el-select v-model="connForm.ssl_mode" class="w-full" popper-class="glass-popper">
+              <el-option label="禁用（内网明文）" value="disable" />
+              <el-option label="加密并验证证书" value="verify-full" :disabled="selectedTemplate && !['org.opengauss.Driver', 'org.postgresql.Driver','com.mysql.cj.jdbc.Driver'].includes(selectedTemplate.driver.class_name)" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="连接超时（秒）">
+            <el-input v-model.number="connForm.connection_timeout" type="number" :min="1" :max="30" />
+          </el-form-item>
+            </div>
+        <el-form-item v-if="connForm.type !== 'jdbc' && canManageProxy" label="代理（可选）">
+          <el-select v-model="connForm.proxy_id" class="w-full" popper-class="glass-popper" clearable placeholder="不使用代理">
+            <el-option label="不使用代理" :value="null" />
+            <el-option v-for="p in proxies" :key="p.id" :label="`${p.name}（${p.type} ${p.host}:${p.port}）`" :value="p.id" />
+          </el-select>
+          <button type="button" class="ghost-button mt-2 ui-control-target" @click="proxyDialog = true">管理代理</button>
+        </el-form-item>
+          </div>
+        </div>
+        <p v-if="formTest?.ok" role="status" class="text-xs leading-relaxed" :class="compatibilityClass(formTest)" data-testid="connection-version-result">
+          {{ compatibilityText(formTest) }}
+          。{{ versionInfo(formTest).message }}
+          <span v-if="versionInfo(formTest).tested_version && versionInfo(formTest).status === 'branch_verified'">实测版本 {{ versionInfo(formTest).tested_version }}。</span>
+        </p>
+        <ConnectionDiagnosis :result="formTest" :error="formCheckError" />
+      </el-form>
+
+      <template #footer>
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <button type="button" class="ghost-button flex items-center gap-2 aria-disabled:opacity-50 ui-control-target" :aria-disabled="testing || undefined" @click="testUnsaved">
+            <Zap class="w-4 h-4" /> {{ testing ? '测试中…' : '测试连接' }}
+          </button>
+          <div class="flex gap-2 ml-auto">
+            <button class="ghost-button ui-control-target" @click="connDialog = false">取消</button>
+            <button class="liquid-button ui-control-target" :disabled="saving" @click="saveConnection">{{ saving ? '保存中…' : '保存' }}</button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="proxyDialog" title="连接代理" width="min(94vw, 1040px)" class="glass-dialog"
+      destroy-on-close :close-on-click-modal="false" @closed="fetchProxies">
+      <ProxyView v-if="proxyDialog && canManageProxy" embedded />
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped>
+.connection-name { min-width: 180px; }
+.editorial-table .connection-name { white-space: normal; }
+.connection-name-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.connection-name-button:hover { text-decoration: underline; text-underline-offset: 3px; }
+.connection-entry-button {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 12px;
+  text-align: left;
+  white-space: normal;
+}
+.connection-field-label { display: none; }
+.connection-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
+  overflow-wrap: anywhere;
+}
+.connection-facts dt { color: var(--db-text-secondary); }
+@media (max-width: 736px) {
+  .connections-table { display: block; }
+  .connections-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .connections-table tbody, .connections-table tr { display: block; }
+  .connections-table tr { padding: 12px 16px; border-bottom: 1px solid var(--db-divider); }
+  .connections-table tr:last-child { border-bottom: 0; }
+  .connections-table :is(th, td) { border: 0; padding: 3px 0; }
+  .connections-table th { display: block; min-width: 0; }
+  .connections-table td { display: grid; grid-template-columns: 5rem minmax(0, 1fr); align-items: start; }
+  .connections-table .connection-actions-cell { display: block; margin-top: 6px; }
+  .connection-field-label { display: block; color: var(--db-text-secondary); font-size: 12px; }
+  .connections-table td > :is(span, div) { justify-self: start; }
+}
+</style>

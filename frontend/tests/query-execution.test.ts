@@ -19,6 +19,24 @@ function receipt(id: string, status: ExecutionReceipt['status'], kind: 'query' |
   return { request_id: id, connection_id: 1, database: 'first_db', status, transactional: false, kind, affected_rows: 1, duration_ms: 5, message: '服务端已确认未完成' }
 }
 const rejected = async (id: string) => receipt(id, 'rejected')
+
+test('target reset refuses in-flight and unknown work and clears only settled results', async () => {
+  const scope = effectScope(), pending = deferred<ExecResult>()
+  const execution = scope.run(() => useSqlExecution(() => pending.promise, rejected))!
+  const running = execution.run(context)
+  assert.equal(execution.reset(), false)
+  pending.resolve(result); await running
+  assert.equal(execution.reset(), true)
+  assert.equal(execution.state.value.result, null)
+  assert.equal(execution.state.value.context, null)
+  assert.equal(execution.state.value.status, 'idle')
+  scope.stop()
+  const other = effectScope()
+  const unknown = other.run(() => useSqlExecution(async () => result, rejected, memoryStore('pending-target')))!
+  assert.equal(unknown.reset(), false)
+  assert.equal(unknown.state.value.requestId, 'pending-target')
+  other.stop()
+})
 function memoryStore(id: string | null = null) {
   return { id, read() { return this.id }, write(value: string) { this.id = value }, clear() { this.id = null } }
 }
@@ -52,18 +70,64 @@ test('intentional reruns after confirmed success use different IDs', async () =>
   scope.stop()
 })
 
-test('cancel racing with success checks the receipt instead of displaying late rows', async () => {
-  const scope = effectScope(), pending = deferred<ExecResult>()
-  let signal: AbortSignal | undefined, lookups = 0
-  const execution = scope.run(() => useSqlExecution(async (_, current) => { signal = current; return pending.promise }, async id => { lookups++; return receipt(id, 'failed') }))!
-  const running = execution.run(context)
-  execution.cancel()
-  assert.equal(signal?.aborted, true)
-  assert.equal(await execution.run(context), false)
-  pending.resolve(result); await running
-  assert.equal(lookups, 1)
-  assert.equal(execution.state.value.status, 'canceled')
+test('cancel keeps the pending phase and honors the verified outcome over late rows', async () => {
+  const cases = [
+    { status: 'failed', confirmed: true, expected: 'canceled' },
+    { status: 'failed', confirmed: undefined, expected: 'error' },
+    { status: 'succeeded', confirmed: undefined, expected: 'completed' },
+  ] as const
+  for (const branch of cases) {
+    const scope = effectScope()
+    const pending = deferred<ExecResult>(), lookupStarted = deferred<string>(), outcome = deferred<ExecutionReceipt>()
+    let signal: AbortSignal | undefined
+    const execution = scope.run(() => useSqlExecution(async (_, current) => {
+      signal = current
+      return pending.promise
+    }, id => {
+      lookupStarted.resolve(id)
+      return outcome.promise
+    }))!
+    try {
+      const running = execution.run(context)
+      const originalID = execution.state.value.requestId
+      execution.cancel()
+      assert.equal(signal?.aborted, true)
+      pending.resolve(result)
+      const id = await lookupStarted.promise
+      assert.equal(id, originalID)
+      assert.equal(execution.state.value.status, 'canceling')
+      assert.equal(await execution.run(context), false)
+      outcome.resolve({ ...receipt(id, branch.status), cancellation_confirmed: branch.confirmed })
+      await running
+      assert.equal(execution.state.value.status, branch.expected)
+      assert.equal(execution.state.value.result, null)
+    } finally {
+      scope.stop()
+    }
+  }
+})
+
+test('blocked delivery keeps the original ID until an authorized receipt can be read', async () => {
+  const scope = effectScope(), store = memoryStore()
+  let sends = 0, lookups = 0
+  const execution = scope.run(() => useSqlExecution(async () => {
+    sends++
+    throw Object.assign(new Error('执行结果停止返回'), { status: 409, code: 40902 })
+  }, async id => {
+    lookups++
+    return receipt(id, 'succeeded', 'write')
+  }, store))!
+  await execution.run({ ...context, sql: 'UPDATE items SET count=count+1 WHERE id=1' })
+  assert.equal(execution.state.value.status, 'unknown')
   assert.equal(execution.state.value.result, null)
+  assert.match(store.id!, /^[a-f0-9-]{36}$/)
+  assert.equal(lookups, 0)
+  assert.equal(await execution.run(context), false)
+  await execution.check()
+  assert.equal(execution.state.value.status, 'success')
+  assert.equal(store.id, null)
+  assert.equal(sends, 1)
+  assert.equal(lookups, 1)
   scope.stop()
 })
 
@@ -192,6 +256,30 @@ test('completed query recovery does not present an empty table as a saved result
   assert.equal(execution.state.value.status, 'completed')
   assert.equal(execution.state.value.result, null)
   assert.match(execution.state.value.error, /查询结果未保存/)
+  scope.stop()
+})
+
+test('adopting a verified legacy receipt preserves only matching unresolved execution IDs', () => {
+  const scope = effectScope(), store = memoryStore(), id = crypto.randomUUID(), other = crypto.randomUUID()
+  const execution = scope.run(() => useSqlExecution(async () => result, rejected, store))!
+  assert.equal(execution.adoptReceipt(id, receipt(crypto.randomUUID(), 'running')), false)
+  assert.equal(store.id, null)
+  assert.equal(execution.adoptReceipt(id, receipt(id, 'running')), true)
+  assert.equal(store.id, id)
+  assert.equal(execution.needsReview.value, true)
+  assert.equal(execution.adoptReceipt(other, receipt(other, 'succeeded')), false)
+  assert.equal(store.id, id)
+  scope.stop()
+})
+
+test('adopting a completed legacy read leaves its receipt visible and clears the pending record', () => {
+  const scope = effectScope(), store = memoryStore(), id = crypto.randomUUID()
+  const execution = scope.run(() => useSqlExecution(async () => result, rejected, store))!
+  assert.equal(execution.adoptReceipt(id, receipt(id, 'succeeded')), true)
+  assert.equal(store.id, null)
+  assert.equal(execution.state.value.status, 'completed')
+  assert.equal(execution.state.value.requestId, id)
+  assert.equal(execution.state.value.result, null)
   scope.stop()
 })
 

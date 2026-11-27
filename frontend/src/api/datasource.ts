@@ -4,9 +4,17 @@
 import request from '../utils/request'
 import type { DatasourceTemplate } from './connector'
 import type { SourceDefinition } from './source-catalog'
+import { connectionTestTimeout } from './connection-test-timeout'
 
 export interface Capabilities {sql: boolean;format: boolean;metadata: boolean;collect: boolean;keys: boolean;transactions: boolean;enforced_read_only: boolean;reason?: string}
-export function sourceLabel(c: ConnectionItem) {return c.template?.product || ({mysql:'MySQL',postgres:'PostgreSQL',redis:'Redis',jdbc:'自定义 JDBC'}[c.type] ?? c.type)}
+
+const sourceTypeLabels = new Map([
+  ['mysql', 'MySQL'], ['postgres', 'PostgreSQL'], ['redis', 'Redis'], ['jdbc', '自定义 JDBC'],
+])
+
+export function sourceLabel(source: { type: string; template?: Pick<DatasourceTemplate, 'product'> }) {
+  return source.template?.product || sourceTypeLabels.get(source.type) || source.type
+}
 
 export type DbType = 'mysql' | 'postgres' | 'redis' | 'jdbc'
 export type EnvKind = 'dev' | 'test' | 'prod'
@@ -132,8 +140,8 @@ export const connectionApi = {
   compatibility() {
     return request.get<unknown, { items: TestedVersion[]; scope: string }>('/connections/compatibility', { silentError: true })
   },
-  list(params?: { type?: string; keyword?: string }) {
-    return request.get<unknown, ListWrap<ConnectionItem>>('/connections', { params })
+  list(params?: { type?: string; keyword?: string }, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, ListWrap<ConnectionItem>>('/connections', { params, ...options })
   },
   create(payload: ConnectionPayload) {
     return request.post<unknown, ConnectionItem>('/connections', payload)
@@ -147,11 +155,11 @@ export const connectionApi = {
   remove(id: number) {
     return request.delete<unknown, { id: number }>(`/connections/${id}`)
   },
-  testSaved(id: number, draft?: ConnectionPayload) {
-    return request.post<unknown, TestResult>(`/connections/${id}/test`, draft, { timeout: 25_000 })
+  testSaved(id: number, draft?: ConnectionPayload, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.post<unknown, TestResult>(`/connections/${id}/test`, draft, { ...options, timeout: connectionTestTimeout })
   },
-  test(payload: ConnectionPayload) {
-    return request.post<unknown, TestResult>('/connections/test', payload, { timeout: 25_000 })
+  test(payload: ConnectionPayload, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.post<unknown, TestResult>('/connections/test', payload, { ...options, timeout: connectionTestTimeout })
   },
 }
 

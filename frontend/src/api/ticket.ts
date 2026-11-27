@@ -19,6 +19,10 @@ export interface TicketItem {
   reason: string
   created_at: string
   updated_at: string
+  executed_by?: number | null
+  executed_at?: string | null
+  execution_result?: { affected_rows?: number } | null
+  execution_error?: string
 }
 
 // 后端返回的平铺字段与前端 TicketItem 的映射：后端为 table_name/sql_text/database_name 等
@@ -41,13 +45,17 @@ type RawTicket = {
   reason: string
   created_at: string
   updated_at: string
+  executed_by?: number | null
+  executed_at?: string | null
+  execution_result?: { affected_rows?: number } | null
+  execution_error?: string
 }
 
 function adapt(raw: RawTicket): TicketItem {
   return {
     id: raw.id,
     title: raw.title,
-    type: (raw.type || (raw as any)['type']) as TicketItem['type'],
+    type: raw.type as TicketItem['type'],
     table: raw.table || raw.table_name,
     database_name: raw.database_name || '',
     connection_id: raw.connection_id,
@@ -60,6 +68,10 @@ function adapt(raw: RawTicket): TicketItem {
     reason: raw.reason || '',
     created_at: raw.created_at,
     updated_at: raw.updated_at,
+    executed_by: raw.executed_by,
+    executed_at: raw.executed_at,
+    execution_result: raw.execution_result,
+    execution_error: raw.execution_error,
   }
 }
 
@@ -75,8 +87,8 @@ export interface TicketPayload {
 }
 
 export const ticketApi = {
-  async list(params: { status?: string; q?: string; type?: string; page?: number; page_size?: number }) {
-    const data = await request.get<unknown, { items: RawTicket[]; total: number; page: number; page_size: number }>('/tickets', { params })
+  async list(params: { status?: string; q?: string; type?: string; page?: number; page_size?: number }, signal?: AbortSignal) {
+    const data = await request.get<unknown, { items: RawTicket[]; total: number; page: number; page_size: number }>('/tickets', { params, signal, silentError: true })
     return { ...data, items: data.items.map(adapt) }
   },
   async create(payload: TicketPayload) {
@@ -87,8 +99,10 @@ export const ticketApi = {
     const raw = await request.get<unknown, RawTicket>(`/tickets/${id}`)
     return adapt(raw)
   },
-  execute(id: number) { return request.post<unknown, {status: string}>(`/tickets/${id}/execute`) },
+  execute(id: number) {
+    return request.post<unknown, { status: string }>(`/tickets/${id}/execute`, undefined, { silentError: true })
+  },
   async updateStatus(id: number, status: TicketItem['status']) {
-    return request.post<unknown, { id: number; status: string }>(`/tickets/${id}/status`, { status })
+    return request.post<unknown, { id: number; status: string }>(`/tickets/${id}/status`, { status }, { silentError: true })
   },
 }

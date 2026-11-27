@@ -1,282 +1,135 @@
-<template>
-  <div class="flex flex-col h-full min-h-0">
-    <!-- 配置条 -->
-    <div class="flex flex-wrap items-center gap-2.5 px-4 py-2.5 border-b border-white/10 bg-white/[0.02]">
-      <div class="flex items-center gap-2">
-        <span class="text-[11px] text-white/40">图表类型</span>
-        <el-select v-model="chartType" class="w-28" size="small" popper-class="glass-popper">
-          <el-option label="表格" value="table" />
-          <el-option label="柱状图" value="bar" />
-          <el-option label="折线图" value="line" />
-          <el-option label="饼图" value="pie" />
-          <el-option label="指标卡" value="metric" />
-        </el-select>
-      </div>
-
-      <template v-if="chartType !== 'table'">
-        <div class="flex items-center gap-2">
-          <span class="text-[11px] text-white/40">维度</span>
-          <el-select v-model="config.dimension" class="w-32" size="small" popper-class="glass-popper" clearable placeholder="选择维度">
-            <el-option v-for="c in columns" :key="c" :label="c" :value="c" />
-          </el-select>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[11px] text-white/40">指标</span>
-          <el-select v-model="config.metrics" class="w-40" size="small" multiple collapse-tags collapse-tags-tooltip popper-class="glass-popper" placeholder="选择指标">
-            <el-option v-for="c in numericColumns" :key="c" :label="c" :value="c" />
-            <el-option v-for="c in nonNumericColumns" :key="c" :label="`${c} (计数)`" :value="c" />
-          </el-select>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[11px] text-white/40">聚合</span>
-          <el-select v-model="config.aggregation" class="w-24" size="small" popper-class="glass-popper">
-            <el-option label="求和" value="sum" />
-            <el-option label="计数" value="count" />
-            <el-option label="平均" value="avg" />
-            <el-option label="最小" value="min" />
-            <el-option label="最大" value="max" />
-          </el-select>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[11px] text-white/40">排序</span>
-          <el-select v-model="config.sort" class="w-20" size="small" popper-class="glass-popper">
-            <el-option label="降序" value="desc" />
-            <el-option label="升序" value="asc" />
-          </el-select>
-        </div>
-        <div class="flex items-center gap-2">
-          <span class="text-[11px] text-white/40">Top</span>
-          <el-input-number v-model="config.topN" :min="1" :max="100" size="small" class="w-20" controls-position="right" />
-        </div>
-      </template>
-
-      <div class="flex-1" />
-      <button
-        v-if="canWrite && columns.length"
-        class="liquid-button text-xs py-1.5 px-3 flex items-center gap-1"
-        @click="openSaveDialog"
-      >
-        <BookmarkPlus class="w-3.5 h-3.5" />另存为报表
-      </button>
-    </div>
-
-    <!-- AI 建议条 -->
-    <div v-if="aiSuggestions.length" class="px-4 py-2 flex flex-wrap gap-2 bg-violet-500/10 border-b border-violet-400/20">
-      <span class="text-[11px] text-violet-300 flex items-center gap-1"><Sparkles class="w-3 h-3" /> AI 建议：</span>
-      <button
-        v-for="s in aiSuggestions"
-        :key="s.label"
-        class="px-2 py-0.5 rounded-full text-[11px] bg-white/10 hover:bg-white/15 text-white/70 transition-colors"
-        @click="applySuggestion(s)"
-      >{{ s.label }}</button>
-    </div>
-
-    <!-- 洞察条 -->
-    <div v-if="insights.length" class="px-4 py-2 grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white/[0.02] border-b border-white/10">
-      <div v-for="ins in insights" :key="ins.label" class="rounded-lg bg-white/5 border border-white/10 p-2">
-        <p class="text-[10px] text-white/40">{{ ins.label }}</p>
-        <p class="text-xs font-medium mt-0.5">{{ ins.value }}</p>
-      </div>
-    </div>
-
-    <!-- 图表区 -->
-    <div class="flex-1 min-h-0 p-3 overflow-auto">
-      <div v-if="!columns.length" class="h-full flex items-center justify-center text-sm text-white/35">
-        执行 SQL 后可在此配置图表
-      </div>
-      <ChartCard
-        v-else
-        :chart-type="chartType"
-        :columns="columns"
-        :rows="rows"
-        :config="config"
-        height="320px"
-      />
-    </div>
-
-    <!-- 另存为报表 Dialog -->
-    <el-dialog v-model="saveOpen" title="另存为报表" width="520px" class="glass-dialog" :close-on-click-modal="false">
-      <div class="space-y-4">
-        <div>
-          <p class="text-xs text-white/50 mb-1">报表名称</p>
-          <el-input v-model="saveForm.name" placeholder="例如：月度销售趋势" maxlength="128" />
-        </div>
-        <div>
-          <p class="text-xs text-white/50 mb-1">描述（可选）</p>
-          <el-input v-model="saveForm.description" type="textarea" :rows="2" placeholder="报表用途说明" maxlength="512" />
-        </div>
-        <div>
-          <p class="text-xs text-white/50 mb-1">可见性</p>
-          <el-select v-model="saveForm.visibility" class="w-full" popper-class="glass-popper">
-            <el-option label="私有（仅自己可见）" value="private" />
-            <el-option label="共享（团队可见）" value="shared" />
-          </el-select>
-        </div>
-        <div class="text-[11px] text-white/30 bg-white/5 rounded-lg p-2.5">
-          将固化：数据源 #{{ connectionId }} / 库 {{ database || '默认' }} / SQL + 图表配置（{{ chartType }}）
-        </div>
-      </div>
-      <template #footer>
-        <div class="flex justify-end gap-2">
-          <button class="ghost-button" @click="saveOpen=false">取消</button>
-          <button class="liquid-button" :disabled="saving" @click="saveReport">{{ saving ? '保存中…' : '保存' }}</button>
-        </div>
-      </template>
-    </el-dialog>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { BookmarkPlus, Sparkles } from 'lucide-vue-next'
-import ChartCard, { type ChartKind, type ChartConfig } from '../../../components/business/chart/ChartCard.vue'
+import { computed, reactive, ref } from 'vue'
+import { BookmarkPlus, Maximize2, Minimize2 } from 'lucide-vue-next'
+import type { ChartConfig } from '../../../components/business/chart/ChartCard.vue'
+import type { ExecResult } from '../../../api/workbench'
 import { reportApi } from '../../../api/report'
+import { featureAllowed } from '../../../utils/permission'
 import { useUserStore } from '../../../stores/user'
+import { reportChart } from '../../report/reportChart'
+import ReportResult from '../../report/ReportResult.vue'
 
 const props = defineProps<{
-  columns: string[]
-  rows: unknown[][]
+  result: ExecResult
   sql: string
   connectionId: number
   database: string
+  table: boolean
+  expanded: boolean
+  toolbarTarget?: string
 }>()
-
-const userStore = useUserStore()
-const canWrite = computed(() => userStore.role !== 'readonly')
-
-const chartType = ref<ChartKind>('table')
-const config = reactive<ChartConfig>({
-  dimension: '',
-  metrics: [],
-  aggregation: 'sum',
-  sort: 'desc',
-  topN: 20,
-})
-
-// 自动推断维度与指标
-const numericColumns = computed(() => {
-  if (!props.rows.length) return props.columns.slice(0, 2)
-  const sample = props.rows.slice(0, 20)
-  return props.columns.filter((_, idx) => {
-    return sample.every(row => {
-      const v = (row as unknown[])[idx]
-      return v === null || v === undefined || !isNaN(Number(v))
-    })
-  })
-})
-const nonNumericColumns = computed(() => props.columns.filter(c => !numericColumns.value.includes(c)))
-
-watch(() => props.columns, (cols) => {
-  if (!cols.length) return
-  if (!config.dimension) config.dimension = cols[0]
-  if (!config.metrics?.length) {
-    config.metrics = numericColumns.value.slice(0, 2).length ? numericColumns.value.slice(0,2) : cols.slice(1,3)
-  }
-}, { immediate: true })
-
-interface Suggestion { label: string; chartType: ChartKind; dimension?: string; metrics?: string[]; aggregation?: ChartConfig['aggregation'] }
-const aiSuggestions = computed<Suggestion[]>(() => {
-  if (!props.columns.length || !props.rows.length) return []
-  const suggestions: Suggestion[] = []
-  const numCols = numericColumns.value
-  const catCols = nonNumericColumns.value
-  const firstCat = catCols[0]
-  const firstNum = numCols[0]
-  if (firstCat && firstNum) {
-    suggestions.push({ label: `按 ${firstCat} 看 ${firstNum} 总和`, chartType: 'bar', dimension: firstCat, metrics: [firstNum], aggregation: 'sum' })
-    suggestions.push({ label: `${firstNum} 占比`, chartType: 'pie', dimension: firstCat, metrics: [firstNum], aggregation: 'sum' })
-    if (numCols.length > 1) {
-      suggestions.push({ label: `${firstCat} 趋势对比`, chartType: 'line', dimension: firstCat, metrics: numCols.slice(0,2), aggregation: 'sum' })
-    }
-  }
-  if (firstNum) {
-    suggestions.push({ label: `${firstNum} 指标卡`, chartType: 'metric', metrics: [firstNum], aggregation: 'sum' })
-  }
-  const timeCol = props.columns.find(c => /time|date|created|updated/i.test(c))
-  if (timeCol && firstNum) {
-    suggestions.push({ label: `按 ${timeCol} 趋势`, chartType: 'line', dimension: timeCol, metrics: [firstNum], aggregation: 'sum' })
-  }
-  return suggestions.slice(0,5)
-})
-function applySuggestion(s: Suggestion) {
-  chartType.value = s.chartType
-  if (s.dimension) config.dimension = s.dimension
-  if (s.metrics) config.metrics = s.metrics
-  if (s.aggregation) config.aggregation = s.aggregation
-  ElMessage.success(`已应用：${s.label}`)
-}
-const insights = computed(() => {
-  if (!props.columns.length || !props.rows.length) return []
-  const rows = props.rows
-  const numCols = numericColumns.value
-  const list: { label: string; value: string }[] = []
-  list.push({ label: '总行数', value: `${rows.length}` })
-  list.push({ label: '列数', value: `${props.columns.length}` })
-  const firstNum = numCols[0]
-  if (firstNum) {
-    const idx = props.columns.indexOf(firstNum)
-    if (idx >= 0) {
-      const nums = rows.map(r => Number((r as any)[idx]) || 0)
-      const sum = nums.reduce((a,b)=>a+b,0)
-      const avg = sum / (nums.length || 1)
-      const max = Math.max(...nums)
-      const min = Math.min(...nums)
-      list.push({ label: `${firstNum} 求和`, value: sum.toLocaleString() })
-      list.push({ label: `${firstNum} 均值`, value: avg.toFixed(2) })
-      list.push({ label: `${firstNum} 范围`, value: `${min} ~ ${max}` })
-    }
-  }
-  // NULL 统计
-  let nullCount = 0
-  rows.forEach(r => { (r as any[]).forEach(v => { if (v === null || v === undefined) nullCount++ }) })
-  if (nullCount > 0) list.push({ label: 'NULL 数', value: `${nullCount}` })
-  return list.slice(0,8)
-})
-
-// 保存报表
+const emit = defineEmits<{ expand: [] }>()
+const chartType = defineModel<'bar' | 'line'>('chartType', { required: true })
+const config = defineModel<ChartConfig>('config', { required: true })
+const user = useUserStore()
+const canSave = computed(() => featureAllowed(user, 'report.design', user.role !== 'readonly'))
+const type = computed(() => props.table ? 'table' : chartType.value)
+const validation = computed(() => reportChart(type.value, config.value, props.result))
+const columns = computed(() => [...new Set(props.result.columns ?? [])])
 const saveOpen = ref(false)
 const saving = ref(false)
-const saveForm = reactive({
-  name: '',
-  description: '',
-  visibility: 'private' as 'private' | 'shared',
-})
+const status = ref('')
+const error = ref('')
+const form = reactive({ name: '', description: '' })
 
-function openSaveDialog() {
-  if (!props.sql.trim()) {
-    ElMessage.warning('请先执行 SQL')
-    return
-  }
-  saveForm.name = `报表 ${new Date().toLocaleDateString()}`
-  saveForm.description = ''
-  saveForm.visibility = 'private'
+function selectDimension(event: Event) {
+  config.value = { ...config.value, dimension: (event.target as HTMLSelectElement).value }
+}
+function toggleMetric(column: string, event: Event) {
+  const current = config.value.metrics ?? []
+  const checked = (event.target as HTMLInputElement).checked
+  config.value = { ...config.value, metrics: checked ? [...current, column] : current.filter(item => item !== column) }
+}
+function openSave() {
+  form.name = ''
+  form.description = ''
+  error.value = ''
+  status.value = ''
   saveOpen.value = true
 }
-
 async function saveReport() {
-  if (!saveForm.name.trim()) {
-    ElMessage.warning('报表名称必填')
-    return
-  }
+  const name = form.name.trim()
+  if (!name || !canSave.value || saving.value || validation.value.error) return
   saving.value = true
+  error.value = ''
   try {
     await reportApi.create({
-      name: saveForm.name.trim(),
-      description: saveForm.description.trim(),
+      name,
+      description: form.description.trim(),
       connection_id: props.connectionId,
       database: props.database,
       sql: props.sql,
-      chart_type: chartType.value,
-      chart_config: config,
-      visibility: saveForm.visibility,
+      chart_type: type.value,
+      chart_config: props.table ? {} : { dimension: config.value.dimension, metrics: config.value.metrics },
+      visibility: 'private',
     })
-    ElMessage.success('报表已保存，可在报表查看')
     saveOpen.value = false
-  } catch {
-    /* 拦截器提示 */
+    status.value = '个人报表已保存。'
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '保存报表失败，请重试。'
   } finally {
     saving.value = false
   }
 }
 </script>
+
+<template>
+  <div v-if="!table || canSave" :class="table && toolbarTarget ? 'contents' : 'flex shrink-0 flex-wrap items-center gap-2 border-b border-stroke px-3 py-1 text-xs'">
+    <template v-if="!table">
+      <label class="flex items-center gap-1"><span class="shrink-0 whitespace-nowrap">类型</span>
+        <select v-model="chartType" class="glass-input ui-control-target" aria-label="图表类型">
+          <option value="bar">柱状图</option>
+          <option value="line">折线图</option>
+        </select>
+      </label>
+      <label class="flex items-center gap-1"><span class="shrink-0 whitespace-nowrap">维度</span>
+        <select :value="config.dimension" class="glass-input ui-control-target max-w-32" aria-label="图表维度" @change="selectDimension">
+          <option v-for="column in columns" :key="column" :value="column">{{ column }}</option>
+        </select>
+      </label>
+      <details class="relative">
+        <summary class="ghost-button ui-control-target cursor-pointer">指标（{{ config.metrics?.length ?? 0 }}）</summary>
+        <div class="glass-panel absolute left-0 z-20 grid max-h-52 min-w-40 gap-1 overflow-auto p-2 shadow-lg">
+          <label v-for="column in columns" :key="column" class="flex items-center gap-2 break-all">
+            <input type="checkbox" :checked="config.metrics?.includes(column)"
+              :disabled="(config.metrics?.length ?? 0) >= 6 && !config.metrics?.includes(column)"
+              @change="toggleMetric(column, $event)" />
+            {{ column }}
+          </label>
+        </div>
+      </details>
+      <button type="button" class="ghost-button ui-control-target inline-flex items-center gap-1" :aria-pressed="expanded" @click="emit('expand')">
+        <Minimize2 v-if="expanded" class="size-4" aria-hidden="true" />
+        <Maximize2 v-else class="size-4" aria-hidden="true" />
+        {{ expanded ? '恢复图表尺寸' : '放大图表' }}
+      </button>
+    </template>
+    <Teleport defer :to="toolbarTarget ?? 'body'" :disabled="!toolbarTarget">
+      <button v-if="canSave && columns.length" type="button" class="ghost-button ui-control-target ml-auto inline-flex items-center gap-1"
+        :class="{ 'ui-icon-button': toolbarTarget }" aria-label="另存为报表" title="另存为报表" :disabled="!!validation.error" @click="openSave">
+        <BookmarkPlus class="size-4" aria-hidden="true" /><span v-if="!toolbarTarget">另存为报表</span>
+      </button>
+      <span v-if="status" role="status" class="text-muted">{{ status }}</span>
+    </Teleport>
+  </div>
+  <div v-if="!table" class="flex min-h-0 flex-1 flex-col overflow-auto p-2">
+    <ReportResult :type="type" :config="config" :result="result" title="查询图表" compact hide-details fill />
+  </div>
+  <el-dialog v-model="saveOpen" title="另存为报表" width="min(520px, calc(100vw - 24px))" class="glass-dialog"
+    :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
+    <form class="space-y-3" @submit.prevent="saveReport">
+      <label class="block text-sm">报表名称
+        <input v-model="form.name" class="glass-input mt-1 block w-full" maxlength="128" required />
+      </label>
+      <label class="block text-sm">描述（可选）
+        <textarea v-model="form.description" class="glass-input mt-1 block w-full" rows="2" maxlength="512" />
+      </label>
+      <p class="text-xs text-muted">使用本次执行的 SQL、数据源和数据库 {{ database }}。保存后仅本人可见。</p>
+      <p v-if="error" role="alert" class="break-words text-sm text-danger">{{ error }}</p>
+      <div class="flex justify-end gap-2">
+        <button type="button" class="ghost-button ui-control-target" :disabled="saving" @click="saveOpen = false">取消</button>
+        <button type="submit" class="liquid-button ui-control-target" :disabled="saving || !form.name.trim()">{{ saving ? '保存中…' : '保存' }}</button>
+      </div>
+    </form>
+  </el-dialog>
+</template>

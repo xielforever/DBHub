@@ -11,9 +11,12 @@ export interface Role {
 }
 
 export interface UserItem {
+	capabilities?:string[]
+	membership_version?:number
   id: number
   username: string
   email: string
+  can_edit_email?: boolean
   role_id: number
   role: 'admin' | 'developer' | 'readonly'
   role_name: string
@@ -53,43 +56,44 @@ interface Paged<T> {
 }
 
 export const adminApi = {
- auditDelivery: () => request.get<unknown, AuditDelivery>('/audit-logs/delivery'),
- groups: (params: {keyword?: string; page: number; page_size: number}) => request.get<unknown, Paged<UserGroup>>('/user-groups', {params}),
- saveGroup: (id: number, payload: {name: string; description: string; member_ids: number[]; expected_version: number}) => {
+ auditDelivery: (options?: { silentError?: boolean; signal?: AbortSignal }) =>
+   request.get<unknown, AuditDelivery>('/audit-logs/delivery', options),
+ groups: (params: {keyword?: string; page: number; page_size: number}, options?: { signal?: AbortSignal; silentError?: boolean }) => request.get<unknown, Paged<UserGroup>>('/user-groups', {params, ...options}),
+ saveGroup: (id: number, payload: {name: string; description: string; member_ids: number[]; expected_version: number}, options?: { silentError?: boolean }) => {
   const body = {name: payload.name, description: payload.description, member_ids: payload.member_ids, expected_version: payload.expected_version}
-  return id ? request.put<unknown, UserGroup>(`/user-groups/${id}`, body) : request.post<unknown, UserGroup>('/user-groups', body)
+  return id ? request.put<unknown, UserGroup>(`/user-groups/${id}`, body, options) : request.post<unknown, UserGroup>('/user-groups', body, options)
  },
- deleteGroup: (id: number, expectedVersion: number) => request.delete(`/user-groups/${id}`, {data: {expected_version: expectedVersion}}),
-  roles() {
-    return request.get<unknown, { items: Role[] }>('/roles')
+ deleteGroup: (id: number, expectedVersion: number, options?: { silentError?: boolean }) => request.delete(`/user-groups/${id}`, {data: {expected_version: expectedVersion}, ...options}),
+  roles(options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, { items: Role[] }>('/roles', options)
   },
-  users(params: { keyword?: string; page: number; page_size: number }) {
-    return request.get<unknown, Paged<UserItem>>('/users', { params })
+  users(params: { keyword?: string; page: number; page_size: number }, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, Paged<UserItem>>('/users', { params, ...options })
   },
-  createUser(payload: { username: string; password: string; role: string; email?: string }) {
-    return request.post<unknown, UserItem>('/users', payload)
+  createUser(payload: { username: string; password: string; role: string; email?: string }, options?: { silentError?: boolean }) {
+    return request.post<unknown, UserItem>('/users', payload, options)
   },
-  updateUser(id: number, payload: { role: string; email?: string }) {
-    return request.put<unknown, { id: number }>(`/users/${id}`, payload)
+  updateUser(id: number, payload: { role: string; email?: string }, options?: { silentError?: boolean }) {
+    return request.put<unknown, { id: number }>(`/users/${id}`, payload, options)
   },
-  setUserStatus(id: number, isActive: boolean) {
+  setUserStatus(id: number, isActive: boolean, options?: { silentError?: boolean }) {
     return request.patch<unknown, { id: number; is_active: boolean }>(`/users/${id}/status`, {
       is_active: isActive,
-    })
+    }, options)
   },
-  resetPassword(id: number, newPassword: string) {
+  resetPassword(id: number, newPassword: string, options?: { silentError?: boolean }) {
     return request.post<unknown, { id: number }>(`/users/${id}/reset-password`, {
       new_password: newPassword,
-    })
+    }, options)
   },
-  deleteUser(id: number) {
-    return request.delete<unknown, { id: number }>(`/users/${id}`)
+  deleteUser(id: number, options?: { silentError?: boolean }) {
+    return request.delete<unknown, { id: number }>(`/users/${id}`, options)
   },
-  changePassword(oldPassword: string, newPassword: string) {
+  changePassword(oldPassword: string, newPassword: string, silentError = false) {
     return request.post<unknown, { ok: boolean }>('/auth/change-password', {
       old_password: oldPassword,
       new_password: newPassword,
-    })
+    }, { silentError })
   },
   auditLogs(params: {
     platform?:boolean
@@ -102,7 +106,7 @@ export const adminApi = {
     days?: number
     page: number
     page_size: number
-  }) {
-    return request.get<unknown, Paged<AuditLog>>(params.platform?'/platform/audit-logs':'/audit-logs', { params })
+  }, options?: { silentError?: boolean; signal?: AbortSignal }) {
+    return request.get<unknown, Paged<AuditLog>>(params.platform?'/platform/audit-logs':'/audit-logs', { ...options, params })
   },
 }

@@ -32,8 +32,8 @@ export interface MetricsOverview {
 }
 
 export const dashboardApi = {
-  overview(days = 14) {
-    return request.get<unknown, MetricsOverview>('/metrics/overview', { params: { days } })
+  overview(days = 14, options?: { signal?: AbortSignal; silentError?: boolean }) {
+    return request.get<unknown, MetricsOverview>('/metrics/overview', { ...options, params: { days } })
   },
 }
 

@@ -1,192 +1,5 @@
-<template>
-  <aside class="glass-panel w-full flex flex-col overflow-hidden">
-    <div class="px-3 py-2.5 border-b border-white/10 flex flex-col gap-2">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-medium flex items-center gap-2">
-          <FolderTree class="w-4 h-4 text-indigo-300" /> 数据源
-        </h2>
-        <div class="flex items-center gap-1">
-          <button class="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" title="全部折叠" @click="collapseAll">
-            <ChevronsUpDown class="w-3.5 h-3.5" />
-          </button>
-          <button class="text-white/40 hover:text-white p-1 rounded-lg hover:bg-white/10" aria-label="刷新连接树" @click="reload(true)">
-            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
-          </button>
-        </div>
-      </div>
-      <div class="relative">
-        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" />
-        <input v-model.trim="keyword" class="glass-input !py-1.5 !pl-8 text-xs w-full" placeholder="搜索连接/库/表" />
-      </div>
-      <!-- 收藏与最近 -->
-      <div v-if="favorites.length" class="mt-1 rounded-xl bg-amber-500/5 border border-amber-400/10 p-2">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-[11px] text-amber-300/70 flex items-center gap-1"><Star class="w-3 h-3" /> 收藏的表</span>
-          <button class="text-[10px] text-white/30 hover:text-white/60" @click="clearFavorites">清空</button>
-        </div>
-        <div class="space-y-0.5">
-          <button v-for="fav in favorites" :key="fav.key" class="tree-row !py-1 text-[11px]" @click="jumpFavorite(fav)" draggable="true" @dragstart="onDragTable($event, fav.name)">
-            <Table2 class="w-3 h-3 text-amber-300" /><span class="truncate">{{ fav.name }}</span><span class="text-[10px] text-white/30 truncate">{{ fav.db }}</span>
-          </button>
-        </div>
-      </div>
-      <div v-if="recentTables.length" class="mt-1 rounded-xl bg-white/5 border border-white/10 p-2">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-[11px] text-white/40 flex items-center gap-1"><Clock3 class="w-3 h-3" /> 最近浏览</span>
-          <button class="text-[10px] text-white/30 hover:text-white/60" @click="clearRecent">清空</button>
-        </div>
-        <div class="space-y-0.5">
-          <button v-for="rt in recentTables.slice(0,5)" :key="rt.key" class="tree-row !py-1 text-[11px]" @click="jumpFavorite(rt)" draggable="true" @dragstart="onDragTable($event, rt.name)">
-            <History class="w-3 h-3 text-white/30" /><span class="truncate">{{ rt.name }}</span><span class="text-[10px] text-white/30 truncate">{{ rt.db }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="flex-1 overflow-y-auto p-2" v-loading="loading">
-      <div v-if="!filteredConnections.length && !loading" class="text-center text-xs text-white/40 px-4 py-10">
-        {{ keyword ? '无匹配结果' : '暂无数据源' }}<br v-if="!keyword" /><span v-if="!keyword" class="text-[11px]">请先在「数据源」中创建连接</span>
-      </div>
-
-      <div v-for="conn in filteredConnections" :key="conn.id" class="mb-0.5">
-        <!-- 连接根节点 -->
-        <button
-          class="tree-row w-full group"
-          :class="{ 'bg-white/10': activeConnId === conn.id }"
-          @click="toggleConnection(conn)"
-        >
-          <ChevronRight class="w-3.5 h-3.5 text-white/40 transition-transform shrink-0" :class="{ 'rotate-90': expandedConns.has(conn.id) }" />
-          <component :is="typeIcon(conn.type)" class="w-4 h-4 shrink-0" :style="{ color: typeColor(conn.type) }" />
-          <span class="truncate text-left flex-1">{{ conn.name }}</span>
-          <span v-if="conn.environment === 'prod'" class="px-1 py-0.5 rounded text-[9px] bg-rose-500/20 text-rose-300 shrink-0">PROD</span>
-          <span v-if="conn.proxy_name" class="px-1 py-0.5 rounded text-[9px] bg-violet-500/20 text-violet-300 flex items-center gap-0.5 shrink-0"><Waypoints class="w-2.5 h-2.5" />{{ shortProxy(conn.proxy_name) }}</span>
-        </button>
-
-        <div v-if="expandedConns.has(conn.id)" class="ml-4 border-l border-white/10 pl-1">
-          <p v-if="errors[conn.id]" class="text-[11px] text-rose-300/80 px-2 py-1">{{ errors[conn.id] }}</p>
-
-          <template v-else-if="conn.type === 'redis'">
-            <button class="tree-row" @click="emitRedisOverview(conn)">
-              <Activity class="w-3.5 h-3.5 text-rose-300" /><span>服务器概览</span>
-            </button>
-            <button class="tree-row" @click="emitRedisKeys(conn)">
-              <KeyRound class="w-3.5 h-3.5 text-amber-300" /><span>键空间浏览</span>
-            </button>
-          </template>
-
-          <template v-else>
-            <div v-if="loadingConns[conn.id]" class="text-[11px] text-white/40 px-2 py-1">加载中…</div>
-            <template v-else>
-              <!-- PostgreSQL -->
-              <template v-if="conn.type === 'postgres'">
-                <template v-for="db in filteredDbs(conn.id)" :key="db.name">
-                  <button class="tree-row" @click="toggleSchemaNode(conn, db.name, null)">
-                    <ChevronRight class="w-3 h-3 text-white/35 transition-transform" :class="{ 'rotate-90': schemaOpen(conn, db.name, null) }" />
-                    <Database class="w-3.5 h-3.5 text-sky-300" /><span class="truncate">{{ db.name }}</span>
-                  </button>
-                  <div v-if="schemaOpen(conn, db.name, null)" class="ml-4 border-l border-white/10 pl-1">
-                    <template v-for="sch in schemas[`${conn.id}:${db.name}`] || []" :key="sch">
-                      <button class="tree-row" @click="toggleTables(conn, db.name, sch)">
-                        <ChevronRight class="w-3 h-3 text-white/35 transition-transform" :class="{ 'rotate-90': tablesOpen(conn, db.name, sch) }" />
-                        <Folder class="w-3.5 h-3.5 text-violet-300" /><span class="truncate">{{ sch }}</span>
-                      </button>
-                      <div v-if="tablesOpen(conn, db.name, sch)" class="ml-4 border-l border-white/10 pl-1">
-                        <div
-                          v-for="t in filteredTables(conn.id, db.name, sch)"
-                          :key="t.name"
-                          class="group/table flex items-center"
-                        >
-                          <button
-                            class="tree-row flex-1"
-                            :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, sch, t.name) }"
-                            draggable="true"
-                            @dragstart="onDragTable($event, t.name)"
-                            @click="emitTable(conn, db.name, sch, t)"
-                            @contextmenu.prevent="openContextMenu($event, conn, db.name, sch, t)"
-                          >
-                            <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
-                            <span class="truncate">{{ t.name }}</span>
-                          </button>
-                          <button class="opacity-0 group-hover/table:opacity-100 p-1 text-amber-300/60 hover:text-amber-300" :class="{ 'opacity-100': isFavorite(conn.id, db.name, sch, t.name) }" @click.stop="toggleFavorite(conn, db.name, sch, t)">
-                            <Star class="w-3 h-3" :class="{ 'fill-amber-300': isFavorite(conn.id, db.name, sch, t.name) }" />
-                          </button>
-                          <button class="opacity-0 group-hover/table:opacity-100 p-1 text-white/30 hover:text-white" @click.stop="openContextMenu($event, conn, db.name, sch, t)">
-                            <MoreHorizontal class="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-              </template>
-
-              <!-- MySQL -->
-              <template v-else>
-                <template v-for="db in filteredDbs(conn.id)" :key="db.name">
-                  <button class="tree-row" @click="toggleTables(conn, db.name, '')">
-                    <ChevronRight class="w-3 h-3 text-white/35 transition-transform" :class="{ 'rotate-90': tablesOpen(conn, db.name, '') }" />
-                    <Database class="w-3.5 h-3.5 text-sky-300" /><span class="truncate">{{ db.name }}</span>
-                  </button>
-                  <div v-if="tablesOpen(conn, db.name, '')" class="ml-4 border-l border-white/10 pl-1">
-                    <div v-for="t in filteredTables(conn.id, db.name, '')" :key="t.name" class="group/table flex items-center">
-                      <button
-                        class="tree-row flex-1"
-                        :class="{ 'bg-indigo-500/20 text-indigo-200': isActiveTable(conn.id, db.name, '', t.name) }"
-                        draggable="true"
-                        @dragstart="onDragTable($event, t.name)"
-                        @click="emitTable(conn, db.name, '', t)"
-                        @contextmenu.prevent="openContextMenu($event, conn, db.name, '', t)"
-                      >
-                        <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-white/35' : 'text-emerald-300'" />
-                        <span class="truncate">{{ t.name }}</span>
-                      </button>
-                      <button class="opacity-0 group-hover/table:opacity-100 p-1 text-amber-300/60 hover:text-amber-300" :class="{ 'opacity-100': isFavorite(conn.id, db.name, '', t.name) }" @click.stop="toggleFavorite(conn, db.name, '', t)">
-                        <Star class="w-3 h-3" :class="{ 'fill-amber-300': isFavorite(conn.id, db.name, '', t.name) }" />
-                      </button>
-                      <button class="opacity-0 group-hover/table:opacity-100 p-1 text-white/30 hover:text-white" @click.stop="openContextMenu($event, conn, db.name, '', t)">
-                        <MoreHorizontal class="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                </template>
-              </template>
-            </template>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <!-- 右键菜单 -->
-    <div
-      v-if="contextMenu.visible"
-      class="fixed z-[9999] glass-panel !p-1 min-w-[200px] shadow-2xl border border-white/15"
-      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
-      @mouseleave="contextMenu.visible = false"
-    >
-      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxPreview">
-        <Eye class="w-3.5 h-3.5" /> 预览前 50 行
-      </button>
-      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxSelect">
-        <Code2 class="w-3.5 h-3.5" /> 生成 SELECT
-      </button>
-      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxInsertName">
-        <Plus class="w-3.5 h-3.5" /> 插入表名到编辑器
-      </button>
-      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxToggleFav">
-        <Star class="w-3.5 h-3.5" /> {{ isFavorite(contextMenu.conn?.id || 0, contextMenu.database, contextMenu.schema, contextMenu.table?.name || '') ? '取消收藏' : '收藏表' }}
-      </button>
-      <div class="h-px bg-white/10 my-1" />
-      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxCopyName">
-        <Copy class="w-3.5 h-3.5" /> 复制表名
-      </button>
-      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-white/10 rounded-lg flex items-center gap-2" @click="ctxCopyQualified">
-        <Copy class="w-3.5 h-3.5" /> 复制全限定名
-      </button>
-    </div>
-  </aside>
-</template>
-
 <script setup lang="ts">
+import LoadingState from '../../../components/base/LoadingState.vue'
 import { computed, reactive, ref, shallowReactive } from 'vue'
 import {
   Activity,
@@ -352,7 +165,7 @@ function typeIcon(t: DbType) {
   return t === 'redis' ? KeyRound : Database
 }
 function typeColor(t: DbType) {
-  return { mysql: '#60a5fa', postgres: '#a78bfa', redis: '#f472b6', jdbc: '#34d399' }[t] ?? '#94a3b8'
+  return { mysql: 'var(--db-chart-1)', postgres: 'var(--db-chart-2)', redis: 'var(--db-chart-5)', jdbc: 'var(--db-chart-3)' }[t] ?? 'var(--db-text-tertiary)'
 }
 
 async function toggleConnection(conn: ConnectionItem) {
@@ -397,7 +210,7 @@ async function toggleSchemaNode(conn: ConnectionItem, db: string, _sch: null) {
   if (!schemas[key]) {
     try {
       const res = await workbenchApi.schemas(conn.id, db)
-      schemas[key] = res.items
+      schemas[key] = res.items ?? []
     } catch {
       schemas[key] = []
     }
@@ -506,6 +319,196 @@ defineExpose({
 })
 </script>
 
+<template>
+  <aside class="glass-panel w-full flex flex-col overflow-hidden">
+    <div class="px-3 py-2.5 border-b border-stroke flex flex-col gap-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-medium flex items-center gap-2">
+          <FolderTree class="w-4 h-4 text-accent" /> 数据源
+        </h2>
+        <div class="flex items-center gap-1">
+          <button class="text-subtle hover:text-content p-1 rounded-lg hover:bg-interactive ui-control-target" title="全部折叠" @click="collapseAll">
+            <ChevronsUpDown class="w-3.5 h-3.5" />
+          </button>
+          <button class="text-subtle hover:text-content p-1 rounded-lg hover:bg-interactive ui-control-target" aria-label="刷新连接树" @click="reload(true)">
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': loading }" />
+          </button>
+        </div>
+      </div>
+      <div class="relative">
+        <Search class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-subtle" />
+        <input v-model.trim="keyword" class="glass-input !py-1.5 !pl-8 text-xs w-full" placeholder="搜索连接/库/表" />
+      </div>
+      <!-- 收藏与最近 -->
+      <div v-if="favorites.length" class="ui-inset-card ui-inset-card--warning mt-1 rounded-xl bg-warning-soft border border-warning/10 p-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-warning flex items-center gap-1"><Star class="w-3 h-3" /> 收藏的表</span>
+          <button class="text-xs text-subtle hover:text-muted ui-control-target" @click="clearFavorites">清空</button>
+        </div>
+        <div class="space-y-0.5">
+          <button v-for="fav in favorites" :key="fav.key" class="tree-row !py-1 text-xs ui-control-target" @click="jumpFavorite(fav)" draggable="true" @dragstart="onDragTable($event, fav.name)">
+            <Table2 class="w-3 h-3 text-warning" /><span class="truncate">{{ fav.name }}</span><span class="text-xs text-subtle truncate">{{ fav.db }}</span>
+          </button>
+        </div>
+      </div>
+      <div v-if="recentTables.length" class="ui-inset-card mt-1 rounded-xl bg-surface-muted border border-stroke p-2">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs text-subtle flex items-center gap-1"><Clock3 class="w-3 h-3" /> 最近浏览</span>
+          <button class="text-xs text-subtle hover:text-muted ui-control-target" @click="clearRecent">清空</button>
+        </div>
+        <div class="space-y-0.5">
+          <button v-for="rt in recentTables.slice(0,5)" :key="rt.key" class="tree-row !py-1 text-xs ui-control-target" @click="jumpFavorite(rt)" draggable="true" @dragstart="onDragTable($event, rt.name)">
+            <History class="w-3 h-3 text-subtle" /><span class="truncate">{{ rt.name }}</span><span class="text-xs text-subtle truncate">{{ rt.db }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex-1 overflow-y-auto p-2" data-loading-label="正在读取数据库对象…" v-data-loading="loading">
+      <div v-if="!filteredConnections.length && !loading" class="text-center text-xs text-subtle px-4 py-10">
+        {{ keyword ? '无匹配结果' : '暂无数据源' }}<br v-if="!keyword" /><span v-if="!keyword" class="text-xs">请先在「数据源」中创建连接</span>
+      </div>
+
+      <div v-for="conn in filteredConnections" :key="conn.id" class="mb-0.5">
+        <!-- 连接根节点 -->
+        <button
+          class="tree-row w-full group ui-control-target"
+          :class="{ 'bg-surface-muted': activeConnId === conn.id }"
+          @click="toggleConnection(conn)"
+        >
+          <ChevronRight class="w-3.5 h-3.5 text-subtle transition-transform shrink-0" :class="{ 'rotate-90': expandedConns.has(conn.id) }" />
+          <component :is="typeIcon(conn.type)" class="w-4 h-4 shrink-0" :style="{ color: typeColor(conn.type) }" />
+          <span class="truncate text-left flex-1">{{ conn.name }}</span>
+          <span v-if="conn.environment === 'prod'" class="px-1 py-0.5 rounded text-xs bg-danger-soft text-danger shrink-0">PROD</span>
+          <span v-if="conn.proxy_name" class="px-1 py-0.5 rounded text-xs bg-accent-soft text-accent flex items-center gap-0.5 shrink-0"><Waypoints class="w-2.5 h-2.5" />{{ shortProxy(conn.proxy_name) }}</span>
+        </button>
+
+        <div v-if="expandedConns.has(conn.id)" class="ml-4 border-l border-stroke pl-1">
+          <p v-if="errors[conn.id]" class="text-xs text-danger px-2 py-1">{{ errors[conn.id] }}</p>
+
+          <template v-else-if="conn.type === 'redis'">
+            <button class="tree-row ui-control-target" @click="emitRedisOverview(conn)">
+              <Activity class="w-3.5 h-3.5 text-danger" /><span>服务器概览</span>
+            </button>
+            <button class="tree-row ui-control-target" @click="emitRedisKeys(conn)">
+              <KeyRound class="w-3.5 h-3.5 text-warning" /><span>键空间浏览</span>
+            </button>
+          </template>
+
+          <template v-else>
+            <LoadingState v-if="loadingConns[conn.id]" variant="inline" label="正在读取数据库对象…" />
+            <template v-else>
+              <!-- PostgreSQL -->
+              <template v-if="conn.type === 'postgres'">
+                <template v-for="db in filteredDbs(conn.id)" :key="db.name">
+                  <button class="tree-row ui-control-target" @click="toggleSchemaNode(conn, db.name, null)">
+                    <ChevronRight class="w-3 h-3 text-subtle transition-transform" :class="{ 'rotate-90': schemaOpen(conn, db.name, null) }" />
+                    <Database class="w-3.5 h-3.5 text-accent" /><span class="truncate">{{ db.name }}</span>
+                  </button>
+                  <div v-if="schemaOpen(conn, db.name, null)" class="ml-4 border-l border-stroke pl-1">
+                    <template v-for="sch in schemas[`${conn.id}:${db.name}`] || []" :key="sch">
+                      <button class="tree-row ui-control-target" @click="toggleTables(conn, db.name, sch)">
+                        <ChevronRight class="w-3 h-3 text-subtle transition-transform" :class="{ 'rotate-90': tablesOpen(conn, db.name, sch) }" />
+                        <Folder class="w-3.5 h-3.5 text-accent" /><span class="truncate">{{ sch }}</span>
+                      </button>
+                      <div v-if="tablesOpen(conn, db.name, sch)" class="ml-4 border-l border-stroke pl-1">
+                        <div
+                          v-for="t in filteredTables(conn.id, db.name, sch)"
+                          :key="t.name"
+                          class="group/table flex items-center"
+                        >
+                          <button
+                            class="tree-row flex-1 ui-control-target"
+                            :class="{ 'bg-accent-soft text-accent': isActiveTable(conn.id, db.name, sch, t.name) }"
+                            draggable="true"
+                            @dragstart="onDragTable($event, t.name)"
+                            @click="emitTable(conn, db.name, sch, t)"
+                            @contextmenu.prevent="openContextMenu($event, conn, db.name, sch, t)"
+                          >
+                            <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-subtle' : 'text-success'" />
+                            <span class="truncate">{{ t.name }}</span>
+                          </button>
+                          <button class="opacity-0 group-hover/table:opacity-100 p-1 text-warning hover:text-warning ui-control-target" :class="{ 'opacity-100': isFavorite(conn.id, db.name, sch, t.name) }" @click.stop="toggleFavorite(conn, db.name, sch, t)">
+                            <Star class="w-3 h-3" :class="{ 'fill-amber-300': isFavorite(conn.id, db.name, sch, t.name) }" />
+                          </button>
+                          <button class="opacity-0 group-hover/table:opacity-100 p-1 text-subtle hover:text-content ui-control-target" @click.stop="openContextMenu($event, conn, db.name, sch, t)">
+                            <MoreHorizontal class="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+              </template>
+
+              <!-- MySQL -->
+              <template v-else>
+                <template v-for="db in filteredDbs(conn.id)" :key="db.name">
+                  <button class="tree-row ui-control-target" @click="toggleTables(conn, db.name, '')">
+                    <ChevronRight class="w-3 h-3 text-subtle transition-transform" :class="{ 'rotate-90': tablesOpen(conn, db.name, '') }" />
+                    <Database class="w-3.5 h-3.5 text-accent" /><span class="truncate">{{ db.name }}</span>
+                  </button>
+                  <div v-if="tablesOpen(conn, db.name, '')" class="ml-4 border-l border-stroke pl-1">
+                    <div v-for="t in filteredTables(conn.id, db.name, '')" :key="t.name" class="group/table flex items-center">
+                      <button
+                        class="tree-row flex-1 ui-control-target"
+                        :class="{ 'bg-accent-soft text-accent': isActiveTable(conn.id, db.name, '', t.name) }"
+                        draggable="true"
+                        @dragstart="onDragTable($event, t.name)"
+                        @click="emitTable(conn, db.name, '', t)"
+                        @contextmenu.prevent="openContextMenu($event, conn, db.name, '', t)"
+                      >
+                        <component :is="t.type === 'view' ? Eye : Table2" class="w-3.5 h-3.5" :class="t.type === 'view' ? 'text-subtle' : 'text-success'" />
+                        <span class="truncate">{{ t.name }}</span>
+                      </button>
+                      <button class="opacity-0 group-hover/table:opacity-100 p-1 text-warning hover:text-warning ui-control-target" :class="{ 'opacity-100': isFavorite(conn.id, db.name, '', t.name) }" @click.stop="toggleFavorite(conn, db.name, '', t)">
+                        <Star class="w-3 h-3" :class="{ 'fill-amber-300': isFavorite(conn.id, db.name, '', t.name) }" />
+                      </button>
+                      <button class="opacity-0 group-hover/table:opacity-100 p-1 text-subtle hover:text-content ui-control-target" @click.stop="openContextMenu($event, conn, db.name, '', t)">
+                        <MoreHorizontal class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </template>
+            </template>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右键菜单 -->
+    <div
+      v-if="contextMenu.visible"
+      class="fixed z-[9999] glass-panel !p-1 min-w-[200px] shadow-2xl border border-stroke"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+      @mouseleave="contextMenu.visible = false"
+    >
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-interactive rounded-lg flex items-center gap-2 ui-control-target" @click="ctxPreview">
+        <Eye class="w-3.5 h-3.5" /> 预览前 50 行
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-interactive rounded-lg flex items-center gap-2 ui-control-target" @click="ctxSelect">
+        <Code2 class="w-3.5 h-3.5" /> 生成 SELECT
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-interactive rounded-lg flex items-center gap-2 ui-control-target" @click="ctxInsertName">
+        <Plus class="w-3.5 h-3.5" /> 插入表名到编辑器
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-interactive rounded-lg flex items-center gap-2 ui-control-target" @click="ctxToggleFav">
+        <Star class="w-3.5 h-3.5" /> {{ isFavorite(contextMenu.conn?.id || 0, contextMenu.database, contextMenu.schema, contextMenu.table?.name || '') ? '取消收藏' : '收藏表' }}
+      </button>
+      <div class="h-px bg-surface-muted my-1" />
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-interactive rounded-lg flex items-center gap-2 ui-control-target" @click="ctxCopyName">
+        <Copy class="w-3.5 h-3.5" /> 复制表名
+      </button>
+      <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-interactive rounded-lg flex items-center gap-2 ui-control-target" @click="ctxCopyQualified">
+        <Copy class="w-3.5 h-3.5" /> 复制全限定名
+      </button>
+    </div>
+  </aside>
+</template>
+
+
+
 <style scoped>
 .tree-row {
   display: flex;
@@ -515,12 +518,12 @@ defineExpose({
   padding: 0.35rem 0.5rem;
   border-radius: 0.55rem;
   font-size: 0.78rem;
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--db-text-secondary);
   transition: background 0.15s, color 0.15s;
 }
 .tree-row:hover {
-  background: rgba(255, 255, 255, 0.07);
-  color: #fff;
+  background: var(--db-surface-muted);
+  color: var(--db-text-secondary);
 }
 .tree-row span {
   overflow: hidden;

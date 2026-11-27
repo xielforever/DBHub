@@ -1,171 +1,5 @@
-<template>
-  <el-dialog
-    :model-value="true"
-    title="仪表盘送审检查"
-    width="min(780px,calc(100vw - 24px))"
-    :close-on-click-modal="false"
-    :close-on-press-escape="!submitting"
-    :show-close="!submitting"
-    @close="emit('close')"
-  >
-    <div class="space-y-4">
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 class="font-semibold">{{ dashboard.draft.name }}</h3>
-          <p class="text-xs text-white/60 mt-1">
-            检查已保存草稿
-            {{ dashboard.draft_version }}；提交时重新核对当前权限和口径。
-          </p>
-        </div>
-        <button
-          class="ghost-button"
-          :disabled="checking || submitting"
-          @click="load"
-        >
-          {{ checking ? '检查中…' : '重新检查' }}
-        </button>
-      </div>
-      <p v-if="error" role="alert" class="text-sm text-rose-200">{{ error }}</p>
-      <p v-if="checking" role="status" class="text-sm text-white/70">
-        正在检查卡片、受众覆盖和独立审阅人…
-      </p>
-      <template v-if="check">
-        <div
-          class="rounded-xl border p-3"
-          :class="
-            check.can_submit
-              ? 'border-emerald-400/30 bg-emerald-400/5'
-              : 'border-amber-400/30 bg-amber-400/5'
-          "
-          role="status"
-        >
-          <strong>{{
-            check.can_submit
-              ? '送审条件已满足'
-              : `有 ${blockers.length} 项问题需要处理`
-          }}</strong
-          ><span class="text-xs text-white/65 ml-2"
-            >合格审阅人 {{ check.eligible_reviewers.length }} 位<span
-              v-if="warnings.length"
-            >
-              · {{ warnings.length }} 项提示</span
-            ></span
-          >
-        </div>
-        <div
-          v-if="check.issues.length"
-          class="space-y-3 max-h-[48vh] overflow-y-auto pr-1"
-          aria-label="送审检查结果"
-        >
-          <article
-            v-for="(issue, index) in check.issues"
-            :key="index"
-            class="rounded-xl border border-white/10 p-3 space-y-2"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <h4 class="font-medium text-sm">
-                  {{
-                    issue.report_name ||
-                    (issue.tile_key ? tileName(issue.tile_key) : '看板检查')
-                  }}
-                  <span
-                    class="text-xs"
-                    :class="
-                      issue.severity === 'error'
-                        ? 'text-rose-200'
-                        : 'text-amber-200'
-                    "
-                    >{{ issue.severity === 'error' ? '需处理' : '提示' }}</span
-                  >
-                </h4>
-                <p class="text-sm text-white/70 mt-1">{{ issue.message }}</p>
-              </div>
-              <button
-                v-if="issue.action === 'request_access' && issue.tile_key"
-                class="ghost-button text-xs shrink-0"
-                :disabled="submitting"
-                @click="accessIssue = issue"
-              >
-                申请补权</button
-              ><button
-                v-else-if="
-                  ['edit', 'adopt_contract'].includes(issue.action || '') &&
-                  dashboard.owner_id === user.user?.id
-                "
-                class="ghost-button text-xs shrink-0"
-                :disabled="submitting"
-                @click="emit('edit', dashboard)"
-              >
-                {{
-                  issue.action === 'adopt_contract' ? '核对口径' : '编辑草稿'
-                }}
-              </button>
-            </div>
-            <p
-              v-if="issue.users?.length"
-              class="text-xs text-white/65 break-words"
-            >
-              个人：{{ issue.users.map((u) => u.name).join('、') }}
-            </p>
-            <p
-              v-if="issue.groups?.length"
-              class="text-xs text-white/65 break-words"
-            >
-              用户组：{{ issue.groups.map((g) => g.name).join('、') }}
-            </p>
-          </article>
-        </div>
-        <label class="block text-sm"
-          >独立审阅人<el-select
-            v-model="reviewer"
-            aria-label="仪表盘提交审阅人"
-            placeholder="选择具备全部报表查看权的管理员"
-            class="w-full mt-2"
-            :disabled="
-              checking || submitting || !check.eligible_reviewers.length
-            "
-            ><el-option
-              v-for="candidate in check.eligible_reviewers"
-              :key="candidate.id"
-              :value="candidate.id"
-              :label="candidate.name" /></el-select
-        ></label>
-        <p
-          v-if="!check.eligible_reviewers.length"
-          class="text-xs text-white/65"
-        >
-          请联系管理员配置另一位有效管理员，并通过报表审批发布授予其全部引用报表的查看权。
-        </p>
-      </template>
-      <div class="flex justify-end gap-2 pt-3 border-t border-white/10">
-        <button
-          class="ghost-button"
-          :disabled="submitting"
-          @click="emit('close')"
-        >
-          返回</button
-        ><button
-          class="liquid-button"
-          :disabled="checking || submitting || !check?.can_submit || !reviewer"
-          @click="submit"
-        >
-          {{ submitting ? '提交中…' : '提交审阅' }}
-        </button>
-      </div>
-    </div>
-    <DashboardAccessDialog
-      v-if="accessIssue?.tile_key"
-      :dashboard="dashboard"
-      :tile="accessIssue.tile_key"
-      :user-ids="accessIssue.users?.map((u) => u.id) || []"
-      :group-ids="accessIssue.groups?.map((g) => g.id) || []"
-      @close="accessIssue = undefined"
-      @submitted="accessSubmitted"
-    />
-  </el-dialog>
-</template>
 <script setup lang="ts">
+import LoadingState from '../../components/base/LoadingState.vue'
 import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import {
   managedDashboardApi as api,
@@ -273,8 +107,175 @@ async function submit() {
   }
 }
 </script>
+
+<template>
+  <el-dialog
+    :model-value="true"
+    title="仪表盘送审检查"
+    width="min(780px,calc(100vw - 24px))"
+    :close-on-click-modal="false"
+    :close-on-press-escape="!submitting"
+    :show-close="!submitting"
+    @close="emit('close')"
+  >
+    <div class="space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 class="font-semibold">{{ dashboard.draft.name }}</h3>
+          <p class="text-xs text-muted mt-1">
+            检查已保存草稿
+            {{ dashboard.draft_version }}；提交时重新核对当前权限和口径。
+          </p>
+        </div>
+        <button
+          class="ghost-button ui-control-target"
+          :disabled="checking || submitting"
+          @click="load"
+        >
+          {{ checking ? '检查中…' : '重新检查' }}
+        </button>
+      </div>
+      <p v-if="error" role="alert" class="text-sm text-danger">{{ error }}</p>
+      <LoadingState v-if="checking" variant="detail" label="正在检查卡片、受众覆盖和独立审阅人…" />
+      <template v-if="check">
+        <div
+          class="rounded-xl border p-3"
+          :class="
+            check.can_submit
+              ? 'border-success/30 bg-success-soft'
+              : 'border-warning/30 bg-warning-soft'
+          "
+          role="status"
+        >
+          <strong>{{
+            check.can_submit
+              ? '送审条件已满足'
+              : `有 ${blockers.length} 项问题需要处理`
+          }}</strong
+          ><span class="text-xs text-muted ml-2"
+            >合格审阅人 {{ check.eligible_reviewers.length }} 位<span
+              v-if="warnings.length"
+            >
+              · {{ warnings.length }} 项提示</span
+            ></span
+          >
+        </div>
+        <div
+          v-if="check.issues.length"
+          class="space-y-3 max-h-[48vh] overflow-y-auto pr-1"
+          aria-label="送审检查结果"
+        >
+          <article
+            v-for="(issue, index) in check.issues"
+            :key="index"
+            class="ui-inset-card rounded-xl border border-stroke p-3 space-y-2"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <h4 class="font-medium text-sm">
+                  {{
+                    issue.report_name ||
+                    (issue.tile_key ? tileName(issue.tile_key) : '看板检查')
+                  }}
+                  <span
+                    class="text-xs"
+                    :class="
+                      issue.severity === 'error'
+                        ? 'text-danger'
+                        : 'text-warning'
+                    "
+                    >{{ issue.severity === 'error' ? '需处理' : '提示' }}</span
+                  >
+                </h4>
+                <p class="text-sm text-muted mt-1">{{ issue.message }}</p>
+              </div>
+              <button
+                v-if="issue.action === 'request_access' && issue.tile_key"
+                class="ghost-button text-xs shrink-0 ui-control-target"
+                :disabled="submitting"
+                @click="accessIssue = issue"
+              >
+                申请补权</button
+              ><button
+                v-else-if="
+                  ['edit', 'adopt_contract'].includes(issue.action || '') &&
+                  dashboard.owner_id === user.user?.id
+                "
+                class="ghost-button text-xs shrink-0 ui-control-target"
+                :disabled="submitting"
+                @click="emit('edit', dashboard)"
+              >
+                {{
+                  issue.action === 'adopt_contract' ? '核对口径' : '编辑草稿'
+                }}
+              </button>
+            </div>
+            <p
+              v-if="issue.users?.length"
+              class="text-xs text-muted break-words"
+            >
+              个人：{{ issue.users.map((u) => u.name).join('、') }}
+            </p>
+            <p
+              v-if="issue.groups?.length"
+              class="text-xs text-muted break-words"
+            >
+              用户组：{{ issue.groups.map((g) => g.name).join('、') }}
+            </p>
+          </article>
+        </div>
+        <label class="block text-sm"
+          >业务复核人<el-select
+            v-model="reviewer"
+            aria-label="仪表盘提交审阅人"
+            placeholder="选择具备全部报表查看权的业务复核人"
+            class="w-full mt-2"
+            :disabled="
+              checking || submitting || !check.eligible_reviewers.length
+            "
+            ><el-option
+              v-for="candidate in check.eligible_reviewers"
+              :key="candidate.id"
+              :value="candidate.id"
+              :label="candidate.name" /></el-select
+        ></label>
+        <p
+          v-if="!check.eligible_reviewers.length"
+          class="text-xs text-muted"
+        >
+          请联系管理员核对独立复核人的仪表盘复核资格，以及其对全部引用报表的查看权。
+        </p>
+      </template>
+      <div class="flex justify-end gap-2 pt-3 border-t border-stroke">
+        <button
+          class="ghost-button ui-control-target"
+          :disabled="submitting"
+          @click="emit('close')"
+        >
+          返回</button
+        ><button
+          class="liquid-button ui-control-target"
+          :disabled="checking || submitting || !check?.can_submit || !reviewer"
+          @click="submit"
+        >
+          {{ submitting ? '提交中…' : '提交审阅' }}
+        </button>
+      </div>
+    </div>
+    <DashboardAccessDialog
+      v-if="accessIssue?.tile_key"
+      :dashboard="dashboard"
+      :tile="accessIssue.tile_key"
+      :user-ids="accessIssue.users?.map((u) => u.id) || []"
+      :group-ids="accessIssue.groups?.map((g) => g.id) || []"
+      @close="accessIssue = undefined"
+      @submitted="accessSubmitted"
+    />
+  </el-dialog>
+</template>
+
 <style scoped>
 button {
-  min-height: 44px;
+  min-height: var(--db-control-height-sm);
 }
 </style>

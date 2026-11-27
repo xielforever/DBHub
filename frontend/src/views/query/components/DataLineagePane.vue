@@ -1,244 +1,123 @@
-<template>
-  <div class="flex flex-col h-full min-h-0">
-    <div class="px-3 py-2 border-b border-white/10 flex items-center gap-2 shrink-0 bg-white/[0.02]">
-      <div class="w-6 h-6 rounded-lg bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center">
-        <GitBranch class="w-3.5 h-3.5 text-emerald-300" />
-      </div>
-      <div class="flex-1 min-w-0">
-        <p class="text-xs font-medium text-white/80">数据血缘</p>
-        <p class="text-[10px] text-white/40">上游 · 当前 · 下游 · 影响面 <span v-if="isMock" class="text-amber-300">· 演示</span><span v-else-if="cached" class="text-sky-300">· 缓存(pg_query_go/vitess)</span><span v-else class="text-emerald-300">· 实时</span></p>
-      </div>
-      <el-select v-model="depth" size="small" class="w-20" popper-class="glass-popper">
-        <el-option label="1层" :value="1" />
-        <el-option label="2层" :value="2" />
-        <el-option label="3层" :value="3" />
-      </el-select>
-      <button class="ghost-button !py-1 !px-2 text-[11px]" title="重新解析（pg_query_go/vitess 定时落库）" @click="triggerParse" :disabled="parsing"><RefreshCw class="w-3 h-3" :class="{ 'animate-spin': parsing }" /></button>
-      <button class="ghost-button !py-1 !px-2 text-[11px]" @click="refresh"><RefreshCw class="w-3 h-3" :class="{ 'animate-spin': loading }" /></button>
-    </div>
-
-    <div class="px-3 py-2 border-b border-white/10 flex flex-wrap gap-2 items-center bg-black/20 shrink-0">
-      <div class="relative flex-1 min-w-[140px]">
-        <Search class="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-white/30" />
-        <input v-model.trim="filter" class="glass-input !py-1 !pl-6 text-xs w-full" placeholder="过滤表/视图/报表" />
-      </div>
-      <div class="flex gap-1">
-        <button class="ghost-button !py-1 !px-2 text-[11px]" :class="direction==='both' ? 'bg-white/10' : ''" @click="direction='both'">全部</button>
-        <button class="ghost-button !py-1 !px-2 text-[11px]" :class="direction==='upstream' ? 'bg-white/10' : ''" @click="direction='upstream'">上游</button>
-        <button class="ghost-button !py-1 !px-2 text-[11px]" :class="direction==='downstream' ? 'bg-white/10' : ''" @click="direction='downstream'">下游</button>
-      </div>
-      <span class="text-[11px] px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300">{{ nodes.length }} 节点 · {{ edges }} 边</span>
-    </div>
-
-    <div class="flex-1 overflow-auto p-4" v-loading="loading">
-      <div v-if="!currentTable" class="text-center text-xs text-white/35 py-10">
-        未选择表，血缘以当前查询表 <span class="font-mono text-white/60">{{ fallbackTable }}</span> 为中心
-      </div>
-
-      <!-- 图谱 -->
-      <div class="flex items-stretch gap-3 min-h-[220px]">
-        <!-- 上游 -->
-        <div v-if="direction!=='downstream'" class="flex-1 space-y-2">
-          <p class="text-[11px] text-white/40 flex items-center gap-1"><ArrowLeft class="w-3 h-3" /> 上游 {{ upstreamNodes.length }}</p>
-          <div v-for="n in upstreamNodes" :key="n.id" class="rounded-xl border p-2.5 cursor-pointer hover:brightness-110 transition" :class="n.type==='table' ? 'bg-sky-500/10 border-sky-400/20' : 'bg-white/5 border-white/10'" @click="emit('select', n)">
-            <div class="flex items-center gap-2">
-              <Table2 v-if="n.type==='table'" class="w-3.5 h-3.5 text-sky-300" />
-              <Eye v-else class="w-3.5 h-3.5 text-white/40" />
-              <span class="text-xs font-mono truncate flex-1" :class="n.type==='table' ? 'text-sky-200' : 'text-white/60'">{{ n.name }}</span>
-              <span class="text-[10px] px-1 py-0.5 rounded bg-white/10 text-white/40">{{ n.db }}</span>
-            </div>
-            <p class="text-[10px] text-white/30 mt-1 truncate">{{ n.desc }}</p>
-          </div>
-          <p v-if="!upstreamNodes.length" class="text-[11px] text-white/25 py-4 text-center">无上游</p>
-        </div>
-
-        <!-- 连接线 -->
-        <div v-if="direction==='both'" class="w-px bg-white/10 self-stretch my-2 hidden sm:block" />
-
-        <!-- 当前 -->
-        <div class="flex-1 flex flex-col items-center justify-center gap-2">
-          <div class="w-full rounded-xl bg-violet-500/15 border border-violet-400/30 p-3 text-center shadow-lg shadow-violet-500/10">
-            <p class="text-xs font-mono font-medium text-violet-200">{{ currentTable || fallbackTable }}</p>
-            <p class="text-[10px] text-white/40 mt-1">{{ currentDb || 'orders' }} · 当前表</p>
-            <span class="inline-flex mt-2 px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-300 text-[10px]">中心节点</span>
-          </div>
-          <div class="flex items-center gap-1 text-[10px] text-white/25">
-            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            影响面 {{ downstreamNodes.length + upstreamNodes.length }} 对象
-          </div>
-        </div>
-
-        <div v-if="direction==='both'" class="w-px bg-white/10 self-stretch my-2 hidden sm:block" />
-
-        <!-- 下游 -->
-        <div v-if="direction!=='upstream'" class="flex-1 space-y-2">
-          <p class="text-[11px] text-white/40 flex items-center gap-1">下游 {{ downstreamNodes.length }} <ArrowRight class="w-3 h-3" /></p>
-          <div v-for="n in downstreamNodes" :key="n.id" class="rounded-xl border p-2.5 cursor-pointer hover:brightness-110 transition" :class="n.type==='report' ? 'bg-amber-500/10 border-amber-400/20' : n.type==='view' ? 'bg-emerald-500/10 border-emerald-400/20' : 'bg-white/5 border-white/10'" @click="emit('select', n)">
-            <div class="flex items-center gap-2">
-              <BarChart3 v-if="n.type==='report'" class="w-3.5 h-3.5 text-amber-300" />
-              <Eye v-else-if="n.type==='view'" class="w-3.5 h-3.5 text-emerald-300" />
-              <Table2 v-else class="w-3.5 h-3.5 text-white/40" />
-              <span class="text-xs font-mono truncate flex-1" :class="n.type==='report' ? 'text-amber-200' : n.type==='view' ? 'text-emerald-200' : 'text-white/60'">{{ n.name }}</span>
-              <span class="text-[10px] px-1 py-0.5 rounded bg-white/10 text-white/40">{{ n.db }}</span>
-            </div>
-            <p class="text-[10px] text-white/30 mt-1 truncate">{{ n.desc }}</p>
-          </div>
-          <p v-if="!downstreamNodes.length" class="text-[11px] text-white/25 py-4 text-center">无下游</p>
-        </div>
-      </div>
-
-      <!-- 影响分析 -->
-      <div class="mt-4 rounded-xl bg-amber-500/10 border border-amber-400/20 p-3">
-        <p class="text-xs font-medium text-amber-200 flex items-center gap-1.5"><AlertTriangle class="w-3.5 h-3.5" /> 变更影响分析</p>
-        <p class="text-[11px] text-white/50 mt-1">若修改 <span class="font-mono text-white/70">{{ currentTable || fallbackTable }}</span> 的列 <span class="font-mono text-amber-200">total_amount</span>，将影响下游 {{ downstreamNodes.length }} 对象，建议先创建变更工单并通知 Owner。</p>
-        <div class="flex gap-1.5 mt-2">
-          <span v-for="n in downstreamNodes.slice(0,3)" :key="n.id" class="px-2 py-1 rounded-full bg-white/10 text-white/60 text-[11px]">{{ n.name }}</span>
-          <span v-if="downstreamNodes.length>3" class="text-[11px] text-white/30">+{{ downstreamNodes.length-3 }}</span>
-        </div>
-        <button class="ghost-button !py-1 !px-3 text-xs mt-3" @click="emit('createTicket')">创建变更工单</button>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { AlertTriangle, ArrowLeft, ArrowRight, BarChart3, Eye, GitBranch, RefreshCw, Search, Table2 } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import LoadingState from '../../../components/base/LoadingState.vue'
+import PageState from '../../../components/base/PageState.vue'
 import { assetApi } from '../../../api/asset'
+import { useUserStore } from '../../../stores/user'
+import { featureAllowed } from '../../../utils/permission'
+import { useReportRun } from '../../report/useReportRun'
 
-const props = defineProps<{
-  currentTable: string
-  currentDb: string
-  fallbackTable: string
-  connectionId?: number
-  schema?: string
-}>()
-
-const emit = defineEmits<{
-  (e: 'select', node: any): void
-  (e: 'createTicket'): void
-}>()
-
+const props = defineProps<{ currentTable: string; currentDb: string; fallbackTable: string; connectionId?: number; schema?: string }>()
+const emit = defineEmits<{ createTicket: [] }>()
+const user = useUserStore()
+const canParse = computed(() => ['admin', 'developer'].includes(user.role))
+const canApply = computed(() => featureAllowed(user, 'change.apply', canParse.value))
+const graph = useReportRun<Awaited<ReturnType<typeof assetApi.lineage>>>()
+const table = computed(() => props.currentTable || props.fallbackTable)
 const depth = ref(2)
-const direction = ref<'both'|'upstream'|'downstream'>('both')
 const filter = ref('')
-const loading = ref(false)
-const isMock = ref(false)
-const cached = ref(false)
 const parsing = ref(false)
-
-interface Node { id: string; name: string; type: 'table'|'view'|'report'|'dashboard'; db: string; desc: string }
-const upstream = ref<Node[]>([])
-const downstream = ref<Node[]>([])
-
-async function fetchReal(): Promise<boolean> {
-  const table = props.currentTable || props.fallbackTable
-  if (!table) return false
-  // 若未提供 connectionId/database，则仍尝试按表名查询（后端会模糊匹配）
-  try {
-    const resp: any = await assetApi.lineage({
-      connection_id: props.connectionId || 0,
-      database: props.currentDb || '',
-      schema: props.schema || '',
-      table,
-      depth: depth.value,
-    })
-    const nodes: Node[] = (resp.nodes || []).map((n: any) => ({
-      id: n.id, name: n.name, type: n.type, db: n.db, desc: n.desc || n.type,
-    }))
-    const edges: any[] = resp.edges || []
-    // 中心 id 推断：与当前表同名的节点
-    const center = nodes.find(n => n.name.toLowerCase() === table.toLowerCase()) || nodes.find(n => n.desc === '当前')
-    const centerId = center?.id
-    const ups: Node[] = []
-    const downs: Node[] = []
-    if (centerId) {
-      for (const e of edges) {
-        if (e.to === centerId) {
-          const n = nodes.find(x => x.id === e.from)
-          if (n && n.id !== centerId) ups.push(n)
-        }
-        if (e.from === centerId) {
-          const n = nodes.find(x => x.id === e.to)
-          if (n && n.id !== centerId) downs.push(n)
-        }
+const commandError = ref('')
+const data = computed(() => graph.state.value.status === 'success' ? graph.state.value.data : undefined)
+const typeLabel: Record<string, string> = { table: '表', view: '视图', report: '报表', dashboard: '仪表盘' }
+const impactLabels = {
+  upstream: '上游对象', downstream: '下游对象', downstream_tables: '下游表',
+  downstream_views: '下游视图', downstream_reports: '下游报表', total: '图谱对象总数',
+}
+const impacts = computed(() => Object.entries(impactLabels).flatMap(([key, label]) => {
+  const count = data.value?.impact?.[key]
+  return typeof count === 'number' ? [{ key, label, count }] : []
+}))
+const center = computed(() => {
+  const nodes = data.value?.nodes ?? []
+  const expected = [props.connectionId ?? 0, props.currentDb, props.schema ?? '', table.value].join('.').toLowerCase()
+  if (props.connectionId) return nodes.find(item => item.id === expected && item.desc === '当前')
+  return nodes.find(item => item.desc === '当前' && item.name === table.value)
+})
+const groups = computed(() => {
+  if (!center.value || !data.value) return []
+  const root = center.value.id
+  const { nodes, edges } = data.value
+  const needle = filter.value.trim().toLocaleLowerCase()
+  function connected(side: 'upstream' | 'downstream') {
+    const reached = new Set([root])
+    let frontier = [root]
+    for (let level = 0; level < depth.value && frontier.length; level++) {
+      const current = new Set(frontier)
+      frontier = []
+      for (const edge of edges ?? []) {
+        const from = side === 'upstream' ? edge.to : edge.from
+        const to = side === 'upstream' ? edge.from : edge.to
+        if (!current.has(from) || reached.has(to)) continue
+        reached.add(to)
+        frontier.push(to)
       }
-      // 若边不足，退化：按类型分（report 视为下游，其余按 id 排序前后）
-      if (!ups.length && !downs.length) {
-        for (const n of nodes) {
-          if (n.id === centerId) continue
-          if (n.type === 'report' || n.type === 'view') downs.push(n)
-          else ups.push(n)
-        }
-      }
-    } else {
-      // 未识别中心，简单按半分
-      const half = Math.floor(nodes.length / 2)
-      ups.push(...nodes.slice(0, half))
-      downs.push(...nodes.slice(half))
     }
-    // 过滤
-    let upsF = ups
-    let downsF = downs
-    if (filter.value) {
-      const kw = filter.value.toLowerCase()
-      upsF = upsF.filter(n => n.name.toLowerCase().includes(kw) || n.db.toLowerCase().includes(kw))
-      downsF = downsF.filter(n => n.name.toLowerCase().includes(kw) || n.db.toLowerCase().includes(kw))
-    }
-    // 按 depth 截断（后端已按 depth，但前端再保险）
-    upstream.value = upsF.slice(0, depth.value)
-    downstream.value = downsF.slice(0, depth.value + 1)
-    isMock.value = false
-    cached.value = !!(resp as any).cached
-    return true
-  } catch (e) {
-    return false
+    return nodes.filter(node => node.id !== root && reached.has(node.id))
   }
+  return (['upstream', 'downstream'] as const).map(side => {
+    const all = connected(side)
+    const shown = all.filter(item => (item.name + ' ' + item.db).toLocaleLowerCase().includes(needle))
+    return { side, name: side === 'upstream' ? '上游' : '下游', all, shown }
+  })
+})
+
+function load() {
+  if (!table.value) return
+  const params = { connection_id: props.connectionId ?? 0, database: props.currentDb, schema: props.schema ?? '', table: table.value, depth: depth.value }
+  return graph.run(JSON.stringify(params), signal => assetApi.lineage(params, { signal, silentError: true }))
 }
 
-async function triggerParse() {
+async function parse() {
+  if (!canParse.value || parsing.value) return
   parsing.value = true
+  commandError.value = ''
   try {
     await assetApi.lineageRefresh()
-    await generate()
-  } catch {}
-  parsing.value = false
-}
-
-function generateMock() {
-  isMock.value = true
-  cached.value = false
-  upstream.value = [
-    { id: 'u1', name: 'users', type: 'table' as const, db: 'users', desc: '用户主表 · 外键 users.id' },
-    { id: 'u2', name: 'products', type: 'table' as const, db: 'shop', desc: '商品表 · JOIN products.id' },
-    { id: 'u3', name: 'orders_staging', type: 'table' as const, db: 'orders', desc: '临时表 · ETL 来源' },
-  ].slice(0, depth.value) as Node[]
-  downstream.value = [
-    { id: 'd1', name: 'v_monthly_sales', type: 'view' as const, db: 'orders', desc: '视图 · 依赖 orders' },
-    { id: 'd2', name: 'v_user_orders', type: 'view' as const, db: 'orders', desc: '视图 · 关联 users' },
-    { id: 'd3', name: '月度销售趋势', type: 'report' as const, db: 'orders', desc: '报表 #1 · 订阅 12 人' },
-    { id: 'd4', name: '今日订单指标', type: 'report' as const, db: 'orders', desc: '报表 #3 · 大盘' },
-  ].slice(0, depth.value + 1) as Node[]
-  if (filter.value) {
-    const kw = filter.value.toLowerCase()
-    upstream.value = upstream.value.filter(n => n.name.toLowerCase().includes(kw))
-    downstream.value = downstream.value.filter(n => n.name.toLowerCase().includes(kw))
+    await load()
+  } catch (error) {
+    commandError.value = error instanceof Error ? error.message : '血缘解析结果待核对。'
+  } finally {
+    parsing.value = false
   }
 }
 
-async function generate() {
-  loading.value = true
-  const ok = await fetchReal()
-  if (!ok) generateMock()
-  loading.value = false
-}
-
-const upstreamNodes = computed(() => upstream.value)
-const downstreamNodes = computed(() => downstream.value)
-const nodes = computed(() => [...upstreamNodes.value, ...downstreamNodes.value, { id: 'center', name: props.currentTable || props.fallbackTable, type: 'table', db: props.currentDb || 'orders', desc: '当前' } as Node])
-const edges = computed(() => upstreamNodes.value.length + downstreamNodes.value.length)
-
-function refresh() { generate() }
-onMounted(generate)
-watch([depth, () => props.currentTable, filter], generate)
+watch([table, depth, () => props.connectionId, () => props.currentDb, () => props.schema], () => { void load() }, { immediate: true })
 </script>
+
+<template>
+  <section class="space-y-3 py-3 min-w-0" aria-label="数据血缘">
+    <div class="flex flex-wrap items-end gap-2">
+      <label class="text-sm">关系深度<select v-model.number="depth" class="glass-input block mt-1"><option :value="1">1 层</option><option :value="2">2 层</option><option :value="3">3 层</option></select></label>
+      <label class="flex-1 basis-40 min-w-0 text-sm">过滤关系<input v-model="filter" class="glass-input block w-full mt-1" placeholder="对象名称或数据库" /></label>
+      <button class="ghost-button ui-control-target" :disabled="graph.state.value.status === 'loading'" @click="load">刷新血缘</button>
+      <button v-if="canParse" class="ghost-button ui-control-target" :disabled="parsing" @click="parse">重新解析</button>
+    </div>
+    <p v-if="commandError" class="text-sm text-danger" role="alert">{{ commandError }}</p>
+    <LoadingState v-if="graph.state.value.status === 'loading'" label="正在读取血缘…" />
+    <PageState v-else-if="graph.state.value.status === 'error'" heading="h3" title="读取血缘失败" :description="graph.state.value.message || '请重新核对当前对象的血缘。'" tone="danger">
+      <template #actions><button class="ghost-button ui-control-target" @click="load">重试血缘</button></template>
+    </PageState>
+    <PageState v-else-if="data && !center" heading="h3" title="血缘未返回当前对象" description="请刷新并核对当前对象的采集快照。" />
+    <template v-else-if="data && center">
+      <p class="text-sm break-all">当前对象 {{ center.name }} · {{ center.db }}<span v-if="data.cached" class="text-muted"> · 已缓存</span></p>
+      <div class="grid gap-4 md:grid-cols-2">
+        <section v-for="group in groups" :key="group.side" class="min-w-0 space-y-2">
+          <h4 class="editorial-object-title">{{ group.name }} {{ group.all.length }} 项</h4>
+          <ul v-if="group.shown.length" class="divide-y divide-divider">
+            <li v-for="item in group.shown" :key="item.id" class="py-2 text-sm break-all">
+              <p>{{ item.name }} <span class="text-xs text-muted">{{ typeLabel[item.type] || item.type }}</span></p>
+              <p class="text-xs text-muted">{{ item.db }}<span v-if="item.desc"> · {{ item.desc }}</span></p>
+            </li>
+          </ul>
+          <p v-else class="text-sm text-muted">{{ group.all.length ? '没有匹配的关系。' : '当前图谱未返回关系。' }}</p>
+        </section>
+      </div>
+      <p v-if="impacts.length" class="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted">
+        <span>影响统计</span>
+        <span v-for="impact in impacts" :key="impact.key">{{ impact.label }} {{ impact.count }} 项</span>
+      </p>
+      <button v-if="canApply" class="ghost-button ui-control-target" @click="emit('createTicket')">创建变更工单</button>
+    </template>
+  </section>
+</template>

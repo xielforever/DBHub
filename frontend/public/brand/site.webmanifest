@@ -1,0 +1,23 @@
+{
+  "name": "知数 · 专业数据管理平台",
+  "short_name": "知数",
+  "lang": "zh-CN",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#EEECE5",
+  "theme_color": "#EEECE5",
+  "icons": [
+    {
+      "src": "/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

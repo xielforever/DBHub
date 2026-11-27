@@ -14,6 +14,7 @@ import {
   workspaceSignal,
   changeWorkspaceContext,
 } from '../src/utils/workspace-context.ts'
+import { canPublishDashboardReview, needsDashboardReviewAgain } from '../src/views/dashboard/dashboard-review-access.ts'
 const now = Date.parse('2026-10-18T09:30:00Z'),
   policy = {
     allow_unknown_freshness: false,
@@ -141,4 +142,25 @@ test('a single-card refresh never reports a full-page success', () => {
   const q = dashboardQuality([a], policy, now, 'full', true)
   assert.equal(q.available, 1)
   assert.equal(q.complete, false)
+})
+
+test('matrix publication belongs to the current independent business signer', () => {
+  const review = { status: 'approved', submitted_by: 1, business_signer_id: 2, can_publish: true }
+  assert.equal(canPublishDashboardReview(review, 2, true), true)
+  assert.equal(canPublishDashboardReview(review, 1, true), false)
+  assert.equal(canPublishDashboardReview(review, 3, true), false)
+  assert.equal(canPublishDashboardReview(review, 2, false), false)
+  assert.equal(canPublishDashboardReview({ ...review, submitted_by: 2 }, 2, true), false)
+  assert.equal(canPublishDashboardReview({ ...review, can_publish: false }, 2, true), false)
+  assert.equal(canPublishDashboardReview({ ...review, status: 'pending' }, 2, true), false)
+})
+
+test('stale dashboard signatures require re-review and never open publication', () => {
+  const review = { status: 'approved', submitted_by: 1, business_signer_id: 2, can_publish: true }
+  for (const stale of [{ ...review, reviewer_eligible: false }, { ...review, requires_re_review: true }]) {
+    assert.equal(needsDashboardReviewAgain(stale), true)
+    assert.equal(canPublishDashboardReview(stale, 2, true), false)
+  }
+  assert.equal(needsDashboardReviewAgain({ ...review, reviewer_eligible: false, requires_re_review: false }), false)
+  assert.equal(canPublishDashboardReview({ status: 'approved', submitted_by: 1 }, 3, true), true)
 })

@@ -1,0 +1,2 @@
+/* 兼容旧导入路径。主题值集中在 tokens.css，由应用级 theme.ts 驱动。 */
+@import './styles/tokens.css';

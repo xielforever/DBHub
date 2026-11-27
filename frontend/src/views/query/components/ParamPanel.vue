@@ -1,94 +1,3 @@
-<template>
-  <div class="flex flex-col h-full min-h-0">
-    <div class="px-3 py-2 border-b border-white/10 flex items-center gap-2 shrink-0">
-      <div class="w-6 h-6 rounded-lg bg-amber-500/20 border border-amber-400/30 flex items-center justify-center">
-        <Braces class="w-3.5 h-3.5 text-amber-300" />
-      </div>
-      <div class="flex-1 min-w-0">
-        <p class="text-xs font-medium text-white/80">查询参数</p>
-        <p class="text-[10px] text-white/40">支持 &#123;&#123;param&#125;&#125;、:param、$1 语法</p>
-      </div>
-      <span v-if="params.length" class="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[11px]">{{ params.length }} 个</span>
-    </div>
-
-    <div v-if="!params.length" class="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
-      <div class="w-12 h-12 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
-        <SearchCode class="w-6 h-6 text-white/20" />
-      </div>
-      <p class="text-xs text-white/50">未检测到参数</p>
-      <p class="text-[11px] text-white/30 leading-5">在 SQL 中使用 <span class="font-mono px-1 py-0.5 rounded bg-white/10 text-amber-300">&#123;&#123;user_id&#125;&#125;</span> 或 <span class="font-mono px-1 py-0.5 rounded bg-white/10 text-amber-300">:status</span> 或 <span class="font-mono px-1 py-0.5 rounded bg-white/10 text-amber-300">$1</span><br/>即可自动识别为可填充参数</p>
-      <div class="mt-2 p-2.5 rounded-xl bg-white/5 border border-white/10 text-left w-full">
-        <p class="text-[11px] text-white/40 mb-1">示例</p>
-        <pre class="text-[11px] font-mono text-white/60 whitespace-pre-wrap">SELECT * FROM orders
-WHERE user_id = &#123;&#123;user_id&#125;&#125;
-  AND status = :status
-  AND created_at > $1</pre>
-      </div>
-    </div>
-
-    <div v-else class="flex-1 overflow-auto p-3 space-y-3">
-      <div class="flex items-center gap-2">
-        <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="loadTemplates">
-          <Library class="w-3 h-3" /> 模板
-        </button>
-        <button class="ghost-button !py-1 !px-2 text-[11px] flex items-center gap-1" @click="saveAsTemplate">
-          <Bookmark class="w-3 h-3" /> 保存模板
-        </button>
-        <div class="flex-1" />
-        <button class="ghost-button !py-1 !px-2 text-[11px]" @click="clearValues">清空</button>
-      </div>
-
-      <div v-for="p in params" :key="p.name" class="rounded-xl bg-white/5 border border-white/10 p-2.5">
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-xs font-mono text-amber-300 flex items-center gap-1.5">
-            {{ p.raw }}
-            <span v-if="p.required" class="w-1 h-1 rounded-full bg-rose-400" title="必填" />
-          </span>
-          <span class="text-[10px] px-1.5 py-0.5 rounded bg-white/10 text-white/40">{{ p.type }}</span>
-        </div>
-        <input
-          v-model="values[p.name]"
-          :type="p.type === 'number' ? 'number' : 'text'"
-          :placeholder="p.placeholder"
-          class="glass-input !py-1.5 text-xs w-full"
-          @keydown.enter="emitApply"
-        />
-        <p v-if="p.description" class="text-[10px] text-white/30 mt-1">{{ p.description }}</p>
-      </div>
-
-      <div class="rounded-xl bg-indigo-500/10 border border-indigo-400/20 p-2.5">
-        <p class="text-[11px] text-indigo-300/80 font-medium mb-1 flex items-center gap-1">
-          <Eye class="w-3 h-3" /> 预览（替换后）
-        </p>
-        <pre class="text-[11px] font-mono text-white/60 whitespace-pre-wrap break-all max-h-32 overflow-auto">{{ previewSql }}</pre>
-      </div>
-
-      <div class="flex gap-2">
-        <button class="liquid-button flex-1 !py-2 text-xs flex items-center justify-center gap-1.5" :disabled="!allFilled" @click="emitApply">
-          <Play class="w-3.5 h-3.5" /> 应用参数并执行
-        </button>
-        <button class="ghost-button !py-2 !px-3 text-xs" @click="emitCopy">复制 SQL</button>
-      </div>
-
-      <div v-if="templates.length" class="space-y-1.5">
-        <p class="text-[11px] text-white/40">已保存模板 · {{ templates.length }}</p>
-        <div v-for="t in templates" :key="t.id" class="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 group">
-          <div class="flex-1 min-w-0">
-            <p class="text-xs text-white/70 truncate">{{ t.name }}</p>
-            <p class="text-[10px] text-white/30 truncate">{{ Object.keys(t.values).length }} 参数 · {{ formatTime(t.created_at) }}</p>
-          </div>
-          <button class="ghost-button !py-1 !px-2 text-[10px] opacity-0 group-hover:opacity-100" @click="applyTemplate(t)">应用</button>
-          <button class="ghost-button !py-1 !px-1.5 text-[10px] text-rose-300/60 opacity-0 group-hover:opacity-100" @click="deleteTemplate(t.id)"><Trash2 class="w-3 h-3" /></button>
-        </div>
-      </div>
-    </div>
-
-    <div class="px-3 py-2 border-t border-white/10 bg-white/[0.02] shrink-0">
-      <p class="text-[10px] text-white/25 leading-4">💡 参数值会自动持久化到本地；支持保存为模板在团队间复用（本地存储，后端占位）</p>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
@@ -278,3 +187,94 @@ watch(() => props.sql, () => {
   // keep values, but no auto clear
 })
 </script>
+
+<template>
+  <div class="flex flex-col h-full min-h-0">
+    <div class="px-3 py-2 border-b border-stroke flex items-center gap-2 shrink-0">
+      <div class="w-6 h-6 rounded-lg bg-warning-soft border border-warning/30 flex items-center justify-center">
+        <Braces class="w-3.5 h-3.5 text-warning" />
+      </div>
+      <div class="flex-1 min-w-0">
+        <p class="text-xs font-medium text-content">查询参数</p>
+        <p class="text-xs text-subtle">支持 &#123;&#123;param&#125;&#125;、:param、$1 语法</p>
+      </div>
+      <span v-if="params.length" class="px-2 py-0.5 rounded-full bg-warning-soft text-warning text-xs">{{ params.length }} 个</span>
+    </div>
+
+    <div v-if="!params.length" class="flex-1 flex flex-col items-center justify-center gap-3 p-6 text-center">
+      <div class="w-12 h-12 rounded-2xl bg-surface-muted border border-stroke flex items-center justify-center">
+        <SearchCode class="w-6 h-6 text-subtle" />
+      </div>
+      <p class="text-xs text-muted">未检测到参数</p>
+      <p class="text-xs text-subtle leading-5">在 SQL 中使用 <span class="font-mono px-1 py-0.5 rounded bg-surface-muted text-warning">&#123;&#123;user_id&#125;&#125;</span> 或 <span class="font-mono px-1 py-0.5 rounded bg-surface-muted text-warning">:status</span> 或 <span class="font-mono px-1 py-0.5 rounded bg-surface-muted text-warning">$1</span><br/>即可自动识别为可填充参数</p>
+      <div class="mt-2 p-2.5 rounded-xl bg-surface-muted border border-stroke text-left w-full">
+        <p class="text-xs text-subtle mb-1">示例</p>
+        <pre class="text-xs font-mono text-muted whitespace-pre-wrap">SELECT * FROM orders
+WHERE user_id = &#123;&#123;user_id&#125;&#125;
+  AND status = :status
+  AND created_at > $1</pre>
+      </div>
+    </div>
+
+    <div v-else class="flex-1 overflow-auto p-3 space-y-3">
+      <div class="flex items-center gap-2">
+        <button class="ghost-button !py-1 !px-2 text-xs flex items-center gap-1 ui-control-target" @click="loadTemplates">
+          <Library class="w-3 h-3" /> 模板
+        </button>
+        <button class="ghost-button !py-1 !px-2 text-xs flex items-center gap-1 ui-control-target" @click="saveAsTemplate">
+          <Bookmark class="w-3 h-3" /> 保存模板
+        </button>
+        <div class="flex-1" />
+        <button class="ghost-button !py-1 !px-2 text-xs ui-control-target" @click="clearValues">清空</button>
+      </div>
+
+      <div v-for="p in params" :key="p.name" class="ui-inset-card rounded-xl bg-surface-muted border border-stroke p-2.5">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-xs font-mono text-warning flex items-center gap-1.5">
+            {{ p.raw }}
+            <span v-if="p.required" class="w-1 h-1 rounded-full bg-danger" title="必填" />
+          </span>
+          <span class="text-xs px-1.5 py-0.5 rounded bg-surface-muted text-subtle">{{ p.type }}</span>
+        </div>
+        <input
+          v-model="values[p.name]"
+          :type="p.type === 'number' ? 'number' : 'text'"
+          :placeholder="p.placeholder"
+          class="glass-input !py-1.5 text-xs w-full"
+          @keydown.enter="emitApply"
+        />
+        <p v-if="p.description" class="text-xs text-subtle mt-1">{{ p.description }}</p>
+      </div>
+
+      <div class="rounded-xl bg-accent-soft border border-accent/20 p-2.5">
+        <p class="text-xs text-accent font-medium mb-1 flex items-center gap-1">
+          <Eye class="w-3 h-3" /> 预览（替换后）
+        </p>
+        <pre class="text-xs font-mono text-muted whitespace-pre-wrap break-all max-h-32 overflow-auto">{{ previewSql }}</pre>
+      </div>
+
+      <div class="flex gap-2">
+        <button class="liquid-button flex-1 !py-2 text-xs flex items-center justify-center gap-1.5 ui-control-target" :disabled="!allFilled" @click="emitApply">
+          <Play class="w-3.5 h-3.5" /> 应用参数并执行
+        </button>
+        <button class="ghost-button !py-2 !px-3 text-xs ui-control-target" @click="emitCopy">复制 SQL</button>
+      </div>
+
+      <div v-if="templates.length" class="space-y-1.5">
+        <p class="text-xs text-subtle">已保存模板 · {{ templates.length }}</p>
+          <div v-for="t in templates" :key="t.id" class="ui-inset-card flex items-center gap-2 px-2.5 py-2 rounded-lg bg-surface-muted border border-stroke group">
+          <div class="flex-1 min-w-0">
+            <p class="text-xs text-muted truncate">{{ t.name }}</p>
+            <p class="text-xs text-subtle truncate">{{ Object.keys(t.values).length }} 参数 · {{ formatTime(t.created_at) }}</p>
+          </div>
+          <button class="ghost-button !py-1 !px-2 text-xs opacity-0 group-hover:opacity-100 ui-control-target" @click="applyTemplate(t)">应用</button>
+          <button class="ghost-button !py-1 !px-1.5 text-xs text-danger opacity-0 group-hover:opacity-100 ui-control-target" @click="deleteTemplate(t.id)"><Trash2 class="w-3 h-3" /></button>
+        </div>
+      </div>
+    </div>
+
+    <div class="px-3 py-2 border-t border-stroke bg-surface-muted shrink-0">
+      <p class="text-xs text-subtle leading-4">💡 参数值会自动持久化到本地；支持保存为模板在团队间复用（本地存储，后端占位）</p>
+    </div>
+  </div>
+</template>

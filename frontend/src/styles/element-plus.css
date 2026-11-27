@@ -1,0 +1,111 @@
+/* Teleport 到 body 的弹层也继承同一主题。变量优先于逐控件颜色补丁。 */
+:root[data-theme] {
+  --el-color-primary: var(--db-action-primary);
+  --el-color-primary-light-3: color-mix(in srgb, var(--db-action-primary) 70%, var(--db-surface-solid));
+  --el-color-primary-light-5: color-mix(in srgb, var(--db-action-primary) 50%, var(--db-surface-solid));
+  --el-color-primary-light-7: color-mix(in srgb, var(--db-action-primary) 30%, var(--db-surface-solid));
+  --el-color-primary-light-8: color-mix(in srgb, var(--db-action-primary) 20%, var(--db-surface-solid));
+  --el-color-primary-light-9: var(--db-accent-soft);
+  --el-color-primary-dark-2: color-mix(in srgb, var(--db-action-primary) 85%, var(--db-text-primary));
+  --el-color-success: var(--db-success);
+  --el-color-warning: var(--db-warning);
+  --el-color-danger: var(--db-danger);
+  --el-color-error: var(--db-danger);
+  --el-text-color-primary: var(--db-text-primary);
+  --el-text-color-regular: var(--db-text-secondary);
+  --el-text-color-secondary: var(--db-text-secondary);
+  --el-text-color-placeholder: var(--db-text-tertiary);
+  --el-text-color-disabled: var(--db-text-tertiary);
+  --el-bg-color: var(--db-surface-solid);
+  --el-bg-color-page: var(--db-page-bg);
+  --el-bg-color-overlay: var(--db-surface-overlay);
+  --el-fill-color-blank: var(--db-surface-data);
+  --el-fill-color: var(--db-surface-muted);
+  --el-fill-color-light: var(--db-surface-muted);
+  --el-fill-color-lighter: var(--db-surface-soft);
+  --el-fill-color-extra-light: var(--db-surface-soft);
+  --el-fill-color-dark: var(--db-surface-inset);
+  --el-fill-color-darker: var(--db-surface-inset);
+  --el-fill-color-disabled: var(--db-surface-inset);
+  --el-disabled-bg-color: var(--db-surface-inset);
+  --el-disabled-text-color: var(--db-text-tertiary);
+  --el-border-color: var(--db-control-border);
+  --el-border-color-light: var(--db-border);
+  --el-border-color-lighter: var(--db-divider);
+  --el-border-color-extra-light: var(--db-divider);
+  --el-border-color-hover: var(--db-focus);
+  --el-border-radius-base: var(--db-radius-control);
+  --el-border-radius-small: 3px;
+  --el-component-size: var(--db-control-height);
+  --el-font-size-base: 14px;
+  --el-overlay-color-lighter: var(--db-scrim);
+  --el-mask-color: var(--db-scrim);
+}
+.el-input__wrapper, .el-select__wrapper, .el-textarea__inner { border-radius: var(--db-radius-control); background: var(--db-surface-data); }
+html[data-theme] :is(.el-input, .el-select, .el-date-editor) { --el-component-size: var(--db-control-height); --el-component-size-small: var(--db-control-height); --el-component-size-large: var(--db-control-height); }
+html[data-theme] .el-button { --el-component-size: var(--db-control-height-sm); --el-component-size-small: var(--db-control-height-sm); min-height: var(--db-control-height-sm); }
+html[data-theme] .el-button--primary { --el-component-size: var(--db-action-height); min-height: var(--db-action-height); }
+html[data-theme] :is(.el-input__wrapper, .el-select__wrapper, .el-range-editor.el-input__wrapper) { min-height: var(--db-control-height); }
+html[data-theme] .el-button.is-circle { min-width: var(--db-control-height-sm); }
+html[data-theme] :is(.el-checkbox, .el-radio) { min-height: var(--db-control-height-sm); height: auto; }
+html[data-theme] .el-input__wrapper.is-focus, html[data-theme] .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--db-focus) inset, 0 0 0 3px color-mix(in srgb, var(--db-focus) 16%, transparent); }
+.el-input__inner, .el-textarea__inner { color: var(--db-text-primary); -webkit-text-fill-color: currentColor; }
+.el-input__inner::placeholder, .el-textarea__inner::placeholder { color: var(--db-text-tertiary); opacity: 1; }
+.el-dialog, .el-drawer, .el-popper.is-light, .el-message-box {
+  color: var(--db-text-primary); background: var(--db-surface-overlay);
+  border: 1px solid var(--db-glass-edge); border-radius: var(--db-radius-overlay);
+  box-shadow: inset 0 1px 0 var(--db-glass-highlight), var(--db-shadow-overlay);
+}
+.el-dialog { max-width: calc(100vw - 32px); }
+.el-message-box { max-width: calc(100vw - 24px); }
+.el-message-box__btns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.el-dialog__header, .el-message-box__header { margin-right: 0; padding: 20px 42px 16px 20px; border-bottom: 1px solid var(--db-divider); }
+.el-dialog__title, .el-message-box__title, .el-drawer__title { color: var(--db-text-primary); font-size: 18px; font-weight: 600; font-family: var(--db-font-editorial); }
+.el-dialog__body { color: var(--db-text-primary); padding: 20px; overflow-wrap: anywhere; }
+.el-dialog__footer { padding: 0 20px 20px; }
+.el-dialog__headerbtn, .el-drawer__close-btn, .el-message-box__headerbtn { width: 44px; height: 44px; }
+.el-overlay { background-color: var(--db-scrim); }
+.el-select__popper.el-popper, .el-picker__popper.el-popper, .el-dropdown__popper.el-popper { border-radius: var(--db-radius-popover); }
+.el-select-dropdown, .el-picker-panel, .el-dropdown-menu { background: transparent; color: var(--db-text-primary); border: 0; }
+.el-select-dropdown, .el-dropdown-menu { padding: 6px; }
+.el-select-dropdown__item, .el-dropdown-menu__item { min-height: var(--db-control-height-sm); height: auto; padding: var(--db-button-padding-y) 12px; display: flex; align-items: center; border-radius: var(--db-radius-control); color: var(--db-text-secondary); }
+.el-select-dropdown__item.is-hovering, .el-select-dropdown__item:hover, .el-dropdown-menu__item:not(.is-disabled):hover, .el-dropdown-menu__item:focus { background: var(--db-interactive-hover); color: var(--db-text-primary); }
+.el-select-dropdown__item.is-selected { color: var(--db-accent); background: var(--db-accent-soft); font-weight: 600; }
+.el-select-dropdown__item.is-disabled, .el-dropdown-menu__item.is-disabled { color: var(--db-text-tertiary); opacity: .65; }
+.el-popper.is-light .el-popper__arrow::before { border-color: var(--db-glass-edge); background: var(--db-surface-overlay); }
+.el-date-table th, .el-picker-panel__icon-btn { color: var(--db-text-secondary); }
+.el-date-picker__header:has(.el-date-picker__header-label + .el-date-picker__header-label) { display: grid; grid-template-columns: calc(2 * var(--db-control-height-sm)) minmax(0, 1fr) minmax(0, 1fr) calc(2 * var(--db-control-height-sm)); align-items: center; }
+.el-date-picker__header:has(.el-date-picker__header-label + .el-date-picker__header-label) :is(.el-date-picker__prev-btn, .el-date-picker__next-btn) { display: flex; align-items: center; }
+.el-date-picker__header:has(.el-date-picker__header-label + .el-date-picker__header-label) .el-picker-panel__icon-btn { float: none; margin: 0; }
+.el-date-picker__header-label { min-width: 0; padding-left: 0; padding-right: 0; white-space: nowrap; }
+.el-date-table td .el-date-table-cell__text { color: var(--db-text-primary); }
+.el-date-table :is(td.prev-month, td.next-month) .el-date-table-cell__text { color: var(--db-text-tertiary); }
+.el-date-table td.current:not(.disabled) .el-date-table-cell__text { background: var(--db-action-primary); color: var(--db-on-primary); }
+.el-date-table td.in-range .el-date-table-cell { background: var(--db-accent-soft); }
+.el-drawer__header { color: var(--db-text-primary); margin-bottom: 0; padding: 20px; border-bottom: 1px solid var(--db-divider); }
+.el-drawer__body { padding: 20px; }
+.el-tabs__item { color: var(--db-text-secondary); height: var(--db-control-height); min-height: var(--db-control-height-sm); }
+.el-tabs__item.is-active { color: var(--db-accent); }
+.el-tabs__nav-wrap::after { background: var(--db-divider); }
+.el-table { --el-table-bg-color: var(--db-surface-data); --el-table-tr-bg-color: transparent; --el-table-header-bg-color: var(--db-surface-inset); --el-table-row-hover-bg-color: var(--db-interactive-hover); --el-table-border-color: var(--db-divider); --el-table-text-color: var(--db-text-primary); --el-table-header-text-color: var(--db-text-secondary); border-radius: var(--db-radius-control); }
+.el-table__cell { padding-top: var(--db-table-cell-padding-y); padding-bottom: var(--db-table-cell-padding-y); }
+.el-loading-mask { background: var(--db-surface-data); border-radius: inherit; }
+.el-loading-spinner .el-loading-text { color: var(--db-accent); }
+.el-empty__description p { color: var(--db-text-secondary); }
+.el-message, .el-notification { background: var(--db-surface-overlay); color: var(--db-text-primary); border-color: var(--db-glass-edge); border-radius: var(--db-radius-popover); box-shadow: var(--db-shadow-card); }
+.el-tag { border-radius: var(--db-radius-pill); }
+@media (max-width: 735px) {
+  .el-date-picker__header-label { font-size: 14px; }
+  .el-dialog { max-width: calc(100vw - 24px); }
+  .el-dialog__body, .el-drawer__body { padding: 16px; }
+  .el-dialog__header { padding-left: 16px; }
+  .el-dialog__footer { padding-left: 16px; padding-right: 16px; }
+  .el-picker__popper { max-width: calc(100vw - 24px); }
+  .el-picker__popper .el-date-picker, .el-picker__popper .el-date-range-picker { width: min(322px, calc(100vw - 24px)); }
+  .el-picker__popper .el-picker-panel__content { width: calc(100% - 16px); margin: 8px; }
+  .el-date-range-picker__content { width: 100%; float: none; }
+  .el-date-range-picker__content.is-left { border-right: 0; border-bottom: 1px solid var(--db-divider); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .el-dialog, .el-drawer, .el-popper.is-light, .el-message-box { background: var(--db-surface-solid); backdrop-filter: none; -webkit-backdrop-filter: none; }
+}
