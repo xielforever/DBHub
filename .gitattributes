@@ -1,0 +1,4 @@
+/scripts/ops/*local*.sh text eol=lf
+/deploy/local/*.service text eol=lf
+/deploy/local/*.timer text eol=lf
+/backend/scripts/*.sh text eol=lf

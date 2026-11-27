@@ -104,7 +104,8 @@ class AutomationRuntime(Runtime):
             admin_context, admin = login('admin')
             admin.goto(self.origin + '/inbox?tab=todos')
             expect(admin.get_by_text('报表待审批', exact=False).first).to_be_visible()
-            admin.get_by_role('button', name='去处理', exact=True).first.click()
+            admin.get_by_role('button', name='报表待审批', exact=True).first.click()
+            admin.get_by_role('link', name='去处理', exact=True).click()
             expect(admin.get_by_role('dialog')).to_be_visible()
             assert f'report={report["id"]}' in admin.url
             self.passed('live_todo_opens_frozen_report_review')
@@ -113,13 +114,17 @@ class AutomationRuntime(Runtime):
             self.wait(lambda: self.api('GET', '/inbox')['unread'] == 0)
             assert self.api('GET', '/inbox/todos')['total'] == 1
             select_workspace(admin, '隔离验收空间')
+            admin.goto(self.origin + '/inbox?tab=notifications')
             expect(admin.get_by_text('暂无通知', exact=True)).to_be_visible()
-            expect(admin.get_by_role('tab', name='待我处理（0）', exact=True)).to_be_visible()
+            admin.get_by_role('tab', name='待我处理', exact=True).click()
+            expect(admin.get_by_role('heading', name='暂无待处理事项', exact=True)).to_be_visible()
             select_workspace(admin, '默认工作空间')
             self.passed('browser_workspace_switch_clears_inbox_and_pending_counts')
             admin.goto(self.origin + '/settings?section=operations')
+            expect(admin).to_have_url(re.compile(r'/platform\?[^#]*tab=operations'))
             expect(admin.get_by_role('heading', name='运行与备份', exact=True)).to_be_visible()
-            expect(admin.get_by_text('审计留存：自动清理关闭', exact=False)).to_be_visible()
+            retention = admin.get_by_role('region', name='部署留存设置')
+            expect(retention.get_by_text('自动清理关闭', exact=True).first).to_be_visible()
             self.passed('browser_read_highwater_keeps_pending_work_and_platform_operations')
             assert not errors and not violations, {'page_errors': errors, 'csp_violations': violations}
             self.result['browser'] = {'page_errors': 0, 'csp_violations': 0, 'widths': [1440, 390], 'mocked_business_responses': 0}

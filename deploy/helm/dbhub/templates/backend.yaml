@@ -21,6 +21,34 @@ spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets: {{ toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        - name: prepare-audit-directory
+          image: {{ include "dbhub.image" .Values.backend.image | quote }}
+          imagePullPolicy: {{ .Values.backend.image.pullPolicy }}
+          securityContext: {readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              umask 077
+              dir=/var/lib/dbhub/audit
+              if [ -L "$dir" ] || { [ -e "$dir" ] && [ ! -d "$dir" ]; }; then
+                printf '%s\n' 'Audit path must be a real directory.' >&2
+                exit 1
+              fi
+              if [ ! -d "$dir" ]; then
+                mkdir -m 0700 -- "$dir"
+              fi
+              if [ "$(stat -c '%u' -- "$dir")" != "$(id -u)" ]; then
+                printf '%s\n' 'Audit directory must be owned by the backend user.' >&2
+                exit 1
+              fi
+              if [ "$(stat -c '%a' -- "$dir")" != 700 ]; then
+                chmod 00700 -- "$dir"
+              fi
+              test "$(stat -c '%a' -- "$dir")" = 700
+          resources: {{ toYaml .Values.backend.resources | nindent 12 }}
+          volumeMounts:
+            - {name: audit, mountPath: /var/lib/dbhub}
       containers:
         - name: backend
           image: {{ include "dbhub.image" .Values.backend.image | quote }}

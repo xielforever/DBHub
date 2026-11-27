@@ -1,0 +1,103 @@
+# A52: same isolated PostgreSQL and images, no external ingress or live volumes.
+# Start only after the functional regression containers have stopped.
+services:
+  perf-prepare:
+    image: dbhub-local/postgres:16-existing
+    pull_policy: never
+    environment:
+      PGHOST: metadata
+      PGUSER: iam_test
+      PGDATABASE: iam_test
+      PGPASSWORD: ${IAM_POSTGRES_PASSWORD}
+    volumes:
+      - ./iam-performance-prepare.sh:/fixture/prepare.sh:ro
+      - ./iam-performance-seed.sql:/fixture/seed.sql:ro
+      - ./iam-performance-target.sql:/fixture/target.sql:ro
+      - ./iam-performance-verify.sql:/fixture/verify.sql:ro
+      - ./iam-performance-schema.sql:/fixture/schema.sql:ro
+    entrypoint: [bash, /fixture/prepare.sh]
+    command: [init]
+  perf-probe:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    volumes:
+      - ./iam-performance-probe.mjs:/fixture/probe.mjs:ro
+    entrypoint: [node, /fixture/probe.mjs]
+    command: [baseline]
+  perf-baseline:
+    image: dbhub-local/golang:1.26.9-bookworm
+    pull_policy: never
+    working_dir: /src
+    environment:
+      CGO_ENABLED: "1"
+      GOFLAGS: -mod=vendor
+      GOTOOLCHAIN: local
+      GOPROXY: "off"
+      GOMAXPROCS: "4"
+      META_DB_MAX_CONNS: "8"
+      APP_ENV: development
+      APP_SECRET_KEY: ${IAM_APP_SECRET}
+      APP_ADMIN_USERNAME: perf-user-1
+      APP_ADMIN_PASSWORD: TestPassword123!
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_perf_baseline
+      REDIS_URL: redis://redis:6379/5
+      DBHUB_AUDIT_DIR: /audit
+      LOG_LEVEL: error
+      DBHUB_LOGIN_MAX_ATTEMPTS: "1000"
+      DBHUB_LOGIN_IP_MAX_ATTEMPTS: "10000"
+    volumes:
+      - /mnt/c/dev/backups/DBHub/phase1-20261022-094458/restored-working-copy/backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - perf-baseline-build:/out
+      - perf-baseline-audit:/audit
+    command: [sh, -ec, "install -d -m 0700 /audit; go build -p=2 -trimpath -o /out/server ./cmd/server; exec /out/server"]
+    logging: {options: {max-size: 10m, max-file: "2"}}
+    depends_on:
+      metadata: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  perf-candidate:
+    image: dbhub-local/golang:1.26.9-bookworm
+    pull_policy: never
+    working_dir: /src
+    environment:
+      CGO_ENABLED: "1"
+      GOFLAGS: -mod=vendor
+      GOTOOLCHAIN: local
+      GOPROXY: "off"
+      GOMAXPROCS: "4"
+      META_DB_MAX_CONNS: "8"
+      APP_ENV: development
+      APP_SECRET_KEY: ${IAM_APP_SECRET}
+      APP_ADMIN_USERNAME: perf-user-1
+      APP_ADMIN_PASSWORD: TestPassword123!
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_perf_candidate_v2
+      REDIS_URL: redis://redis:6379/6
+      DBHUB_AUDIT_DIR: /audit
+      LOG_LEVEL: error
+      DBHUB_LOGIN_MAX_ATTEMPTS: "1000"
+      DBHUB_LOGIN_IP_MAX_ATTEMPTS: "10000"
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - perf-candidate-build:/out
+      - perf-candidate-audit:/audit
+    command: [sh, -ec, "install -d -m 0700 /audit; go build -p=2 -trimpath -o /out/server ./cmd/server; exec /out/server"]
+    logging: {options: {max-size: 10m, max-file: "2"}}
+    depends_on:
+      metadata: {condition: service_healthy}
+      redis: {condition: service_healthy}
+  perf-driver:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    working_dir: /fixture
+    volumes:
+      - ./iam-performance.mjs:/fixture/performance.mjs:ro
+      - ../../docs/项目管控/验收证据/2026-10-22-阶段1基础/performance-workload-v1.json:/fixture/workload.json:ro
+      - ../../.dbhub/phase1-test:/evidence
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: [node, performance.mjs]
+volumes:
+  perf-baseline-build: {}
+  perf-candidate-build: {}
+  perf-baseline-audit: {}
+  perf-candidate-audit: {}

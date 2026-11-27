@@ -1,0 +1,50 @@
+name: 任务或需求
+description: 记录目标、范围、依赖和可核查的验收条件；已有任务请直接更新原 Issue。
+title: "[需求] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先检索已有 Issue，并阅读仓库 AGENTS.md 和项目配置。新建记录不自动获得工作包编号、就绪状态或实施授权；不要在此预填验收通过。
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景与目标
+      description: 说明当前问题、受影响的人或流程，以及希望达到的行为。
+    validations:
+      required: true
+  - type: input
+    id: task
+    attributes:
+      label: 任务编号与关联
+      description: 填已有 WBS 编号及关联 Issue；尚未确定时填“待确认”，不要自行编造编号。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 实施范围与范围外内容
+      description: 写清本次覆盖的行为和边界；范围变更说明与原计划的差异。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 用可观察、可核查的条件描述何时完成；此处是计划，不是验收结果。
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 验证计划
+      description: 说明拟执行的检查、环境、数据/配置和预期证据；未知部分标待确认。
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: 依赖、阻塞与计划影响
+      description: 关联实际前置任务，说明解除条件和对计划的影响；没有已知依赖时写“无已知依赖”。
+    validations:
+      required: true

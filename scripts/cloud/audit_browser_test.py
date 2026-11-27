@@ -85,7 +85,7 @@ try:
             page.locator('button[type=submit]').click()
         assert login.value.status == 200
         sessions.append(login.value.json()['data']['access_token'])
-        page.wait_for_url('**/dashboard')
+        page.wait_for_url('**/home')
         page.goto(frontend + '/audit', wait_until='networkidle')
         expect(page.get_by_label('主内容区（可滚动）').get_by_role('heading', name='操作审计', exact=True)).to_be_visible()
         expect(page.get_by_role('status').filter(has_text='审计写入正常')).to_be_visible()

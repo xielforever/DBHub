@@ -1,0 +1,36 @@
+# A separate disposable namespace exercises real HTTP activation/rollback.
+# No ports, no live volumes, no changes to the preview's activation settings.
+services:
+  b6-api:
+    extends:
+      file: iam-runtime.compose.yaml
+      service: go-api
+    environment:
+      APP_ADMIN_USERNAME: iam-b6-author
+      APP_ADMIN_PASSWORD: TestPassword123!
+      DATABASE_URL: postgres://iam_test:${IAM_POSTGRES_PASSWORD}@metadata:5432/iam_test?sslmode=disable&search_path=iam_b6_acceptance
+      REDIS_URL: redis://redis:6379/10
+      DBHUB_IAM_ISOLATION_ID: phase1-b6-http
+    volumes:
+      - ../../backend:/src:ro
+      - go-cache:/root/.cache/go-build
+      - b6-build:/out
+      - b6-audit:/audit
+  b6-probe:
+    image: dbhub-local/node:24.12.0-bullseye-slim
+    pull_policy: never
+    volumes:
+      - ./iam-b6-acceptance.mjs:/fixture/b6.mjs:ro
+      - ../../.dbhub/phase1-test:/evidence
+    command: [node, /fixture/b6.mjs, exercise]
+  b6-provision:
+    image: dbhub-local/postgres:16-existing
+    pull_policy: never
+    environment:
+      PGPASSWORD: ${IAM_POSTGRES_PASSWORD}
+    volumes:
+      - ./iam-b6-bootstrap.sql:/fixture/b6.sql:ro
+    command: [psql, -h, metadata, -U, iam_test, -d, iam_test, -v, ON_ERROR_STOP=1, -f, /fixture/b6.sql]
+volumes:
+  b6-build: {}
+  b6-audit: {}

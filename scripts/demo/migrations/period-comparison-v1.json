@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "sql_sha256": {
+    "reporting.finance_orders": "e2a9d808d2fb2185e256f03d6524a006f77041258679b14e6447b5fdc9ad51e6",
+    "reporting.management_fulfillment": "cebeff2b768f28c263c315a6e17dfb5dcaf3fefa4a1183bba8b76bc25102a621"
+  }
+}

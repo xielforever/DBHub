@@ -41,12 +41,19 @@ def validate(items):
         pod = spec['template']['spec']
         assert pod['automountServiceAccountToken'] is False
         assert pod['securityContext']['runAsNonRoot'] is True
-        for container in pod['containers']:
+        for container in pod.get('initContainers', []) + pod['containers']:
             assert container['securityContext']['allowPrivilegeEscalation'] is False
             assert container['securityContext']['readOnlyRootFilesystem'] is True
         if name == 'backend':
             assert pod['securityContext']['fsGroupChangePolicy'] == 'OnRootMismatch'
             c = pod['containers'][0]
+            [init] = pod['initContainers']
+            assert init['name'] == 'prepare-audit-directory' and init['image'] == c['image']
+            assert init['imagePullPolicy'] == c['imagePullPolicy']
+            assert init['securityContext']['capabilities']['drop'] == ['ALL']
+            audit_mounts = [v for v in c['volumeMounts'] if v['name'] == 'audit']
+            assert init['volumeMounts'] == audit_mounts == [{'name': 'audit', 'mountPath': '/var/lib/dbhub'}]
+            assert not init.get('envFrom')
             assert {v['name']: v['value'] for v in c['env']}['APP_ENV'] == 'production'
             assert c['readinessProbe']['httpGet']['path'] == '/api/ready'
             assert c['livenessProbe']['httpGet']['path'] == '/api/health'

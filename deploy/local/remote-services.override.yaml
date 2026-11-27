@@ -1,0 +1,36 @@
+# 前后端仍在本地；只把基础服务连接改为环境配置指定的现有实例。
+services:
+  backend:
+    depends_on: !reset {}
+    environment:
+      DATABASE_URL: ${DBHUB_METADATA_URL:?请在本机环境文件配置元数据库连接}
+      REDIS_URL: ${DBHUB_REDIS_URL:?请在本机环境文件配置Redis连接}
+      DBHUB_MIGRATION_TIMEOUT_SECONDS: ${DBHUB_MIGRATION_TIMEOUT_SECONDS:-30}
+      DBHUB_READINESS_TIMEOUT_SECONDS: ${DBHUB_READINESS_TIMEOUT_SECONDS:-2}
+      DBHUB_REDIS_PROBE_TIMEOUT_MS: ${DBHUB_REDIS_PROBE_TIMEOUT_MS:-500}
+      DBHUB_LOGIN_REDIS_TIMEOUT_MS: ${DBHUB_LOGIN_REDIS_TIMEOUT_MS:-500}
+      DBHUB_CONNECTION_CHECK_PERSIST_TIMEOUT_SECONDS: ${DBHUB_CONNECTION_CHECK_PERSIST_TIMEOUT_SECONDS:-3}
+      SSL_CERT_FILE: /run/dbhub-infra/ca.crt
+      DBHUB_TARGET_ALLOWLIST: ${DBHUB_TARGET_ALLOWLIST:?请配置获准数据源主机端口}
+    extra_hosts:
+      - ${DBHUB_INFRA_HOSTNAME:?请配置数据库证书主机名}:${DBHUB_INFRA_ADDRESS:?请配置Tailscale地址}
+    volumes:
+      - type: bind
+        source: ${DBHUB_INFRA_CA_FILE:?请配置本地可信证书路径}
+        target: /run/dbhub-infra/ca.crt
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      # 服务端最多等待 60s，探针客户端另留 1s。
+      timeout: 65s
+      start_period: 240s
+  frontend:
+    environment:
+      VITE_CONNECTION_TEST_TIMEOUT_MS: ${VITE_CONNECTION_TEST_TIMEOUT_MS:-25000}
+      VITE_DATABASE_LIST_TIMEOUT_MS: ${VITE_DATABASE_LIST_TIMEOUT_MS:-90000}
+      VITE_IAM_EFFECTIVE_TIMEOUT_MS: ${VITE_IAM_EFFECTIVE_TIMEOUT_MS:-45000}
+  metadata:
+    profiles: [local-infrastructure]
+  redis:
+    profiles: [local-infrastructure]

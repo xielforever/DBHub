@@ -66,12 +66,25 @@ def main():
         pvc = rt.prefix + '-pvc';rt.volume(pvc)
         rt.docker('run', '--rm', '--user', '0:0', '--entrypoint', 'sh',
                   '--mount', f'type=volume,src={pvc},dst=/fixture', rt.backend_image,
-                  '-ec', 'chown 0:65532 /fixture; chmod 2770 /fixture; touch /fixture/.initialized')
+                  '-ec', 'chown 0:65532 /fixture; chmod 2770 /fixture; '
+                         'install -d -m 2770 -o 65532 -g 65532 /fixture/audit; '
+                         'touch /fixture/audit/.preserve-pvc-fixture')
+        rendered = manifests()
+        pod = next(item['spec']['template']['spec'] for item in rendered
+                   if item['kind'] == 'Deployment' and item['metadata']['name'].endswith('-backend'))
+        [init] = pod['initContainers']
+        uid = pod['securityContext']['runAsUser']
+        gid = pod['securityContext']['runAsGroup']
+        mount = 'type=volume,src=' + pvc + ',dst=' + init['volumeMounts'][0]['mountPath']
+        shell, *shell_args = init['command']
+        rt.docker('run', '--rm', '--network', 'none', '--read-only', '--user', f'{uid}:{gid}',
+                  '--cap-drop=ALL', '--security-opt', 'no-new-privileges',
+                  '--mount', mount, '--entrypoint', shell, rt.backend_image, *shell_args, *init['args'])
         helm_backend = rt.prefix + '-helm-backend'
         rt.run(helm_backend, '--network-alias', 'check-dbhub-backend', '--env-file', str(env),
                '--read-only', '--user', '65532:65532', '--cap-drop=ALL',
                '--mount', 'type=volume,src=' + pvc + ',dst=/var/lib/dbhub', rt.backend_image)
-        nginx = next(item['data']['default.conf'] for item in manifests() if item['kind'] == 'ConfigMap' and 'default.conf' in item['data'])
+        nginx = next(item['data']['default.conf'] for item in rendered if item['kind'] == 'ConfigMap' and 'default.conf' in item['data'])
         conf = rt.state / 'helm-nginx.conf';conf.write_text(nginx);conf.chmod(0o644)
         helm_front = rt.prefix + '-helm-front'
         rt.run(helm_front, '--publish', f'127.0.0.1:{rt.port}:8080', '--user', '101:101', '--read-only', '--cap-drop=ALL',
@@ -80,7 +93,9 @@ def main():
                frontend_image, '-g', 'daemon off;')
         rt.wait_ready()
         assert rt.raw('GET', '/')[0] == 200
-        rt.docker('exec', helm_backend, 'test', '-d', '/var/lib/dbhub/audit')
+        rt.docker('exec', helm_backend, 'sh', '-ec',
+                  'test "$(stat -c %a /var/lib/dbhub/audit)" = 700; '
+                  'test -f /var/lib/dbhub/audit/.preserve-pvc-fixture')
         rt.passed('helm_nginx_nonroot_and_csi_audit_directory_permissions_on_docker')
         rt.docker('stop', '-t', '15', helm_front);rt.docker('rm', helm_front)
         rt.docker('stop', '-t', '15', helm_backend);rt.docker('rm', helm_backend)

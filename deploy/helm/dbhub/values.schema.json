@@ -154,6 +154,27 @@
           "type": "integer",
           "minimum": 1
         },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": ["ClusterIP", "LoadBalancer"]
+            },
+            "annotations": {
+              "type": "object",
+              "additionalProperties": {"type": "string"}
+            },
+            "externalTrafficPolicy": {
+              "enum": ["Cluster", "Local"]
+            },
+            "nodePort": {
+              "type": ["integer", "null"],
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
         "image": {
           "type": "object",
           "additionalProperties": false,

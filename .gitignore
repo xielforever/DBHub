@@ -40,6 +40,11 @@ frontend/*.local
 *.log
 logs/
 
+# ---------- 本地工具产物与集群凭据 ----------
+.codex-attachments/
+dbhub-kubeconfig.yaml
+*-kubeconfig.yaml
+
 # ---------- Docker 数据卷（本地持久化）----------
 .docker-volumes/
 .dbhub/

@@ -45,7 +45,7 @@ def choose(page,combo,name):
 def login(page,username,password):
     page.goto(frontend+'/login',wait_until='networkidle');page.locator('#username').fill(username);page.locator('#password').fill(password)
     with page.expect_response(lambda r:r.url.endswith('/auth/login')) as pending:page.locator('button[type=submit]').click()
-    tokens.append(pending.value.json()['data']['access_token']);page.wait_for_url('**/dashboard')
+    tokens.append(pending.value.json()['data']['access_token']);page.wait_for_url('**/home')
 
 token=api('POST','/auth/login',{'username':values['APP_ADMIN_USERNAME'],'password':values['APP_ADMIN_PASSWORD']})['access_token']
 try:
@@ -56,17 +56,20 @@ try:
         browser=p.chromium.launch(executable_path='/usr/bin/chromium',proxy={'server':values.get('HTTPS_PROXY') or 'http://proxy:8080','bypass':'frontend,backend,jdbc,localhost,127.0.0.1'},args=['--no-sandbox','--disable-dev-shm-usage'])
         context=browser.new_context(viewport={'width':1440,'height':1000},locale='zh-CN',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(20000);page.on('pageerror',lambda e:errors.append(str(e)))
         login(page,values['APP_ADMIN_USERNAME'],values['APP_ADMIN_PASSWORD'])
-        expect(page).to_have_title('概览 · DBHub');page.goto(frontend+'/settings',wait_until='networkidle')
+        expect(page).to_have_title('业务工作台 · DBHub');page.goto(frontend+'/settings',wait_until='networkidle')
         driver_section=page.get_by_role('region',name='驱动管理')
         registered=next((d for d in known if d['artifact_id']==h2_artifact['id']),None)
         if not registered:
+            driver_section.get_by_role('button',name='登记驱动',exact=True).click()
             choose(page,driver_section.get_by_role('combobox',name='可用驱动制品'),'h2 '+h2_artifact['version'])
             driver_section.get_by_label('驱动名称',exact=True).fill(prefix+' H2 driver')
-            with page.expect_response(lambda r:r.url.endswith('/connector-drivers') and r.request.method=='POST') as response:driver_section.get_by_role('button',name='登记驱动',exact=True).click()
+            with page.expect_response(lambda r:r.url.endswith('/connector-drivers') and r.request.method=='POST') as response:driver_section.get_by_role('button',name='确认登记',exact=True).click()
             assert response.value.status==201;registered=response.value.json()['data'];drivers.append(registered['id'])
         driver_name=registered['name']
         passed('admin registers an actually installed and checksum-verified JDBC artifact')
+        page.get_by_role('tab',name='数据源模板',exact=True).click()
         section=page.get_by_role('region',name='数据源模板')
+        section.get_by_role('button',name='新建模板',exact=True).click()
         section.get_by_label('模板标识',exact=True).fill(prefix)
         section.get_by_label('模板名称',exact=True).fill(prefix+' template')
         choose(page,section.get_by_role('combobox',name='模板驱动版本'),driver_name+' '+registered['version'])
@@ -117,11 +120,12 @@ try:
         expect(page.locator('.el-message')).to_have_count(0);page.screenshot(path=str(out/'connector-metadata-mobile.png'),animations='disabled',full_page=True)
         passed('metadata browsing remains readable on a 390px screen')
         page.set_viewport_size({'width':1440,'height':1000});page.goto(frontend+'/settings',wait_until='networkidle')
-        section=page.get_by_role('region',name='数据源模板');row=section.get_by_role('listitem').filter(has_text=prefix+' template');row.get_by_role('button',name='新修订',exact=True).click();section.get_by_label('模板名称',exact=True).fill(prefix+' revision 2')
+        page.get_by_role('tab',name='数据源模板',exact=True).click()
+        section=page.get_by_role('region',name='数据源模板');row=section.get_by_role('row').filter(has_text=prefix+' template');row.get_by_role('button',name='新修订',exact=True).click();section.get_by_label('模板名称',exact=True).fill(prefix+' revision 2')
         with page.expect_response(lambda r:r.url.endswith('/datasource-templates/'+str(template['id'])) and r.request.method=='PUT') as response:section.get_by_role('button',name='发布新修订',exact=True).click()
         assert response.value.status==201;templates.append(response.value.json()['data']['id']);assert api('GET','/connections/'+str(h2_source['id']))['template']['revision']==1
         passed('publishing a revision preserves the source original template binding')
-        page.set_viewport_size({'width':390,'height':844});section.get_by_role('heading',name='数据源模板',exact=True).scroll_into_view_if_needed();assert page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth');expect(page.locator('.el-message')).to_have_count(0);page.screenshot(path=str(out/'connector-settings-mobile.png'),animations='disabled',full_page=True);page.set_viewport_size({'width':1440,'height':1000})
+        page.set_viewport_size({'width':390,'height':844});section.scroll_into_view_if_needed();assert page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth');expect(page.locator('.el-message')).to_have_count(0);page.screenshot(path=str(out/'connector-settings-mobile.png'),animations='disabled',full_page=True);page.set_viewport_size({'width':1440,'height':1000})
         passed('driver and template settings do not overflow the mobile page')
 
         pg_driver=next((d for d in api('GET','/connector-drivers')['items'] if d['artifact_id'].startswith('postgresql-')),None)
@@ -197,7 +201,7 @@ try:
         readonly_password=secrets.token_urlsafe(20)
         user=api('POST','/users',{'username':prefix+'-ro','password':readonly_password,'role':'readonly'},201);users.append(user['id'])
         ro_context=browser.new_context(viewport={'width':390,'height':844},locale='zh-CN');ro=ro_context.new_page();ro.on('pageerror',lambda e:errors.append(str(e)));login(ro,user['username'],readonly_password)
-        ro.goto(frontend+'/settings',wait_until='networkidle');expect(ro.get_by_role('heading',name='驱动管理',exact=True)).to_have_count(0)
+        ro.goto(frontend+'/settings',wait_until='networkidle');expect(ro.get_by_role('region',name='驱动管理',exact=True)).to_have_count(0)
         ro.goto(frontend+'/query?connection='+str(redis['id']),wait_until='networkidle');expect(ro.get_by_role('heading',name='键值浏览',exact=True)).to_be_visible();expect(ro.get_by_role('button',name='新建字符串键',exact=True)).to_have_count(0)
         ro.goto(frontend+'/query?connection='+str(h2_source['id']),wait_until='networkidle');expect(ro.get_by_role('heading',name='结构浏览',exact=True)).to_be_visible();expect(ro.get_by_role('button',name='采集结构',exact=True)).to_have_count(0)
         passed('readonly users can browse while driver management and write controls stay hidden')
