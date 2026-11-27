@@ -12,6 +12,12 @@ type QueryControls struct{ pool *ScopedPool }
 
 func NewQueryControls(pool *pgxpool.Pool) *QueryControls { return &QueryControls{scopedPool(pool)} }
 
+// A queued request holds its frozen identity, not a database lease. Acquire the
+// execution fence only after admission, then revalidate before sending SQL.
+func (r *QueryControls) IAMExecutionLease(ctx context.Context) (func(), error) {
+	return (&UserRepository{pool: r.pool}).IAMLease(ctx)
+}
+
 type QuerySettings struct {
 	TimeoutMS        int  `json:"timeout_ms"`
 	MaxRows          int  `json:"max_rows"`

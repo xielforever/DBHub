@@ -39,14 +39,15 @@ type loginCount struct {
 	expires time.Time
 }
 type loginLimiter struct {
-	client      *redis.Client
-	secret      []byte
-	account, ip int
-	window      time.Duration
-	trusted     []netip.Prefix
-	mu          sync.Mutex
-	counts      map[string]loginCount
-	now         func() time.Time
+	client       *redis.Client
+	secret       []byte
+	account, ip  int
+	window       time.Duration
+	redisTimeout time.Duration
+	trusted      []netip.Prefix
+	mu           sync.Mutex
+	counts       map[string]loginCount
+	now          func() time.Time
 }
 
 func newLoginLimiter(cfg *config.Config, client *redis.Client) *loginLimiter {
@@ -65,7 +66,11 @@ func newLoginLimiter(cfg *config.Config, client *redis.Client) *loginLimiter {
 	if account < 1 || ip < 1 || window <= 0 {
 		return nil
 	}
-	return &loginLimiter{client: client, secret: cfg.SecretKey, account: account, ip: ip, window: window, trusted: cfg.TrustedProxyCIDRs, counts: map[string]loginCount{}, now: time.Now}
+	timeout := cfg.LoginRedisTimeout
+	if timeout <= 0 {
+		timeout = 500 * time.Millisecond
+	}
+	return &loginLimiter{client: client, secret: cfg.SecretKey, account: account, ip: ip, window: window, redisTimeout: timeout, trusted: cfg.TrustedProxyCIDRs, counts: map[string]loginCount{}, now: time.Now}
 }
 
 func (l *loginLimiter) key(kind, value string) string {
@@ -81,9 +86,13 @@ func (l *loginLimiter) allow(ctx context.Context, username string, request *http
 	}
 	keys := []string{l.key("account", strings.ToLower(username)), l.key("ip", ClientIP(request, l.trusted))}
 	if l.client != nil {
-		ctx, cancel := context.WithTimeout(ctx, time.Second)
+		timeout := l.redisTimeout
+		if timeout <= 0 {
+			timeout = 500 * time.Millisecond
+		}
+		ctx, cancel := context.WithTimeout(ctx, 2*timeout)
 		defer cancel()
-		wait, err := loginBudget.Run(ctx, l.client.WithTimeout(500*time.Millisecond), keys, l.account, l.ip, l.window.Milliseconds()).Int64()
+		wait, err := loginBudget.Run(ctx, l.client.WithTimeout(timeout), keys, l.account, l.ip, l.window.Milliseconds()).Int64()
 		return time.Duration(wait) * time.Millisecond, err
 	}
 	l.mu.Lock()

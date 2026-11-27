@@ -76,17 +76,38 @@ func (h *Handler) Inbox(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.OK(w, out)
 }
+func (h *Handler) NotificationDelivery(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		fail(w, db.ErrAutomationInput)
+		return
+	}
+	out, err := h.Repo.NotificationDelivery(r.Context(), id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpx.OK(w, out)
+}
 func (h *Handler) Todos(w http.ResponseWriter, r *http.Request) {
 	size, offset, e := page(r)
 	if e != nil {
 		fail(w, e)
 		return
 	}
-	items, total, e := h.Repo.Todos(r.Context(), size, offset)
+	query := r.URL.Query()
+	kind := query.Get("kind")
+	if query.Has("kind") && (len(query["kind"]) != 1 || kind != "dashboard_review" && kind != "dashboard_publish") {
+		httpx.Fail(w, httpx.BadRequest("待办类型无效"))
+		return
+	}
+	items, total, e := h.Repo.Todos(r.Context(), kind, size, offset)
 	if e != nil {
 		fail(w, e)
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	httpx.OK(w, map[string]any{"items": items, "total": total})
 }
 func (h *Handler) Read(w http.ResponseWriter, r *http.Request) {
@@ -105,6 +126,18 @@ func (h *Handler) Read(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.OK(w, map[string]any{"changed": n})
 }
+func connectionFilter(r *http.Request) (int64, error) {
+	raw := r.URL.Query().Get("connection_id")
+	if raw == "" {
+		return 0, nil
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, db.ErrAutomationInput
+	}
+	return id, nil
+}
+
 func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 	size, offset, e := page(r)
 	if e != nil {
@@ -120,7 +153,12 @@ func (h *Handler) Tasks(w http.ResponseWriter, r *http.Request) {
 		fail(w, db.ErrAutomationInput)
 		return
 	}
-	items, total, e := h.Repo.SourceTasks(r.Context(), status, size, offset)
+	connectionID, e := connectionFilter(r)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	items, total, e := h.Repo.SourceTasks(r.Context(), status, connectionID, size, offset)
 	if e != nil {
 		fail(w, e)
 		return
@@ -223,7 +261,12 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, out)
 }
 func (h *Handler) Schedules(w http.ResponseWriter, r *http.Request) {
-	items, e := h.Repo.SourceSchedules(r.Context())
+	connectionID, e := connectionFilter(r)
+	if e != nil {
+		fail(w, e)
+		return
+	}
+	items, e := h.Repo.SourceSchedules(r.Context(), connectionID)
 	if e != nil {
 		fail(w, e)
 		return
@@ -264,13 +307,10 @@ func (h *Handler) CheckHistory(w http.ResponseWriter, r *http.Request) {
 		fail(w, e)
 		return
 	}
-	var cid int64
-	if raw := r.URL.Query().Get("connection_id"); raw != "" {
-		cid, e = strconv.ParseInt(raw, 10, 64)
-		if e != nil || cid <= 0 {
-			fail(w, db.ErrAutomationInput)
-			return
-		}
+	cid, e := connectionFilter(r)
+	if e != nil {
+		fail(w, e)
+		return
 	}
 	items, total, e := h.Repo.SourceCheckHistory(r.Context(), cid, size, offset)
 	if e != nil {

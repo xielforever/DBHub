@@ -21,13 +21,20 @@ type Handler struct {
 	log                   *slog.Logger
 	sessions              *SessionStore
 	loginLimiter          *loginLimiter
+	security              SecurityStore
+	mfa                   *mfaSecurity
+	sso                   *ssoSecurity
 }
 
 func NewHandler(cfg *config.Config, users UserStore, log *slog.Logger, sessions *SessionStore) *Handler {
 	if sessions == nil {
 		sessions = NewSessionStore(nil)
 	}
-	return &Handler{users: users, secret: cfg.SecretKey, accessTTL: cfg.AccessTTL, refreshTTL: cfg.RefreshTTL, log: log, sessions: sessions, loginLimiter: newLoginLimiter(cfg, sessions.client)}
+	h := &Handler{users: users, secret: cfg.SecretKey, accessTTL: cfg.AccessTTL, refreshTTL: cfg.RefreshTTL, log: log, sessions: sessions, loginLimiter: newLoginLimiter(cfg, sessions.client)}
+	h.security, _ = users.(SecurityStore)
+	h.mfa = newMFASecurity(cfg, sessions)
+	h.sso = newSSOSecurity(cfg, h.mfa, sessions)
+	return h
 }
 
 type loginRequest struct {
@@ -106,6 +113,43 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Unauthorized("用户名或密码错误"))
 		return
 	}
+	h.finishAuthentication(w, r, user)
+}
+
+// Every primary identity method, including SSO, must enter this gate before a
+// session is issued. Challenge responses contain no session or refresh token.
+func (h *Handler) finishAuthentication(w http.ResponseWriter, r *http.Request, user *User) {
+	w.Header().Set("Cache-Control", "no-store")
+	if h.security != nil {
+		state, err := h.security.MFAState(r.Context(), user.ID)
+		if err != nil {
+			identityFailure(w)
+			return
+		}
+		if state.Enabled {
+			token, err := randomIdentityToken(32)
+			if err != nil {
+				identityFailure(w)
+				return
+			}
+			if !identityCheckpoint(w, r, user) {
+				return
+			}
+			if err = h.security.CreateMFAChallenge(r.Context(), user, h.mfa.digest("challenge", token), time.Now().Add(5*time.Minute)); err != nil {
+				identityFailure(w)
+				return
+			}
+			httpx.OK(w, map[string]any{"mfa_required": true, "challenge_token": token, "expires_in": 300})
+			return
+		}
+	}
+	h.issueSession(w, r, user, nil)
+}
+
+func (h *Handler) issueSession(w http.ResponseWriter, r *http.Request, user *User, recoveryCodes []string) {
+	if !identityCheckpoint(w, r, user) {
+		return
+	}
 	pair, e := IssuePair(h.secret, user, h.accessTTL, h.refreshTTL)
 	if e != nil {
 		httpx.Fail(w, httpx.Internal("签发令牌失败", e))
@@ -120,6 +164,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Audit-User-Id", strconv.FormatInt(user.ID, 10))
 	auditctx.Update(r.Context(), func(d *auditctx.Data) { d.ActorID = user.ID; d.ActorUsername = user.Username; d.ActorRole = user.Role })
+	if recoveryCodes != nil {
+		httpx.OK(w, struct {
+			tokenResponse
+			RecoveryCodes []string `json:"recovery_codes"`
+		}{tokenData(pair, user), recoveryCodes})
+		return
+	}
 	httpx.OK(w, tokenData(pair, user))
 }
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {

@@ -88,7 +88,7 @@ func (r *ConnectionRepository) Definitions(ctx context.Context) ([]SourceDefinit
 	return items, err
 }
 func canManageDefinition(ctx context.Context, d *SourceDefinition) bool {
-	return d.Visibility == "private" && d.OwnerID == ActorID(ctx) || d.Visibility == "global" && ActorAdmin(ctx)
+	return d.Visibility == "private" && d.OwnerID == ActorID(ctx) || d.Visibility == "global" && ActorCapability(ctx, "datasource_manage")
 }
 
 // InsertDefinition serializes append revisions and validates the current owner
@@ -97,7 +97,7 @@ func insertDefinition(ctx context.Context, tx pgx.Tx, d *SourceDefinition, previ
 	if ActorID(ctx) == 0 || d.Visibility != "private" && d.Visibility != "global" {
 		return ErrNotFound
 	}
-	if d.Visibility == "global" && !ActorAdmin(ctx) {
+	if d.Visibility == "global" && !ActorCapability(ctx, "datasource_manage") {
 		return ErrNotFound
 	}
 	d.OwnerID = ActorID(ctx)
@@ -129,7 +129,7 @@ func insertDefinition(ctx context.Context, tx pgx.Tx, d *SourceDefinition, previ
 		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_source_definitions WHERE family_id=$1::uuid AND visibility='global')`, d.FamilyID).Scan(&published); e != nil {
 			return e
 		}
-		if published && !ActorAdmin(ctx) {
+		if published && !ActorCapability(ctx, "datasource_manage") {
 			return ErrNotFound
 		}
 		latest, e := scanDefinition(tx.QueryRow(ctx, `SELECT to_jsonb(d) FROM sys_source_definitions d WHERE family_id=$1::uuid ORDER BY revision DESC LIMIT 1`, d.FamilyID))

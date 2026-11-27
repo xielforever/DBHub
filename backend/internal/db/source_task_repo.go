@@ -13,27 +13,30 @@ import (
 )
 
 type SourceTask struct {
-	ID              string          `json:"id"`
-	WorkspaceID     int64           `json:"workspace_id"`
-	ActorID         int64           `json:"actor_id"`
-	ConnectionID    int64           `json:"connection_id"`
-	ConnectionName  string          `json:"connection_name"`
-	Kind            string          `json:"kind"`
-	Status          string          `json:"status"`
-	Progress        int             `json:"progress"`
-	Phase           string          `json:"phase"`
-	RequestID       string          `json:"request_id"`
-	RequestHash     string          `json:"-"`
-	ParentID        *string         `json:"parent_id"`
-	ScheduleID      *int64          `json:"schedule_id"`
-	MemberVersion   int64           `json:"member_version"`
-	ConfigUpdatedAt time.Time       `json:"config_updated_at"`
-	WorkerToken     string          `json:"-"`
-	LeaseUntil      *time.Time      `json:"lease_until,omitempty"`
-	Result          json.RawMessage `json:"result"`
-	CreatedAt       time.Time       `json:"created_at"`
-	StartedAt       *time.Time      `json:"started_at"`
-	FinishedAt      *time.Time      `json:"finished_at"`
+	PermissionBridge string          `json:"permission_bridge"`
+	PermissionConfig int64           `json:"permission_config"`
+	PermissionEpoch  int64           `json:"permission_epoch"`
+	ID               string          `json:"id"`
+	WorkspaceID      int64           `json:"workspace_id"`
+	ActorID          int64           `json:"actor_id"`
+	ConnectionID     int64           `json:"connection_id"`
+	ConnectionName   string          `json:"connection_name"`
+	Kind             string          `json:"kind"`
+	Status           string          `json:"status"`
+	Progress         int             `json:"progress"`
+	Phase            string          `json:"phase"`
+	RequestID        string          `json:"request_id"`
+	RequestHash      string          `json:"-"`
+	ParentID         *string         `json:"parent_id"`
+	ScheduleID       *int64          `json:"schedule_id"`
+	MemberVersion    int64           `json:"member_version"`
+	ConfigUpdatedAt  time.Time       `json:"config_updated_at"`
+	WorkerToken      string          `json:"-"`
+	LeaseUntil       *time.Time      `json:"lease_until,omitempty"`
+	Result           json.RawMessage `json:"result"`
+	CreatedAt        time.Time       `json:"created_at"`
+	StartedAt        *time.Time      `json:"started_at"`
+	FinishedAt       *time.Time      `json:"finished_at"`
 }
 
 type SourceSchedule struct {
@@ -67,6 +70,9 @@ func scanSourceTask(row pgx.Row) (*SourceTask, error) {
 		return nil, e
 	}
 	out.WorkerToken, out.RequestHash = token, hash
+	if !supportedPermissionBridge(out.PermissionBridge) {
+		out.Phase = unsupportedPermissionMessage
+	}
 	return &out, nil
 }
 
@@ -76,12 +82,13 @@ func (r *AutomationRepository) SourceTask(ctx context.Context, id string) (*Sour
 	return scanSourceTask(r.pool.QueryRow(ctx, `SELECT `+sourceTaskColumns+` FROM sys_source_tasks t WHERE t.id=$1::uuid AND t.actor_id=$2`, id, ActorID(ctx)))
 }
 
-func (r *AutomationRepository) SourceTasks(ctx context.Context, status string, limit, offset int) ([]SourceTask, int64, error) {
+func (r *AutomationRepository) SourceTasks(ctx context.Context, status string, connectionID int64, limit, offset int) ([]SourceTask, int64, error) {
 	var total int64
-	if e := r.pool.QueryRow(ctx, `SELECT count(*) FROM sys_source_tasks WHERE actor_id=$1 AND ($2='' OR status=$2)`, ActorID(ctx), status).Scan(&total); e != nil {
+	const filter = ` FROM sys_source_tasks t WHERE t.actor_id=$1 AND ($2='' OR t.status=$2) AND ($3=0 OR t.connection_id=$3)`
+	if e := r.pool.QueryRow(ctx, `SELECT count(*)`+filter, ActorID(ctx), status, connectionID).Scan(&total); e != nil {
 		return nil, 0, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT `+sourceTaskColumns+` FROM sys_source_tasks t WHERE t.actor_id=$1 AND ($2='' OR t.status=$2) ORDER BY t.created_at DESC,t.id DESC LIMIT $3 OFFSET $4`, ActorID(ctx), status, limit, offset)
+	rows, e := r.pool.Query(ctx, `SELECT `+sourceTaskColumns+filter+` ORDER BY t.created_at DESC,t.id DESC LIMIT $4 OFFSET $5`, ActorID(ctx), status, connectionID, limit, offset)
 	if e != nil {
 		return nil, 0, e
 	}
@@ -160,7 +167,7 @@ func (r *AutomationRepository) EnqueueSourceTask(ctx context.Context, conn *Conn
 	}
 	if kind == "collect" {
 		role, _ := actorRole(ctx)
-		if role != "admin" && role != "developer" {
+		if role != "admin" && role != "developer" && !ActorCapability(ctx, "datasource_manage") {
 			return nil, ErrAutomationDenied
 		}
 	}
@@ -173,11 +180,14 @@ func (r *AutomationRepository) EnqueueSourceTask(ctx context.Context, conn *Conn
 		return nil, e
 	}
 	if parent != "" {
-		var status string
-		if e = tx.QueryRow(ctx, `SELECT status FROM sys_source_tasks WHERE id=$1::uuid AND actor_id=$2`, parent, ActorID(ctx)).Scan(&status); errors.Is(e, pgx.ErrNoRows) {
+		var status, bridge string
+		if e = tx.QueryRow(ctx, `SELECT status,permission_bridge FROM sys_source_tasks WHERE id=$1::uuid AND actor_id=$2`, parent, ActorID(ctx)).Scan(&status, &bridge); errors.Is(e, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		} else if e != nil {
 			return nil, e
+		}
+		if !supportedPermissionBridge(bridge) {
+			return nil, ErrAutomationConflict
 		}
 		if status == "queued" || status == "running" || status == "cancel_requested" || status == "succeeded" {
 			return nil, ErrAutomationConflict
@@ -232,12 +242,12 @@ func (r *AutomationRepository) ClaimSourceTask(ctx context.Context) (*SourceTask
 	if _, e = tx.Exec(ctx, sourceQueueLock); e != nil {
 		return nil, e
 	}
-	_, e = tx.Exec(ctx, `UPDATE sys_source_tasks SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' ELSE 'interrupted' END,phase=CASE WHEN status='cancel_requested' THEN '取消已确认' ELSE '运行租约已过期，请核实后手动重试' END,finished_at=now() WHERE status IN ('running','cancel_requested') AND lease_until<now()`)
+	_, e = tx.Exec(ctx, `UPDATE sys_source_tasks SET status=CASE WHEN status='cancel_requested' THEN 'cancelled' ELSE 'interrupted' END,phase=CASE WHEN status='cancel_requested' THEN '取消已确认' ELSE '运行租约已过期，请核实后手动重试' END,finished_at=now() WHERE permission_bridge IN('legacy-frozen-v1','phase1-bridge-2') AND status IN ('running','cancel_requested') AND lease_until<now()`)
 	if e != nil {
 		return nil, e
 	}
 	var running int
-	if e = tx.QueryRow(ctx, `SELECT count(*) FROM sys_source_tasks WHERE status IN ('running','cancel_requested')`).Scan(&running); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT count(*) FROM sys_source_tasks WHERE permission_bridge IN('legacy-frozen-v1','phase1-bridge-2') AND status IN ('running','cancel_requested')`).Scan(&running); e != nil {
 		return nil, e
 	}
 	if running >= 2 {
@@ -246,7 +256,7 @@ func (r *AutomationRepository) ClaimSourceTask(ctx context.Context) (*SourceTask
 		}
 		return nil, ErrNotFound
 	}
-	out, e := scanSourceTask(tx.QueryRow(ctx, `UPDATE sys_source_tasks t SET status='running',phase='验证身份与配置',progress=5,started_at=now(),worker_token=$1::uuid,lease_until=now()+interval '5 minutes' WHERE id=(SELECT id FROM sys_source_tasks WHERE status='queued' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING `+sourceTaskColumns, dashboardUUID()))
+	out, e := scanSourceTask(tx.QueryRow(ctx, `UPDATE sys_source_tasks t SET status='running',phase='验证身份与配置',progress=5,started_at=now(),worker_token=$1::uuid,lease_until=now()+interval '5 minutes' WHERE id=(SELECT id FROM sys_source_tasks WHERE permission_bridge IN('legacy-frozen-v1','phase1-bridge-2') AND status='queued' ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING `+sourceTaskColumns, dashboardUUID()))
 	if e != nil {
 		if errors.Is(e, ErrNotFound) {
 			if e = tx.Commit(ctx); e != nil {
@@ -343,7 +353,7 @@ func (r *AutomationRepository) SaveSourceSchedule(ctx context.Context, conn *Con
 		return nil, ErrNotFound
 	}
 	role, _ := actorRole(ctx)
-	if kind == "collect" && role != "admin" && role != "developer" {
+	if kind == "collect" && role != "admin" && role != "developer" && !ActorCapability(ctx, "datasource_manage") {
 		return nil, ErrAutomationDenied
 	}
 	tx, e := r.pool.Begin(ctx)
@@ -387,8 +397,8 @@ func (r *AutomationRepository) SaveSourceSchedule(ctx context.Context, conn *Con
 	return &out, nil
 }
 
-func (r *AutomationRepository) SourceSchedules(ctx context.Context) ([]SourceSchedule, error) {
-	rows, e := r.pool.Query(ctx, `SELECT to_jsonb(s) FROM sys_source_schedules s WHERE actor_id=$1 ORDER BY id DESC LIMIT 200`, ActorID(ctx))
+func (r *AutomationRepository) SourceSchedules(ctx context.Context, connectionID int64) ([]SourceSchedule, error) {
+	rows, e := r.pool.Query(ctx, `SELECT to_jsonb(s) FROM sys_source_schedules s WHERE actor_id=$1 AND ($2=0 OR connection_id=$2) ORDER BY id DESC LIMIT 200`, ActorID(ctx), connectionID)
 	if e != nil {
 		return nil, e
 	}

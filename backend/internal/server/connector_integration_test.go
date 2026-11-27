@@ -288,9 +288,45 @@ func TestConnectorJDBCRealHTTP(t *testing.T) {
 			t.Fatal(got)
 		}
 	})
+	t.Run("jdbc-large-results-use-export-only-limits", func(t *testing.T) {
+		session, err := (jdbc.Driver{Client: client}).Open(context.Background(), connector.OpenSpec{
+			Source: connector.Source{Database: original.Database}, Username: original.Username, Password: password, SSLMode: "disable",
+			JDBC: &connector.JDBCSpec{ArtifactID: "postgresql-42.7.7", SHA256: hashes["postgresql"], URL: "jdbc:postgresql://" + net.JoinHostPort(original.Host, strconv.Itoa(original.Port)) + "/" + original.Database, Dialect: "postgres", Capabilities: connector.Capabilities{SQL: true, Transactions: true}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer session.Close(context.Background())
+		executor := session.(connector.SQLExecutor)
+		request := connector.ExecuteRequest{SQL: "SELECT i FROM generate_series(1,10001) i", ReadOnly: true, Query: true, Options: connector.ExecuteOptions{MaxRows: 10000}}
+		ordinary, err := executor.Execute(context.Background(), request)
+		if err != nil || len(ordinary.Rows) != 10000 || !ordinary.Truncated {
+			t.Fatalf("ordinary result boundary: %v", err)
+		}
+		request.Options = connector.ExecuteOptions{LargeResult: true, MaxRows: 100000, MaxBytes: 16 << 20}
+		large, err := executor.Execute(context.Background(), request)
+		if err != nil || len(large.Rows) != 10001 || large.Truncated {
+			t.Fatalf("large result boundary: %v", err)
+		}
+		request.SQL = "SELECT repeat('x',900000) FROM generate_series(1,10)"
+		large, err = executor.Execute(context.Background(), request)
+		if err != nil || len(large.Rows) != 10 || large.Truncated {
+			t.Fatalf("large byte budget: %v", err)
+		}
+		request.Options.LargeResult = false
+		request.Options.MaxRows = 10000
+		_, err = executor.Execute(context.Background(), request)
+		if failure, ok := err.(*connector.Error); !ok || failure.Kind != "resource_exhausted" {
+			t.Fatalf("ordinary byte ceiling was not enforced: %v", err)
+		}
+	})
 	t.Run("jdbc-mysql-real-driver-and-server-readonly", func(t *testing.T) {
 		a.t = t
-		cfg, e := mysql.ParseDSN(os.Getenv("TEST_MYSQL_DSN"))
+		dsn := os.Getenv("TEST_MYSQL_DSN")
+		if dsn == "" {
+			t.Skip("real MySQL not configured")
+		}
+		cfg, e := mysql.ParseDSN(dsn)
 		if e != nil || cfg.DBName == "" {
 			t.Fatal("real MySQL DSN required")
 		}

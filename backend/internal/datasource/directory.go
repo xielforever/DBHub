@@ -108,13 +108,32 @@ func directoryPage(r *http.Request) (db.DirectoryFilter, error) {
 		}
 	}
 	view := q.Get("view")
-	if view != "" && view != "all" && view != "favorites" && view != "recent" {
+	if view != "" && view != "all" && view != "favorites" && view != "recent" && view != "shared" && view != "managed" {
 		return db.DirectoryFilter{}, httpx.BadRequest("目录视图无效")
 	}
 	if len([]rune(q.Get("keyword"))) > 100 {
 		return db.DirectoryFilter{}, httpx.BadRequest("搜索词过长")
 	}
-	return db.DirectoryFilter{Keyword: q.Get("keyword"), Category: q.Get("category"), View: view, Limit: size, Offset: (p - 1) * size}, nil
+	filter := db.DirectoryFilter{Keyword: q.Get("keyword"), Category: q.Get("category"), View: view, Limit: size, Offset: (p - 1) * size}
+	if view == "managed" {
+		filter.Type, filter.Environment, filter.Status = q.Get("type"), q.Get("environment"), q.Get("status")
+		switch filter.Type {
+		case "", "postgres", "mysql", "redis", "jdbc":
+		default:
+			return db.DirectoryFilter{}, httpx.BadRequest("数据源类型无效")
+		}
+		switch filter.Environment {
+		case "", "dev", "test", "prod":
+		default:
+			return db.DirectoryFilter{}, httpx.BadRequest("环境无效")
+		}
+		switch filter.Status {
+		case "", "enabled", "disabled":
+		default:
+			return db.DirectoryFilter{}, httpx.BadRequest("修订状态无效")
+		}
+	}
+	return filter, nil
 }
 
 func (h *Handler) definitionAudit(r *http.Request, id int64, outcome string) {

@@ -64,21 +64,26 @@ func (r *ManagedDashboardRepository) AudienceChange(ctx context.Context, key str
 		out := ReportCommandResult{}
 		var owner, no, next, epoch int64
 		var raw []byte
-		e := tx.QueryRow(ctx, `SELECT d.owner_id,d.publication_no,d.latest_version+1,d.lifecycle_epoch,v.definition FROM sys_managed_dashboards d JOIN sys_dashboard_releases re ON re.id=d.active_release_id JOIN sys_dashboard_reviews rv ON rv.id=re.review_id JOIN sys_dashboard_versions v ON v.id=rv.version_id WHERE d.id=$1 AND d.lifecycle='active' FOR UPDATE OF d`, id).Scan(&owner, &no, &next, &epoch, &raw)
+		var mayAdminister bool
+		e := tx.QueryRow(ctx, `SELECT d.owner_id,d.publication_no,d.latest_version+1,d.lifecycle_epoch,v.definition,
+			NOT dbhub_iam_dashboard_matrix_enabled() OR dbhub_dashboard_workflow_admin()
+			FROM sys_managed_dashboards d JOIN sys_dashboard_releases re ON re.id=d.active_release_id
+			JOIN sys_dashboard_reviews rv ON rv.id=re.review_id JOIN sys_dashboard_versions v ON v.id=rv.version_id
+			WHERE d.id=$1 AND d.lifecycle='active' FOR UPDATE OF d`, id).Scan(&owner, &no, &next, &epoch, &raw, &mayAdminister)
 		if e != nil {
 			return out, e
 		}
-		if owner != ActorID(ctx) && !ActorAdmin(ctx) {
+		if owner != ActorID(ctx) && !(mayAdminister && ActorDashboardReviewer(ctx)) {
 			return out, ErrManagedDenied
 		}
 		if base != no {
 			return out, ErrManagedConflict
 		}
-		var role *string
-		if e = tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, reviewer).Scan(&role); e != nil {
+		var eligible bool
+		if e = tx.QueryRow(ctx, `SELECT dbhub_dashboard_reviewer_eligible($1)`, reviewer).Scan(&eligible); e != nil {
 			return out, e
 		}
-		if reviewer == ActorID(ctx) || role == nil || *role != "admin" {
+		if reviewer == ActorID(ctx) || !eligible {
 			return out, ErrManagedInput
 		}
 		if _, e = tx.Exec(ctx, `UPDATE sys_dashboard_reviews SET status='expired' WHERE dashboard_id=$1 AND status='pending' AND expires_at<=now()`, id); e != nil {

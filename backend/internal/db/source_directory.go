@@ -27,8 +27,9 @@ type SourceProfile struct {
 	Version    int64    `json:"version"`
 }
 type DirectoryFilter struct {
-	Keyword, Category, View string
-	Limit, Offset           int
+	Keyword, Category, View   string
+	Type, Environment, Status string
+	Limit, Offset             int
 }
 
 const familyJSON = `jsonb_build_object('access_mode',f.access_mode,'access_version',f.access_version,'profile_version',f.profile_version,'category',f.category,'tags',f.tags,'maintainer',f.maintainer,'contact',f.contact)`
@@ -43,19 +44,27 @@ func (r *ConnectionRepository) SearchDefinitions(ctx context.Context, filter Dir
 	if filter.Offset < 0 {
 		filter.Offset = 0
 	}
-	base := ` FROM (SELECT DISTINCT ON(family_id) * FROM sys_source_definitions d WHERE dbhub_source_visible(d.id,$1) ORDER BY family_id,revision DESC) d
+	base := ` FROM (SELECT DISTINCT ON(family_id) * FROM sys_source_definitions d
+ WHERE dbhub_source_visible(d.id,$1) AND ($4<>'managed' OR d.visibility='global')
+ ORDER BY family_id,revision DESC) d
  JOIN sys_source_families f USING(family_id)
  LEFT JOIN sys_source_preferences p ON p.family_id=d.family_id AND p.user_id=$1
  LEFT JOIN sys_connections c ON c.definition_family_id=d.family_id AND c.user_id=$1
- WHERE ($2='' OR d.name ILIKE '%'||$2||'%' OR d.description ILIKE '%'||$2||'%' OR d.config::text ILIKE '%'||$2||'%' OR array_to_string(f.tags,' ') ILIKE '%'||$2||'%')
- AND ($3='' OR f.category=$3) AND ($4<>'favorites' OR p.favorite) AND ($4<>'recent' OR p.last_used_at IS NOT NULL)`
-	args := []any{ActorID(ctx), filter.Keyword, filter.Category, filter.View}
+ WHERE ($2='' OR d.name ILIKE '%'||$2||'%'
+ OR ($4='managed' AND COALESCE(NULLIF(d.config->>'database',''),d.config->'parameters'->>'database','') ILIKE '%'||$2||'%')
+ OR ($4<>'managed' AND (d.description ILIKE '%'||$2||'%' OR d.config::text ILIKE '%'||$2||'%' OR array_to_string(f.tags,' ') ILIKE '%'||$2||'%')))
+ AND ($3='' OR f.category=$3) AND ($4<>'favorites' OR p.favorite) AND ($4<>'recent' OR p.last_used_at IS NOT NULL)
+ AND ($4<>'shared' OR (d.visibility='global' AND d.enabled))
+ AND ($5='' OR d.config->>'type'=$5)
+ AND ($6='' OR COALESCE(NULLIF(d.config->>'environment',''),'dev')=$6)
+ AND ($7='' OR d.enabled=($7='enabled'))`
+	args := []any{ActorID(ctx), filter.Keyword, filter.Category, filter.View, filter.Type, filter.Environment, filter.Status}
 	var total int64
 	if e := r.pool.QueryRow(ctx, `SELECT count(*)`+base, args...).Scan(&total); e != nil {
 		return nil, 0, e
 	}
 	args = append(args, filter.Limit, filter.Offset)
-	rows, e := r.pool.Query(ctx, `SELECT to_jsonb(d)||`+familyJSON+`||jsonb_build_object('favorite',COALESCE(p.favorite,false),'last_used_at',p.last_used_at,'my_connection_id',c.id,'my_revision_id',c.definition_revision_id)`+base+` ORDER BY CASE WHEN $4='recent' THEN p.last_used_at END DESC NULLS LAST,d.created_at DESC,d.id DESC LIMIT $5 OFFSET $6`, args...)
+	rows, e := r.pool.Query(ctx, `SELECT to_jsonb(d)||`+familyJSON+`||jsonb_build_object('favorite',COALESCE(p.favorite,false),'last_used_at',p.last_used_at,'my_connection_id',c.id,'my_revision_id',c.definition_revision_id)`+base+` ORDER BY CASE WHEN $4='recent' THEN p.last_used_at END DESC NULLS LAST,d.created_at DESC,d.id DESC LIMIT $8 OFFSET $9`, args...)
 	if e != nil {
 		return nil, 0, e
 	}
@@ -98,7 +107,7 @@ func lockManagedFamily(ctx context.Context, tx pgx.Tx, id int64) (*SourceDefinit
 		return nil, e
 	}
 	var published, admin, active bool
-	if e = tx.QueryRow(ctx, `SELECT u.is_active,r.code='admin',EXISTS(SELECT 1 FROM sys_source_definitions WHERE family_id=$2::uuid AND visibility='global') FROM sys_users u JOIN sys_roles r ON r.id=u.role_id WHERE u.id=$1`, ActorID(ctx), d.FamilyID).Scan(&active, &admin, &published); e != nil {
+	if e = tx.QueryRow(ctx, `SELECT u.is_active,dbhub_has_capability(u.id,'datasource_manage'),EXISTS(SELECT 1 FROM sys_source_definitions WHERE family_id=$2::uuid AND visibility='global') FROM sys_users u WHERE u.id=$1`, ActorID(ctx), d.FamilyID).Scan(&active, &admin, &published); e != nil {
 		return nil, ErrNotFound
 	}
 	if !active || (published && !admin) || (!published && d.OwnerID != ActorID(ctx)) {

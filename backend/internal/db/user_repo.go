@@ -24,10 +24,12 @@ type Role struct {
 
 // UserDetail 用户列表/详情结构（绝不包含密码哈希）。
 type UserDetail struct {
+	Capabilities      []string   `json:"capabilities"`
 	MembershipVersion int64      `json:"membership_version"`
 	ID                int64      `json:"id"`
 	Username          string     `json:"username"`
 	Email             string     `json:"email"`
+	CanEditEmail      bool       `json:"can_edit_email"`
 	RoleID            int64      `json:"role_id"`
 	Role              string     `json:"role"`
 	RoleName          string     `json:"role_name"`
@@ -38,7 +40,9 @@ type UserDetail struct {
 
 // UserRepository sys_users / sys_roles 仓储。
 type UserRepository struct {
-	pool *ScopedPool
+	pool                *ScopedPool
+	iamIsolationID      string
+	iamRouteFingerprint string
 }
 
 // NewUserRepository 创建用户仓储。
@@ -52,7 +56,16 @@ func (r *UserRepository) Ready(ctx context.Context) error {
 	if r.pool.runtime == nil {
 		return ErrWorkspaceRequired
 	}
+	if err := r.pool.root.Ping(ctx); err != nil {
+		return err
+	}
 	if err := r.pool.maintenance.Ping(ctx); err != nil {
+		return err
+	}
+	if r.pool.leases == nil {
+		return ErrWorkspaceRequired
+	}
+	if err := r.pool.leases.Ping(ctx); err != nil {
 		return err
 	}
 	return r.pool.runtime.Ping(ctx)
@@ -60,14 +73,29 @@ func (r *UserRepository) Ready(ctx context.Context) error {
 
 // FindByUsername 按用户名查找（含密码哈希与角色编码），禁用/不存在统一返回 auth 层错误。
 func (r *UserRepository) FindByUsername(ctx context.Context, username string) (*auth.User, error) {
+	return findIdentityOn(ctx, username, r.pool.root)
+}
+
+// FindMetadataIdentity lets a short metadata read reuse the same existing pool
+// for identity and its subsequent current workspace binding. Session fields
+// are still read anew; cancellation/login retain their reserved identity pool.
+func (r *UserRepository) FindMetadataIdentity(ctx context.Context, username string) (*auth.User, context.Context, error) {
+	u, err := findIdentityOn(ctx, username, r.pool.maintenance)
+	return u, ctx, err
+}
+
+func findIdentityOn(ctx context.Context, username string, pool *pgxpool.Pool) (*auth.User, error) {
+	if pool == nil {
+		return nil, ErrWorkspaceRequired
+	}
 	const q = `
-		SELECT u.id, u.username, r.code, u.password_hash, u.is_active, u.last_login_at
+		SELECT u.id, u.username, r.code, u.password_hash, u.is_active, u.last_login_at,u.auth_version
 		FROM sys_users u
 		JOIN sys_roles r ON r.id = u.role_id
-		WHERE u.username = $1`
+		WHERE u.username = $1 AND u.workspace_account_id IS NULL`
 	u := &auth.User{}
-	err := r.pool.maintenance.QueryRow(ctx, q, username).
-		Scan(&u.ID, &u.Username, &u.Role, &u.PasswordHash, &u.IsActive, &u.LastLoginAt)
+	err := pool.QueryRow(ctx, q, username).
+		Scan(&u.ID, &u.Username, &u.Role, &u.PasswordHash, &u.IsActive, &u.LastLoginAt, &u.AuthVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, auth.ErrUserNotFound
 	}
@@ -82,7 +110,7 @@ func (r *UserRepository) FindByUsername(ctx context.Context, username string) (*
 
 // TouchLogin 更新最后登录时间。
 func (r *UserRepository) TouchLogin(ctx context.Context, id int64) error {
-	_, err := r.pool.maintenance.Exec(ctx,
+	_, err := r.pool.root.Exec(ctx,
 		`UPDATE sys_users SET last_login_at = NOW() WHERE id = $1`, id)
 	if err != nil {
 		return fmt.Errorf("更新登录时间失败: %w", err)
@@ -124,7 +152,7 @@ func (r *UserRepository) ListUsers(ctx context.Context, keyword string, limit, o
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT u.id, u.username, COALESCE(u.email, ''), r.id, r.code, r.name,
-		       (u.is_active AND wm.active), u.last_login_at, u.created_at,wm.version
+		       (u.is_active AND wm.active), u.last_login_at, u.created_at,wm.version,wm.capabilities
 		FROM sys_users u
  JOIN sys_workspace_members wm ON wm.user_id=u.id AND wm.workspace_id=dbhub_workspace()
 		JOIN sys_roles r ON r.code = wm.role_code
@@ -140,12 +168,53 @@ func (r *UserRepository) ListUsers(ctx context.Context, keyword string, limit, o
 	for rows.Next() {
 		var u UserDetail
 		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.RoleID, &u.Role,
-			&u.RoleName, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.MembershipVersion); err != nil {
+			&u.RoleName, &u.IsActive, &u.LastLoginAt, &u.CreatedAt, &u.MembershipVersion, &u.Capabilities); err != nil {
 			return nil, 0, err
 		}
 		users = append(users, u)
 	}
-	return users, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	rows.Close()
+	if ActorAdmin(ctx) && len(users) > 0 {
+		if err := r.markEditableEmails(ctx, users); err != nil {
+			return nil, 0, err
+		}
+	}
+	return users, total, nil
+}
+
+// Identity operations are limited to platform administrators and identities
+// with exactly one workspace membership, in the current workspace.
+const manageableIdentityIDsSQL = `
+	SELECT user_id FROM sys_workspace_members
+	WHERE user_id = ANY($1) AND EXISTS (
+		SELECT 1 FROM sys_users WHERE id=$2 AND is_platform_admin AND is_active
+	)
+	GROUP BY user_id HAVING count(*)=1 AND min(workspace_id)=$3`
+
+func (r *UserRepository) markEditableEmails(ctx context.Context, users []UserDetail) error {
+	ids := make([]int64, 0, len(users))
+	positions := make(map[int64]int, len(users))
+	for i, user := range users {
+		ids = append(ids, user.ID)
+		positions[user.ID] = i
+	}
+	// Only look up eligibility for identities already visible in the current directory.
+	rows, err := r.pool.maintenance.Query(ctx, manageableIdentityIDsSQL, ids, ActorID(ctx), WorkspaceID(ctx))
+	if err != nil {
+		return fmt.Errorf("查询邮箱编辑许可: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		users[positions[id]].CanEditEmail = true
+	}
+	return rows.Err()
 }
 
 // GetByID 按主键取启用用户（标注 Owner 校验用）。
@@ -166,15 +235,17 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (*BriefUser, err
 
 // BriefUser 资产 Owner 名簿的最小字段（全员可查，仅 id/用户名/角色）。
 type BriefUser struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	CanReviewReports    bool   `json:"can_review_reports"`
+	CanReviewDashboards bool   `json:"can_review_dashboards"`
+	ID                  int64  `json:"id"`
+	Username            string `json:"username"`
+	Role                string `json:"role"`
 }
 
 // ListBrief 全部启用用户的精简列表（资产 Owner 选择用）。
 func (r *UserRepository) ListBrief(ctx context.Context) ([]BriefUser, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT u.id, u.username, r.code
+		SELECT u.id, u.username, r.code,dbhub_iam_can_review(u.id,'report'),dbhub_dashboard_reviewer_eligible(u.id)
 		FROM sys_users u JOIN sys_roles r ON r.code = dbhub_member_role(u.id)
 		WHERE u.is_active = TRUE
 		ORDER BY u.id`)
@@ -185,7 +256,7 @@ func (r *UserRepository) ListBrief(ctx context.Context) ([]BriefUser, error) {
 	out := make([]BriefUser, 0)
 	for rows.Next() {
 		var u BriefUser
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &u.CanReviewReports, &u.CanReviewDashboards); err != nil {
 			return nil, err
 		}
 		out = append(out, u)
@@ -206,6 +277,9 @@ func (r *UserRepository) CreateUser(ctx context.Context, username, passwordHash,
 		return nil, fmt.Errorf("开启事务失败: %w", err)
 	}
 	defer tx.Rollback(ctx)
+	if e := iamRequireLegacyAccountOperation(ctx, tx); e != nil {
+		return nil, e
+	}
 	if e := workspaceAdminTx(ctx, tx); e != nil {
 		return nil, e
 	}
@@ -242,9 +316,37 @@ func (r *UserRepository) CreateUser(ctx context.Context, username, passwordHash,
 	return u, nil
 }
 
-// UpdateUser 更新角色与邮箱。
-func (r *UserRepository) UpdateUser(ctx context.Context, id int64, roleCode, email string) error {
-	return r.UpdateMembership(ctx, id, roleCode, nil, 0)
+// UpdateUser updates the workspace role and any permitted email edit atomically.
+func (r *UserRepository) UpdateUser(ctx context.Context, id int64, roleCode string, email *string) error {
+	return r.updateMembership(ctx, id, roleCode, nil, 0, email)
+}
+
+func checkWorkspaceIdentity(ctx context.Context, tx pgx.Tx, id int64) error {
+	var allowed bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (`+manageableIdentityIDsSQL+`)`, []int64{id}, ActorID(ctx), WorkspaceID(ctx)).Scan(&allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrManagedDenied
+	}
+	return nil
+}
+
+func updateWorkspaceIdentityEmail(ctx context.Context, tx pgx.Tx, id int64, email string) error {
+	var previous string
+	// The identity lock serializes membership inserts with the exclusive-scope check.
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(email,'') FROM sys_users WHERE id=$1 FOR UPDATE`, id).Scan(&previous); err != nil {
+		return managedError(err)
+	}
+	// Older clients may include the original email when only editing a role.
+	if email == previous {
+		return nil
+	}
+	if err := checkWorkspaceIdentity(ctx, tx, id); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `UPDATE sys_users SET email=$2 WHERE id=$1`, id, nullableText(email))
+	return err
 }
 
 // SetActive 启用/停用用户。
@@ -288,6 +390,9 @@ func (r *UserRepository) identityMutation(ctx context.Context, id int64, fn func
 		return e
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
+	if e = iamRequireLegacyAccountOperation(ctx, tx); e != nil {
+		return e
+	}
 	var target int64
 	if e = tx.QueryRow(ctx, `SELECT id FROM sys_users WHERE id=$1 FOR UPDATE`, id).Scan(&target); e != nil {
 		return managedError(e)
@@ -295,13 +400,8 @@ func (r *UserRepository) identityMutation(ctx context.Context, id int64, fn func
 	if e = workspaceAdminTx(ctx, tx); e != nil {
 		return e
 	}
-	var ok bool
-	e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM sys_users WHERE id=$1 AND is_platform_admin) AND EXISTS(SELECT 1 FROM sys_workspace_members WHERE workspace_id=$3 AND user_id=$2) AND (SELECT count(*) FROM sys_workspace_members WHERE user_id=$2)=1`, ActorID(ctx), id, WorkspaceID(ctx)).Scan(&ok)
-	if e != nil {
+	if e = checkWorkspaceIdentity(ctx, tx, id); e != nil {
 		return e
-	}
-	if !ok {
-		return ErrManagedDenied
 	}
 	if e = fn(tx); e != nil {
 		return e

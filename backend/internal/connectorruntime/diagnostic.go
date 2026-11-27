@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql/driver"
 	"errors"
+	"io"
 	"net"
 	"strings"
 
@@ -22,6 +24,7 @@ func diagnostic(code string) connector.Diagnostic {
 		"tls_failed":            {"TLS 握手或证书验证失败", "检查服务器证书、信任链、主机名和 TLS 支持；请联系管理员修复配置后重新测试。", "contact_admin"},
 		"dns_failed":            {"无法解析目标主机名", "请管理员检查目标域名和服务端 DNS；共享目标变更需要发布新修订。", "review_target"},
 		"network_unreachable":   {"无法连接目标网络端点", "检查目标地址、端口、防火墙、代理和数据库监听状态；请联系管理员确认网络可达。", "review_target"},
+		"connection_lost":       {"连接在通信过程中断开", "目标未返回完整响应；请管理员检查数据库协议端点及服务器、代理和网络设备日志。此错误不能证明密码错误，请勿自动重试或降低 TLS 校验。", "contact_admin"},
 		"timeout":               {"连接检查超时", "检查网络和数据库负载；确认目标可达后可手动重新测试。", "retry_check"},
 		"capacity_exceeded":     {"连接或并发容量已满", "稍后手动重新测试；持续发生时请管理员检查数据库和连接服务的容量。", "retry_check"},
 		"driver_unavailable":    {"驱动服务暂不可用", "请管理员检查 JDBC 服务、服务认证、已安装制品及驱动规则状态。", "contact_admin"},
@@ -132,6 +135,11 @@ func DiagnoseConnectionError(err error) connector.Diagnostic {
 		return diagnostic("timeout")
 	}
 	var op *net.OpError
+	// MySQL在读取报文失败时记录底层EOF并返回ErrInvalidConn；
+	// 仅识别明确的错误身份，不按任意驱动文本猜测密码或服务端原因。
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, mysql.ErrInvalidConn) || errors.Is(err, driver.ErrBadConn) {
+		return diagnostic("connection_lost")
+	}
 	if errors.As(err, &op) || strings.HasPrefix(state, "08") {
 		return diagnostic("network_unreachable")
 	}

@@ -46,18 +46,19 @@ type dashboardSubjects struct {
 // an audience-size × card-count sequence of SQL queries.
 func dashboardSubjectDirectory(ctx context.Context, q pgx.Tx) (*dashboardSubjects, error) {
 	d := &dashboardSubjects{users: map[int64]DashboardSubject{}, groups: map[int64]DashboardSubject{}, members: map[int64]map[int64]bool{}}
-	rows, err := q.Query(ctx, `SELECT u.id,u.username,m.role_code,(m.active AND u.is_active) FROM sys_workspace_members m JOIN sys_users u ON u.id=m.user_id WHERE m.workspace_id=dbhub_workspace() ORDER BY u.username,u.id`)
+	rows, err := q.Query(ctx, `SELECT u.id,u.username,m.role_code,(m.active AND u.is_active),dbhub_dashboard_reviewer_eligible(u.id) FROM sys_workspace_members m JOIN sys_users u ON u.id=m.user_id WHERE m.workspace_id=dbhub_workspace() ORDER BY u.username,u.id`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var s DashboardSubject
-		if err = rows.Scan(&s.ID, &s.Name, &s.role, &s.active); err != nil {
+		var eligible bool
+		if err = rows.Scan(&s.ID, &s.Name, &s.role, &s.active, &eligible); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		d.users[s.ID] = s
-		if s.active && s.role == "admin" {
+		if s.active && eligible {
 			d.admins = append(d.admins, s)
 		}
 	}
@@ -140,12 +141,18 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 	var owner, version int64
 	var raw []byte
 	var lifecycle string
-	err = tx.QueryRow(ctx, `SELECT owner_id,draft_version,draft,lifecycle FROM sys_managed_dashboards WHERE id=$1 AND lifecycle<>'deleted' AND (owner_id=$2 OR $3)`, id, ActorID(ctx), ActorAdmin(ctx)).Scan(&owner, &version, &raw, &lifecycle)
+	err = tx.QueryRow(ctx, `SELECT owner_id,draft_version,draft,lifecycle FROM sys_managed_dashboards WHERE id=$1 AND lifecycle<>'deleted'
+		AND (owner_id=$2 OR ($3 AND (NOT dbhub_iam_dashboard_matrix_enabled() OR dbhub_dashboard_workflow_admin())))`,
+		id, ActorID(ctx), ActorDashboardReviewer(ctx)).Scan(&owner, &version, &raw, &lifecycle)
 	if err != nil {
 		return nil, managedError(err)
 	}
 	if version != expected {
 		return nil, ErrManagedConflict
+	}
+	governed, err := r.governedDashboard(ctx, tx, id)
+	if err != nil {
+		return nil, err
 	}
 	var def DashboardDefinition
 	if err = json.Unmarshal(raw, &def); err != nil {
@@ -225,6 +232,16 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 			continue
 		}
 		refs = append(refs, p)
+		if governed {
+			if !p.governed {
+				out.Issues = append(out.Issues, DashboardIssue{Code: "report_governance", Severity: "error", TileKey: tile.Key, ReportName: p.Name,
+					Message: "已登记的仪表盘只接受通过阶段 3 复核的受管报表", Action: "edit"})
+			}
+			if _, e = governedDashboardParameters(def.Parameters, tile.ParameterBindings, p.Parameters); e != nil {
+				out.Issues = append(out.Issues, DashboardIssue{Code: "parameter_scope", Severity: "error", TileKey: tile.Key, ReportName: p.Name,
+					Message: "全局筛选允许范围超出卡片报表的批准参数范围", Action: "edit"})
+			}
+		}
 		if p.Contract.Hash != tile.ContractHash {
 			out.Issues = append(out.Issues, DashboardIssue{Code: "contract_changed", Severity: "error", TileKey: tile.Key, ReportName: p.Name, Message: "正式报表口径已变化，请核对并明确采纳后重新检查", Action: "adopt_contract"})
 		}
@@ -260,7 +277,7 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 	}
 	if len(refs) == len(def.Tiles) && len(refs) > 0 {
 		for _, candidate := range directory.admins {
-			if candidate.ID == owner {
+			if candidate.ID == owner || governed && recipients[candidate.ID] {
 				continue
 			}
 			if before != nil && recipients[candidate.ID] && !directory.granted(candidate.ID, &DashboardReport{UserIDs: before.UserIDs, GroupIDs: before.GroupIDs}) {
@@ -279,7 +296,11 @@ func (r *ManagedDashboardRepository) Preflight(ctx context.Context, id, expected
 		}
 	}
 	if len(out.Reviewers) == 0 {
-		add("no_reviewer", "暂无合格独立管理员：须有全部引用报表查看权，且不能是本次新增受众的受益人", "configure_reviewer")
+		message := "暂无合格独立管理员：须有全部引用报表查看权，且不能是本次新增受众的受益人"
+		if governed {
+			message = "暂无合格独立业务复核人：须能查看全部引用报表，并回避提交人与看板受益人"
+		}
+		add("no_reviewer", message, "configure_reviewer")
 	}
 	out.CanSubmit = true
 	for _, issue := range out.Issues {

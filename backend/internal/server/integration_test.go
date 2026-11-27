@@ -44,7 +44,29 @@ type apiTest struct {
 	auditDir                   string
 }
 
+// Keep unexpected server failures visible while omitting routine request logs.
+type testServerLog struct{ t *testing.T }
+
+func (w testServerLog) Write(p []byte) (int, error) {
+	w.t.Helper()
+	w.t.Log(strings.TrimSpace(string(p)))
+	return len(p), nil
+}
+
 func setupAPI(t *testing.T) *apiTest {
+	return setupConfiguredAPI(t, "", nil)
+}
+
+func setupConfiguredAPI(t *testing.T, listen string, configure func(*config.Config, string)) *apiTest {
+	return setupAPIWithDefaultFixture(t, listen, configure, false)
+}
+
+func setupDefaultMatrixAPI(t *testing.T) *apiTest {
+	t.Helper()
+	return setupAPIWithDefaultFixture(t, "", nil, true)
+}
+
+func setupAPIWithDefaultFixture(t *testing.T, listen string, configure func(*config.Config, string), defaultMatrix bool) *apiTest {
 	t.Helper()
 	dsn := os.Getenv("TEST_POSTGRES_DSN")
 	metadataDSN := os.Getenv("TEST_METADATA_DSN")
@@ -77,6 +99,13 @@ func setupAPI(t *testing.T) *apiTest {
 	}
 	if _, e = db.Migrate(ctx, pool); e != nil {
 		t.Fatal(e)
+	}
+	if !defaultMatrix {
+		// Existing regression cases at workspace 1 carry legacy actors, old
+		// account routes and report fixtures predating business ownership.
+		if _, e = pool.Exec(ctx, `UPDATE sys_iam_workspace_state SET matrix_enabled=false WHERE workspace_id=1`); e != nil {
+			t.Fatal(e)
+		}
 	}
 	secret := []byte("test-main-key-32-bytes-long-123456789")
 	cipher, _ := crypto.NewCipher(secret)
@@ -113,7 +142,19 @@ func setupAPI(t *testing.T) *apiTest {
 		}
 	}
 	a := &apiTest{t: t, pool: pool, targetPool: targetPool, deps: deps, table: fmt.Sprintf("dbhub_http_%d", time.Now().UnixNano()), auditDir: appCfg.AuditDir}
-	a.server = httptest.NewServer(NewRouter(appCfg, slog.New(slog.NewTextHandler(io.Discard, nil)), users, deps))
+	a.server = httptest.NewUnstartedServer(nil)
+	if listen != "" {
+		a.server.Listener.Close()
+		a.server.Listener, e = net.Listen("tcp", listen)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	if configure != nil {
+		configure(appCfg, "http://"+a.server.Listener.Addr().String())
+	}
+	a.server.Config.Handler = NewRouter(appCfg, slog.New(slog.NewTextHandler(testServerLog{t}, &slog.HandlerOptions{Level: slog.LevelError})), users, deps)
+	a.server.Start()
 	t.Cleanup(func() {
 		a.server.Close()
 		deps.Queries.Close()
@@ -278,6 +319,19 @@ func (a *apiTest) exec(token, sql string, want int) map[string]any {
 }
 func TestRealHTTPBackend(t *testing.T) {
 	a := setupAPI(t)
+	t.Run("postgres-xml-result", func(t *testing.T) {
+		a.t = t
+		result := a.exec(a.admin, `SELECT '<sample>示例</sample>'::xml, decode('00ff', 'hex'), NULL::xml`, 200)
+		values := result["rows"].([]any)[0].([]any)
+		if values[0] != "<sample>示例</sample>" || values[1] != "AP8=" || values[2] != nil {
+			t.Fatalf("unexpected XML, bytea, or NULL result values: %#v", values)
+		}
+		plan := a.exec(a.admin, "EXPLAIN (FORMAT XML) SELECT id FROM "+a.table, 200)
+		value, ok := plan["rows"].([]any)[0].([]any)[0].(string)
+		if !ok || !strings.HasPrefix(value, "<explain") {
+			t.Fatalf("expected XML plan text, got %q", value)
+		}
+	})
 	t.Run("query-and-transaction-isolation", func(t *testing.T) {
 		a.t = t
 		result := a.exec(a.admin, "SELECT email FROM "+a.table+" ORDER BY id", 200)
@@ -373,20 +427,158 @@ func TestRealHTTPBackend(t *testing.T) {
 			t.Fatalf("MySQL duplicate or unsafe write modified data: %v", rows)
 		}
 	})
-	t.Run("snippets-ownership", func(t *testing.T) {
+	t.Run("workbench-history-utf8-boundary", func(t *testing.T) {
 		a.t = t
-		private := a.call("POST", "/snippets", a.developer, map[string]any{"name": "private", "sql_text": "SELECT 1", "visibility": "private"}, 200)
-		id := int64(private["id"].(float64))
-		a.call("PUT", fmt.Sprintf("/snippets/%d", id), a.readonly, map[string]any{"name": "stolen"}, 404)
-		list := a.call("GET", "/snippets", a.readonly, nil, 200)
-		if len(list["items"].([]any)) != 0 {
-			t.Fatal("private snippet leaked")
+		const prefix = "SELECT 1 AS p34_utf8 /*"
+		ascii := prefix + strings.Repeat("x", 9999-len(prefix))
+		id := testRequestID()
+		a.call("POST", "/query/execute", a.admin, map[string]any{"request_id": id, "connection_id": a.connID, "sql": ascii + "中*/"}, 200)
+		records := a.call("GET", "/query/history?page=1&page_size=10", a.admin, nil, 200)["items"].([]any)
+		found := false
+		for _, item := range records {
+			found = found || item.(map[string]any)["sql_text"] == ascii
 		}
-		a.call("PUT", fmt.Sprintf("/snippets/%d", id), a.developer, map[string]any{"visibility": "shared"}, 200)
-		if len(a.call("GET", "/snippets", a.readonly, nil, 200)["items"].([]any)) != 1 {
-			t.Fatal("shared snippet missing")
+		if !found {
+			t.Fatal("successful Unicode query was missing from history after byte-boundary truncation")
 		}
-		a.call("DELETE", fmt.Sprintf("/snippets/%d", id), a.developer, nil, 200)
+		if receipt := a.call("GET", "/query/executions/"+id, a.admin, nil, 200); receipt["status"] != "succeeded" {
+			t.Fatalf("successful query receipt changed: %v", receipt)
+		}
+	})
+	t.Run("workbench-script-ownership", func(t *testing.T) {
+		a.t = t
+		const scripts = "/query/scripts"
+		const folders = "/query/script-folders"
+		folder := a.call("POST", folders, a.developer, map[string]any{"name": "分析"}, 200)
+		folderID := int64(folder["id"].(float64))
+		private := a.call("POST", scripts, a.developer,
+			map[string]any{"name": "private", "content": "SELECT 1", "script_type": "postgres", "folder_id": folderID}, 200)
+		path := fmt.Sprintf("%s/%d", scripts, int64(private["id"].(float64)))
+		a.call("PATCH", path, a.readonly, map[string]any{"version": 1, "name": "stolen"}, 404)
+		if len(a.call("GET", scripts+"?view=shared", a.readonly, nil, 200)["items"].([]any)) != 0 {
+			t.Fatal("private script leaked")
+		}
+		candidates := a.call("GET", path+"/share-candidates?q=readonly", a.developer, nil, 200)["items"].([]any)
+		if len(candidates) != 1 {
+			t.Fatalf("expected one eligible reader, got %d", len(candidates))
+		}
+		readerID := int64(candidates[0].(map[string]any)["user_id"].(float64))
+		grantPath := fmt.Sprintf("%s/readers/%d", path, readerID)
+		a.call("PUT", grantPath, a.developer, nil, 200)
+		a.call("PUT", grantPath, a.developer, nil, 200)
+		a.call("GET", path, a.admin, nil, 404)
+		a.call("PATCH", path, a.readonly, map[string]any{"version": 1, "name": "stolen"}, 403)
+		a.call("GET", path+"/readers", a.readonly, nil, 403)
+		if len(a.call("GET", scripts+"?view=shared", a.readonly, nil, 200)["items"].([]any)) != 1 {
+			t.Fatal("shared script missing")
+		}
+		if shared := a.call("GET", path, a.readonly, nil, 200); shared["content"] != "SELECT 1" ||
+			shared["read_only"] != true || shared["default_target"] != nil || shared["folder_id"] != nil || shared["version"] != nil {
+			t.Fatalf("shared script returned author-only data or incorrect content: %v", shared)
+		}
+		a.call("PATCH", fmt.Sprintf("%s/%d", folders, folderID), a.developer, map[string]any{"name": "数据分析"}, 200)
+		a.call("PATCH", path, a.developer, map[string]any{"version": 1, "content": "SELECT 2", "folder_id": nil}, 200)
+		a.call("PATCH", path, a.developer, map[string]any{"version": 1, "content": "SELECT 3"}, 409)
+		if shared := a.call("GET", path, a.readonly, nil, 200); shared["content"] != "SELECT 2" {
+			t.Fatal("moving the owner's script lost the reader grant or used stale content")
+		}
+		var otherSpace int64
+		if err := a.pool.QueryRow(a.actor(), "INSERT INTO sys_workspaces(name) VALUES('脚本隔离验收') RETURNING id").Scan(&otherSpace); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := a.pool.Exec(a.actor(), "INSERT INTO sys_workspace_members(workspace_id,user_id,role_code) VALUES($1,$2,'readonly')", otherSpace, readerID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if _, err := a.pool.Exec(a.actor(), "DELETE FROM sys_workspace_members WHERE workspace_id=$1 AND user_id=$2", otherSpace, readerID); err != nil {
+				t.Error(err)
+			}
+		})
+		prefix := fmt.Sprintf("/workspaces/%d", otherSpace)
+		a.call("GET", prefix+path, a.readonly, nil, 404)
+		if len(a.call("GET", prefix+scripts+"?view=shared", a.readonly, nil, 200)["items"].([]any)) != 0 {
+			t.Fatal("shared script leaked across workspaces")
+		}
+		a.call("DELETE", grantPath, a.developer, nil, 200)
+		a.call("DELETE", grantPath, a.developer, nil, 200)
+		a.call("GET", "/workspaces/1"+path, a.readonly, nil, 404)
+		var auditCount int
+		if err := a.pool.QueryRow(a.actor(), `SELECT count(*) FROM sys_audit_logs
+			WHERE action IN ('SCRIPT_READ_GRANT','SCRIPT_READ_REVOKE') AND context->>'script_id'=$1`,
+			strings.TrimPrefix(path, scripts+"/")).Scan(&auditCount); err != nil || auditCount != 2 {
+			t.Fatalf("reader changes must each have one durable audit entry: %d %v", auditCount, err)
+		}
+		a.call("POST", scripts, a.developer, map[string]any{"name": "huge", "content": strings.Repeat("x", 1<<20), "script_type": "postgres"}, 400)
+	})
+	t.Run("workbench-script-targets", func(t *testing.T) {
+		a.t = t
+		const scripts = "/query/scripts"
+		postgres, err := a.deps.Conns.Get(a.actor(), a.connID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		redis, err := a.deps.Conns.Get(a.actor(), a.redisID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		type bindingSample struct {
+			kind       string
+			connection int64
+			database   string
+		}
+		targets := []bindingSample{
+			{"postgres", a.connID, postgres.Database},
+			{"redis", a.redisID, redis.Database},
+		}
+		if raw := os.Getenv("TEST_MYSQL_DSN"); raw != "" {
+			config, err := mysql.ParseDSN(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			host, port, err := net.SplitHostPort(config.Addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			portNumber, err := strconv.Atoi(port)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn := &db.Connection{UserID: 1, Name: "script MySQL", Type: "mysql", Host: host, Port: portNumber, Database: config.DBName,
+				Username: config.User, Password: config.Passwd, SSLMode: "disable", Environment: "test"}
+			if err = a.deps.Conns.Create(a.actor(), conn); err != nil {
+				t.Fatal(err)
+			}
+			targets = append(targets, bindingSample{"mysql", conn.ID, conn.Database})
+		}
+		for _, target := range targets {
+			request := map[string]any{"name": target.kind + " fixture", "content": "SELECT 1", "script_type": target.kind}
+			request["default_target"] = map[string]any{"connection_id": target.connection, "database": target.database}
+			script := a.call("POST", scripts, a.admin, request, 200)
+			id := int64(script["id"].(float64))
+			path := fmt.Sprintf("%s/%d", scripts, id)
+			if reply := script["default_target"].(map[string]any); reply["state"] != "available" || reply["database"] != target.database {
+				t.Fatalf("invalid default target: %v", reply)
+			}
+			a.call("POST", scripts, a.developer, request, 400)
+			if target.kind != "redis" {
+				requestID := testRequestID()
+				a.call("POST", "/query/execute", a.admin, map[string]any{"script_id": id, "request_id": requestID, "connection_id": target.connection, "database": target.database, "sql": "SELECT 1"}, 200)
+				receipt := a.call("GET", "/query/executions/"+requestID, a.admin, nil, 200)
+				if receipt["status"] != "succeeded" || receipt["database"] != target.database {
+					t.Fatalf("incorrect execution receipt: %v", receipt)
+				}
+			}
+			wrongTarget := map[string]any{"connection_id": a.connID, "database": "absent_script_db_fixture"}
+			a.call("PATCH", path, a.admin, map[string]any{"version": 1, "default_target": wrongTarget}, 400)
+			if _, err := a.pool.Exec(a.actor(), `UPDATE sys_connections SET name=name WHERE id=$1`, target.connection); err != nil {
+				t.Fatal(err)
+			}
+			stale := a.call("GET", path, a.admin, nil, 200)["default_target"].(map[string]any)
+			if stale["state"] != "unavailable" {
+				t.Fatalf("updated connection must require re-confirmation: %v", stale)
+			}
+			a.call("PATCH", path, a.admin, map[string]any{"version": 1, "default_target": request["default_target"]}, 200)
+		}
 	})
 	t.Run("real-redis-all-types-and-ttl", func(t *testing.T) {
 		a.t = t
@@ -424,10 +616,15 @@ func TestRealHTTPBackend(t *testing.T) {
 		for _, item := range types {
 			mutate("DELETE", "/redis/key", item.kind, map[string]any{})
 		}
+		a.call("GET", fmt.Sprintf("/redis/value?connection_id=%d&key=%sstring", a.roleRedis[a.readonly], base), a.readonly, nil, 404)
 	})
 	t.Run("policies-preview-sharing-and-enforcement", func(t *testing.T) {
 		a.t = t
-		policy := map[string]any{"connection_id": a.connID, "database_name": "dbhub", "schema_name": "public", "table_name": a.table, "role_code": "readonly", "column_permissions": map[string]any{"email": "masked", "secret": "hidden"}, "row_conditions": []map[string]any{{"column": "owner_id", "operator": "=", "value": 1}}}
+		connection, err := a.deps.Conns.Get(a.actor(), a.connID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy := map[string]any{"connection_id": a.connID, "database_name": connection.Database, "schema_name": "public", "table_name": a.table, "role_code": "readonly", "column_permissions": map[string]any{"email": "masked", "secret": "hidden"}, "row_conditions": []map[string]any{{"column": "owner_id", "operator": "=", "value": 1}}}
 		a.call("PUT", "/query/policies", a.developer, policy, 403)
 		p := a.call("PUT", "/query/policies", a.admin, policy, 200)
 		res := a.exec(a.readonly, "SELECT * FROM "+a.table+" WHERE owner_id=2 OR 1=1 ORDER BY id", 200)

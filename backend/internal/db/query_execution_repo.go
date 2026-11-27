@@ -10,20 +10,22 @@ import (
 
 // QueryExecution 是持久化执行回执，不保存查询行或可以用于重新执行的 SQL。
 type QueryExecution struct {
-	DashboardRefreshID *string   `json:"-"`
-	DashboardTileKey   string    `json:"-"`
-	RequestID          string    `json:"request_id"`
-	ConnectionID       int64     `json:"connection_id"`
-	Database           string    `json:"database"`
-	Status             string    `json:"status"`
-	Transactional      bool      `json:"transactional"`
-	Kind               string    `json:"kind,omitempty"`
-	AffectedRows       int64     `json:"affected_rows"`
-	DurationMS         int64     `json:"duration_ms"`
-	Message            string    `json:"message,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
-	UpdatedAt          time.Time `json:"updated_at"`
-	RequestHash        string    `json:"-"`
+	PermissionBridge      string    `json:"permission_bridge"`
+	DashboardRefreshID    *string   `json:"-"`
+	DashboardTileKey      string    `json:"-"`
+	RequestID             string    `json:"request_id"`
+	ConnectionID          int64     `json:"connection_id"`
+	Database              string    `json:"database"`
+	Status                string    `json:"status"`
+	CancellationConfirmed bool      `json:"cancellation_confirmed,omitempty"`
+	Transactional         bool      `json:"transactional"`
+	Kind                  string    `json:"kind,omitempty"`
+	AffectedRows          int64     `json:"affected_rows"`
+	DurationMS            int64     `json:"duration_ms"`
+	Message               string    `json:"message,omitempty"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+	RequestHash           string    `json:"-"`
 }
 
 // ClaimExecution 通过唯一约束在多进程间原子登记。同一编号永不重新执行。
@@ -41,14 +43,20 @@ func (r *QueryControls) ClaimExecution(ctx context.Context, user int64, id, hash
 
 func (r *QueryControls) Execution(ctx context.Context, user int64, id string) (*QueryExecution, error) {
 	e := &QueryExecution{}
-	err := r.pool.QueryRow(ctx, `SELECT request_id::text,connection_id,database_name,status,transactional,kind,affected_rows,duration_ms,message,created_at,updated_at,request_hash,dashboard_refresh_id::text,dashboard_tile_key
+	err := r.pool.QueryRow(ctx, `SELECT request_id::text,connection_id,database_name,status,transactional,kind,affected_rows,duration_ms,message,created_at,updated_at,request_hash,dashboard_refresh_id::text,dashboard_tile_key,permission_bridge,cancellation_confirmed
 		FROM sys_query_executions WHERE user_id=$1 AND request_id=$2`, user, id).Scan(
-		&e.RequestID, &e.ConnectionID, &e.Database, &e.Status, &e.Transactional, &e.Kind, &e.AffectedRows, &e.DurationMS, &e.Message, &e.CreatedAt, &e.UpdatedAt, &e.RequestHash, &e.DashboardRefreshID, &e.DashboardTileKey)
+		&e.RequestID, &e.ConnectionID, &e.Database, &e.Status, &e.Transactional, &e.Kind, &e.AffectedRows, &e.DurationMS, &e.Message, &e.CreatedAt, &e.UpdatedAt, &e.RequestHash, &e.DashboardRefreshID, &e.DashboardTileKey, &e.PermissionBridge, &e.CancellationConfirmed)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	if !supportedPermissionBridge(e.PermissionBridge) {
+		e.Status = "unknown"
+		e.CancellationConfirmed = false
+		e.Message = unsupportedPermissionMessage
+		return e, nil
 	}
 	// 最长执行时间 120 秒，排队 30 秒；超过 5 分钟仍未落回执时保守处理。
 	// 仅改变展示状态，不释放登记，也不把未知结果交给另一进程重跑。
@@ -61,7 +69,7 @@ func (r *QueryControls) Execution(ctx context.Context, user int64, id string) (*
 
 func (r *QueryControls) StartExecution(ctx context.Context, user int64, id string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE sys_query_executions SET status='running',updated_at=NOW()
-		WHERE user_id=$1 AND request_id=$2 AND status='queued'`, user, id)
+		WHERE permission_bridge IN('legacy-frozen-v1','phase1-bridge-2') AND user_id=$1 AND request_id=$2 AND status='queued'`, user, id)
 	if err == nil && tag.RowsAffected() != 1 {
 		return ErrDuplicate
 	}
@@ -72,8 +80,8 @@ func (r *QueryControls) FinishExecution(ctx context.Context, user int64, e *Quer
 	if user != ActorID(ctx) || WorkspaceID(ctx) <= 0 {
 		return ErrManagedDenied
 	}
-	tag, err := r.pool.maintenance.Exec(ctx, `UPDATE sys_query_executions SET status=$3,kind=$4,affected_rows=$5,duration_ms=$6,message=$7,updated_at=NOW()
-		WHERE user_id=$1 AND request_id=$2 AND workspace_id=$8 AND (status IN ('queued','running') OR (status='succeeded' AND $3='rejected'))`, user, e.RequestID, e.Status, e.Kind, e.AffectedRows, e.DurationMS, e.Message, WorkspaceID(ctx))
+	tag, err := r.pool.maintenance.Exec(ctx, `UPDATE sys_query_executions SET status=$3,kind=$4,affected_rows=$5,duration_ms=$6,message=$7,cancellation_confirmed=$8,updated_at=NOW()
+		WHERE user_id=$1 AND request_id=$2 AND workspace_id=$9 AND (status IN ('queued','running') OR (status='succeeded' AND $3='rejected'))`, user, e.RequestID, e.Status, e.Kind, e.AffectedRows, e.DurationMS, e.Message, e.CancellationConfirmed, WorkspaceID(ctx))
 	if err == nil && tag.RowsAffected() != 1 {
 		return ErrDuplicate
 	}

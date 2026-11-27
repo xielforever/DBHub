@@ -15,6 +15,8 @@ import (
 
 type managedRunKey struct{}
 type managedRun struct {
+	export             *reportExportRequest
+	params             map[string]any
 	dashboard          *db.ManagedDashboardRepository
 	dashboardExecution *db.DashboardExecution
 	repo               *db.ManagedReportRepository
@@ -73,8 +75,8 @@ func managedRunOf(r *http.Request) *managedRun {
 	value, _ := r.Context().Value(managedRunKey{}).(*managedRun)
 	return value
 }
-func (h *Handler) runManaged(w http.ResponseWriter, r *http.Request, repo *db.ManagedReportRepository, x *db.ManagedExecution, requestID string) {
-	ctx := context.WithValue(r.Context(), managedRunKey{}, &managedRun{repo: repo, execution: x, requestID: requestID})
+func (h *Handler) runManaged(w http.ResponseWriter, r *http.Request, repo *db.ManagedReportRepository, x *db.ManagedExecution, requestID string, params map[string]any) {
+	ctx := context.WithValue(r.Context(), managedRunKey{}, &managedRun{repo: repo, execution: x, requestID: requestID, params: params})
 	h.execute(w, r.WithContext(ctx), true, nil)
 }
 func (h *Handler) ExecutePublished(repo *db.ManagedReportRepository) http.HandlerFunc {
@@ -85,8 +87,9 @@ func (h *Handler) ExecutePublished(repo *db.ManagedReportRepository) http.Handle
 			return
 		}
 		var in struct {
-			RequestID     string `json:"request_id"`
-			PublicationNo int64  `json:"publication_no"`
+			Params        map[string]any `json:"params"`
+			RequestID     string         `json:"request_id"`
+			PublicationNo int64          `json:"publication_no"`
 		}
 		if e = httpx.DecodeJSON(w, r, &in); e != nil {
 			httpx.Fail(w, e)
@@ -101,7 +104,7 @@ func (h *Handler) ExecutePublished(repo *db.ManagedReportRepository) http.Handle
 			reportapi.ManagedError(w, e)
 			return
 		}
-		h.runManaged(w, r, repo, x, in.RequestID)
+		h.runManaged(w, r, repo, x, in.RequestID, in.Params)
 	}
 }
 func (h *Handler) ValidateReportReview(repo *db.ManagedReportRepository) http.HandlerFunc {
@@ -112,10 +115,11 @@ func (h *Handler) ValidateReportReview(repo *db.ManagedReportRepository) http.Ha
 			return
 		}
 		var in struct {
-			RequestID string  `json:"request_id"`
-			AccountID int64   `json:"account_id"`
-			UserIDs   []int64 `json:"user_ids"`
-			GroupIDs  []int64 `json:"group_ids"`
+			Params    map[string]any `json:"params"`
+			RequestID string         `json:"request_id"`
+			AccountID int64          `json:"account_id"`
+			UserIDs   []int64        `json:"user_ids"`
+			GroupIDs  []int64        `json:"group_ids"`
 		}
 		if e = httpx.DecodeJSON(w, r, &in); e != nil {
 			httpx.Fail(w, e)
@@ -130,7 +134,7 @@ func (h *Handler) ValidateReportReview(repo *db.ManagedReportRepository) http.Ha
 			reportapi.ManagedError(w, e)
 			return
 		}
-		h.runManaged(w, r, repo, x, in.RequestID)
+		h.runManaged(w, r, repo, x, in.RequestID, in.Params)
 	}
 }
 

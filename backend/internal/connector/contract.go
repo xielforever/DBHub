@@ -64,8 +64,14 @@ type ObjectRef struct {
 	Name, Kind string
 }
 type ExecuteOptions struct {
+	// LargeResult is set only by the approved report-export path, never a SQL request.
+	LargeResult bool
 	// LosslessNumbers keeps exact decimal / large integer text on the JSON wire.
-	LosslessNumbers  bool
+	LosslessNumbers bool
+	// LosslessPGScalars preserves PostgreSQL numbers and keeps the workbench JSON shape.
+	LosslessPGScalars bool
+	// FormatPGDates emits finite native PostgreSQL DATE values as calendar dates.
+	FormatPGDates    bool
 	MaxRows          int
 	MaxBytes         int
 	Timeout          time.Duration

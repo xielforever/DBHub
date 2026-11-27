@@ -108,9 +108,10 @@ type RedisKeyItem struct {
 }
 
 type RedisValue struct {
-	Key   string `json:"key"`
-	Type  string `json:"type"`
-	TTL   int64  `json:"ttl"`
-	Size  int64  `json:"size"`
-	Value any    `json:"value"`
+	Key       string `json:"key"`
+	Type      string `json:"type"`
+	TTL       int64  `json:"ttl"`
+	Size      int64  `json:"size"`
+	Value     any    `json:"value"`
+	Truncated bool   `json:"truncated"`
 }

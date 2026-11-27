@@ -32,6 +32,22 @@ func Fingerprint(sql string) string {
 
 // ParseTables 使用实际 AST；不支持的语法返回错误，不生成近似血缘。
 func ParseTables(query, dialect string) (ParseResult, error) {
+	// History retains named placeholders without storing their values. Normalize
+	// only those placeholders with the execution lexer before building the AST.
+	parameters, e := sqlparse.NamedParameters(query, dialect)
+	if e != nil {
+		return ParseResult{}, e
+	}
+	if len(parameters) > 0 {
+		values := map[string]any{}
+		for _, name := range parameters {
+			values[name] = nil
+		}
+		query, _, e = sqlparse.BindNamed(query, dialect, values)
+		if e != nil {
+			return ParseResult{}, e
+		}
+	}
 	ast, e := sqlparse.Parse(query, dialect)
 	if e != nil {
 		return ParseResult{}, e

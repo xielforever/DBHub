@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
@@ -20,20 +21,27 @@ func (h *Handler) ExecuteReport(reports *db.ReportRepository) http.HandlerFunc {
 func (h *Handler) reportRequest(w http.ResponseWriter, r *http.Request, reports *db.ReportRepository) (executeRequest, int64, int64, error) {
 	if reports == nil {
 		var in struct {
-			RequestID    string `json:"request_id"`
-			ConnectionID int64  `json:"connection_id"`
-			Database     string `json:"database"`
-			SQL          string `json:"sql"`
+			DataContract *db.DataContract     `json:"data_contract"`
+			Parameters   []db.ReportParameter `json:"parameters"`
+			Params       map[string]any       `json:"params"`
+			RequestID    string               `json:"request_id"`
+			ConnectionID int64                `json:"connection_id"`
+			Database     string               `json:"database"`
+			SQL          string               `json:"sql"`
 		}
 		err := httpx.DecodeJSON(w, r, &in)
 		if len(in.SQL) > 128*1024 {
 			err = httpx.BadRequest("SQL 不能超过128KB")
 		}
-		return executeRequest{RequestID: in.RequestID, ConnectionID: in.ConnectionID, Database: in.Database, SQL: in.SQL}, 0, 0, err
+		if err == nil && in.DataContract != nil {
+			err = db.ValidateDataContract(in.DataContract, in.DataContract.ChartType)
+		}
+		return executeRequest{previewContract: in.DataContract, reportParameters: in.Parameters, Params: in.Params, RequestID: in.RequestID, ConnectionID: in.ConnectionID, Database: in.Database, SQL: in.SQL}, 0, 0, err
 	}
 	var in struct {
-		RequestID string `json:"request_id"`
-		Version   int64  `json:"version"`
+		Params    map[string]any `json:"params"`
+		RequestID string         `json:"request_id"`
+		Version   int64          `json:"version"`
 	}
 	if err := httpx.DecodeJSON(w, r, &in); err != nil {
 		return executeRequest{}, 0, 0, err
@@ -57,5 +65,9 @@ func (h *Handler) reportRequest(w http.ResponseWriter, r *http.Request, reports 
 	if rep.ConnectionID < 1 {
 		return executeRequest{}, 0, 0, httpx.Conflict("请先从数据源目录添加此报表对应修订的个人连接，填写自己的数据库账号")
 	}
-	return executeRequest{RequestID: in.RequestID, ConnectionID: rep.ConnectionID, Database: rep.DatabaseName, SQL: rep.SQLText}, rep.ID, rep.Version, nil
+	params, err := db.ResolveReportParameters(rep.Parameters, in.Params, time.Now())
+	if err != nil {
+		return executeRequest{}, 0, 0, httpx.BadRequest(err.Error())
+	}
+	return executeRequest{reportParameters: rep.Parameters, Params: params, RequestID: in.RequestID, ConnectionID: rep.ConnectionID, Database: rep.DatabaseName, SQL: rep.SQLText}, rep.ID, rep.Version, nil
 }

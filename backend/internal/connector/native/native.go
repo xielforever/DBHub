@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 	"github.com/user/dbhub/internal/connector"
@@ -62,6 +63,28 @@ func normalize(err error) error {
 	return err
 }
 
+func normalizeExecutionError(err error, query bool) error {
+	var dbErr *mysql.MySQLError
+	if !query || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &dbErr) {
+		return normalize(err)
+	}
+	state := string(dbErr.SQLState[:])
+	var message string
+	switch {
+	case dbErr.Number == 1054 && state == "42S22":
+		message = "MySQL 查询引用的字段不存在（1054）"
+	case dbErr.Number == 1142 && state == "42000":
+		message = "MySQL 数据库账号没有目标对象的查询权限（1142）"
+	case dbErr.Number == 1146 && state == "42S02":
+		message = "MySQL 查询引用的表不存在（1146）"
+	case (dbErr.Number == 1064 || dbErr.Number == 1149) && state == "42000":
+		message = "MySQL 返回 SQL 语法错误"
+	default:
+		return normalize(err)
+	}
+	return &connector.Error{Kind: "statement_rejected", Message: message, SQLState: state, Definite: true, Cause: err}
+}
+
 type sqlSession struct {
 	r    *target.RelDB
 	spec connector.OpenSpec
@@ -73,8 +96,19 @@ func (s *sqlSession) Probe(ctx context.Context) (*connector.TestInfo, error) {
 func (s *sqlSession) Close(context.Context) error { s.r.Close(); return nil }
 func (s *sqlSession) Execute(ctx context.Context, q connector.ExecuteRequest) (*connector.ExecResult, error) {
 	o := q.Options
-	r, e := target.ExecuteWithOptions(ctx, s.r, q.SQL, q.ReadOnly, target.ExecuteOptions{MaxRows: o.MaxRows, MaxBytes: o.MaxBytes, LosslessNumbers: o.LosslessNumbers, Timeout: o.Timeout, Args: o.Args, AllowUnsafeWrite: o.AllowUnsafeWrite, BeforeExecute: o.BeforeExecute})
-	return r, normalize(e)
+	r, e := target.ExecuteWithOptions(ctx, s.r, q.SQL, q.ReadOnly, target.ExecuteOptions{
+		LargeResult:       o.LargeResult,
+		MaxRows:           o.MaxRows,
+		MaxBytes:          o.MaxBytes,
+		LosslessNumbers:   o.LosslessNumbers,
+		LosslessPGScalars: o.LosslessPGScalars,
+		FormatPGDates:     o.FormatPGDates,
+		Timeout:           o.Timeout,
+		Args:              o.Args,
+		AllowUnsafeWrite:  o.AllowUnsafeWrite,
+		BeforeExecute:     o.BeforeExecute,
+	})
+	return r, normalizeExecutionError(e, q.Query)
 }
 func (s *sqlSession) Databases(c context.Context) ([]connector.DatabaseItem, error) {
 	return target.Databases(c, s.r)

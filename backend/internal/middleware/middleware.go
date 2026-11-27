@@ -145,7 +145,12 @@ func CORS(allowedOrigins []string) Middleware {
 //  1. Authorization: Bearer <token>（标准通道）
 //  2. X-Access-Token: <token>（自定义头兜底）
 //  3. Cookie: dbhub_access_token=<token>（浏览器同源自动携带，网关一般不剥离）
-func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStore) Middleware {
+//
+// IdentityLoader may join a route's navigation read with current identity.
+// The ordinary session, subject, active-user and CSRF checks still run below.
+type IdentityLoader func(context.Context, string) (*auth.User, context.Context, error)
+
+func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStore, loaders ...IdentityLoader) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := extractAccessToken(r)
@@ -167,7 +172,14 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 				httpx.Fail(w, httpx.New(httpx.CodeUnauthorized, "认证令牌无效或已过期", err))
 				return
 			}
-			user, e := users.FindByUsername(r.Context(), claims.Username)
+			identityContext := r.Context()
+			var user *auth.User
+			var e error
+			if len(loaders) > 0 && loaders[0] != nil {
+				user, identityContext, e = loaders[0](r.Context(), claims.Username)
+			} else {
+				user, e = users.FindByUsername(r.Context(), claims.Username)
+			}
 			if auth.UserStoreUnavailable(e) {
 				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "identity_service_unavailable" })
 				w.Header().Set("Retry-After", "2")
@@ -206,7 +218,7 @@ func RequireAuth(secret []byte, users auth.UserStore, sessions *auth.SessionStor
 				httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "审计存储暂不可用，请稍后重试"})
 				return
 			}
-			ctx := context.WithValue(r.Context(), auth.ClaimsContextKey, claims)
+			ctx := context.WithValue(identityContext, auth.ClaimsContextKey, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -239,7 +251,7 @@ func RequireRoles(allowed ...string) Middleware {
 				httpx.Fail(w, httpx.Unauthorized("未认证"))
 				return
 			}
-			if _, ok := allowedSet[claims.Role]; !ok {
+			if _, ok := allowedSet[claims.Role]; !ok && !(claims.IAM != nil && claims.IAM.Target && claims.CurrentAction != "" && auth.HasAction(claims, claims.CurrentAction)) {
 				auditctx.Update(r.Context(), func(d *auditctx.Data) { d.AuthFailure = "insufficient_role" })
 				httpx.Fail(w, httpx.Forbidden("当前角色无权执行此操作"))
 				return

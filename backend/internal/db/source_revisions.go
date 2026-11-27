@@ -53,7 +53,7 @@ func (r *ConnectionRepository) DefinitionRevisions(ctx context.Context, id int64
  CASE WHEN (h.visibility='private' AND h.owner_id=$2) OR (h.visibility='global' AND $3)
  THEN (SELECT count(*) FROM sys_connections c WHERE c.definition_revision_id=h.id) END,
  CASE WHEN (h.visibility='private' AND h.owner_id=$2) OR (h.visibility='global' AND $3) THEN (SELECT count(*) FROM sys_managed_reports m JOIN sys_report_releases re ON re.id=m.active_release_id JOIN sys_report_reviews rv ON rv.id=re.review_id JOIN sys_report_accounts a ON a.id=rv.account_id WHERE a.definition_revision_id=h.id) END
- FROM history h ORDER BY revision DESC LIMIT $4 OFFSET $5`, d.FamilyID, ActorID(ctx), ActorAdmin(ctx), limit, offset)
+ FROM history h ORDER BY revision DESC LIMIT $4 OFFSET $5`, d.FamilyID, ActorID(ctx), ActorCapability(ctx, "datasource_manage"), limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -17,11 +17,11 @@ const reportAudience = `dbhub_member_role($2) IS NOT NULL AND (
 
 func (r *ManagedReportRepository) PublishedGet(ctx context.Context, id int64) (*PublishedReport, error) {
 	p := &PublishedReport{}
-	e := r.pool.QueryRow(ctx, `SELECT m.id,v.definition->>'name',v.definition->>'description',v.number,m.publication_no,v.definition->>'chart_type',v.definition->'chart_config'
+	e := r.pool.QueryRow(ctx, `SELECT m.id,v.definition->>'name',v.definition->>'description',v.number,m.publication_no,v.definition->>'chart_type',v.definition->'chart_config',COALESCE(v.definition->'parameters','[]'::jsonb),v.definition->'data_contract',v.definition->'export_policy'
  FROM sys_managed_reports m JOIN sys_report_releases re ON re.id=m.active_release_id
  JOIN sys_report_reviews rv ON rv.id=re.review_id AND rv.status='approved' JOIN sys_report_versions v ON v.id=rv.version_id
  JOIN sys_report_accounts a ON a.id=rv.account_id AND a.enabled JOIN sys_source_definitions d ON d.id=a.definition_revision_id AND d.enabled AND d.visibility='global'
- WHERE m.id=$1 AND `+reportAudience, id, ActorID(ctx)).Scan(&p.ID, &p.Name, &p.Description, &p.Version, &p.PublicationNo, &p.ChartType, &p.ChartConfig)
+ WHERE m.id=$1 AND `+reportAudience, id, ActorID(ctx)).Scan(&p.ID, &p.Name, &p.Description, &p.Version, &p.PublicationNo, &p.ChartType, &p.ChartConfig, &p.Parameters, &p.DataContract, &p.ExportPolicy)
 	return p, managedError(e)
 }
 
@@ -48,6 +48,16 @@ func (r *ManagedReportRepository) ValidationCandidate(ctx context.Context, revie
 	if submitter != nil && *submitter == ActorID(ctx) {
 		return nil, fmt.Errorf("%w: 不得审阅验证自己提交的版本", ErrManagedInput)
 	}
+	basis, e := reportBusinessOwnerForReview(ctx, tx, reviewID)
+	if e != nil {
+		return nil, e
+	}
+	if e = reportBusinessReviewer(ctx, tx, basis, ActorID(ctx)); e != nil {
+		return nil, e
+	}
+	if basis.required() {
+		out.businessOwnerVersion = &basis.version
+	}
 	if e = json.Unmarshal(raw, &out.Definition); e != nil {
 		return nil, e
 	}
@@ -71,6 +81,14 @@ func (r *ManagedReportRepository) ValidationCandidate(ctx context.Context, revie
 	out.Manifest.MaxRows = 1000
 	out.Manifest.TimeoutMS = 30000
 	out.Hash = reportDigest(out.Manifest)
+	if e = r.resolveBusinessReportBinding(ctx, tx, out); e != nil {
+		return nil, e
+	}
+	if out.businessBinding != "" {
+		if e = tx.QueryRow(ctx, `SELECT publication_no + 1 FROM sys_managed_reports WHERE id=$1`, out.ReportID).Scan(&out.PublicationNo); e != nil {
+			return nil, managedError(e)
+		}
+	}
 	return out, nil
 }
 func (r *ManagedReportRepository) RegisterValidation(ctx context.Context, id string, x *ManagedExecution) error {
@@ -89,6 +107,16 @@ func (r *ManagedReportRepository) RegisterValidation(ctx context.Context, id str
 	if status != "pending" {
 		return ErrManagedConflict
 	}
+	basis, e := reportBusinessOwnerForReview(ctx, tx, x.ReviewID)
+	if e != nil {
+		return e
+	}
+	if e = reportBusinessReviewer(ctx, tx, basis, ActorID(ctx)); e != nil {
+		return e
+	}
+	if e = basis.checkValidation(x.businessOwnerVersion); e != nil {
+		return e
+	}
 	_, _, a, e := r.loadAccount(ctx, tx, x.AccountID)
 	if e != nil {
 		return e
@@ -103,7 +131,7 @@ func (r *ManagedReportRepository) RegisterValidation(ctx context.Context, id str
 		return e
 	}
 	raw, _ := json.Marshal(x.Manifest)
-	_, e = tx.Exec(ctx, `INSERT INTO sys_report_validations(id,review_id,account_id,account_generation,account_version,manifest,manifest_hash,performed_by) VALUES($1::uuid,$2,$3,$4,$5,$6::jsonb,$7,$8)`, id, x.ReviewID, x.AccountID, x.Generation, x.AccountVersion, string(raw), x.Hash, ActorID(ctx))
+	_, e = tx.Exec(ctx, `INSERT INTO sys_report_validations(id,review_id,account_id,account_generation,account_version,manifest,manifest_hash,performed_by,business_policy_stamp,business_owner_version) VALUES($1::uuid,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10)`, id, x.ReviewID, x.AccountID, x.Generation, x.AccountVersion, string(raw), x.Hash, ActorID(ctx), x.BusinessPolicyStamp(), x.businessOwnerVersion)
 	if e != nil {
 		return e
 	}
@@ -136,6 +164,9 @@ func (r *ManagedReportRepository) ResolvePublished(ctx context.Context, id, publ
 		return nil, ErrManagedDenied
 	}
 	out.Connection, out.Password, out.AccountVersion, out.Generation = c, p, a.Version, a.Generation
+	if e = r.resolveBusinessReportBinding(ctx, r.pool, out); e != nil {
+		return nil, e
+	}
 	return out, nil
 }
 func (r *ManagedReportRepository) CheckExecution(ctx context.Context, x *ManagedExecution) error {
@@ -149,8 +180,16 @@ func (r *ManagedReportRepository) CheckExecution(ctx context.Context, x *Managed
 	if e != nil {
 		return e
 	}
-	if latest.Hash != x.Hash || latest.AccountVersion != x.AccountVersion || latest.Generation != x.Generation {
+	if latest.Hash != x.Hash || latest.AccountVersion != x.AccountVersion || latest.Generation != x.Generation ||
+		latest.businessBinding != x.businessBinding || latest.PublicationNo != x.PublicationNo ||
+		!sameReportBusinessOwnerVersion(latest.businessOwnerVersion, x.businessOwnerVersion) {
 		return ErrManagedConflict
+	}
+	if x.BusinessPlan != nil {
+		latest.custodyDashboard = x.custodyDashboard
+		if e = r.checkBusinessReportSnapshot(ctx, latest, x.BusinessPolicyStamp()); e != nil {
+			return e
+		}
 	}
 	if x.AdditionalCheck != nil {
 		return x.AdditionalCheck(ctx)
@@ -169,21 +208,73 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 		if number != expected {
 			return out, ErrManagedConflict
 		}
+		if kind == "publish" {
+			if err := guardCustodyPublication(ctx, tx, availabilityObject{report: id}, reviewID); err != nil {
+				return out, err
+			}
+		}
+		if kind != "publish" {
+			enrolled, err := enrolledReportAvailability(ctx, tx, id)
+			if err != nil {
+				return out, err
+			}
+			if enrolled {
+				return out, fmt.Errorf("%w: 已纳管报表须使用下线与恢复流程", ErrManagedConflict)
+			}
+		}
 		var selected *int64
+		var initialBusinessOwner *int64
 		if kind != "unpublish" {
 			var accountID, targetVersion int64
-			var decider *int64
+			var decider, ownerVersion *int64
+			var submitter int64
+			var manifestHash, validationID string
 			var raw []byte
-			e = tx.QueryRow(ctx, `SELECT rv.account_id,rv.manifest,v.number,rv.decided_by FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id WHERE rv.id=$1 AND v.report_id=$2 AND rv.status='approved'`, reviewID, id).Scan(&accountID, &raw, &targetVersion, &decider)
+			e = tx.QueryRow(ctx, `SELECT rv.account_id,rv.manifest,v.number,rv.decided_by,COALESCE(v.submitted_by,0),rv.manifest_hash,rv.validation_id::text,p.business_owner_version
+				FROM sys_report_reviews rv JOIN sys_report_versions v ON v.id=rv.version_id
+				JOIN sys_report_validations p ON p.id=rv.validation_id AND p.review_id=rv.id
+				WHERE rv.id=$1 AND v.report_id=$2 AND rv.status='approved'`, reviewID, id).Scan(&accountID, &raw, &targetVersion, &decider, &submitter, &manifestHash, &validationID, &ownerVersion)
 			if e != nil {
 				return out, ErrManagedConflict
 			}
-			if _, _, _, e = r.loadAccount(ctx, tx, accountID); e != nil {
+			conn, _, account, e := r.loadAccount(ctx, tx, accountID)
+			if e != nil {
 				return out, e
 			}
 			var m ReportManifest
 			if e = json.Unmarshal(raw, &m); e != nil {
 				return out, e
+			}
+			x := &ManagedExecution{ReportID: id, ReviewID: reviewID, PublicationNo: number + 1, AccountID: accountID,
+				AccountVersion: account.Version, Generation: account.Generation, Connection: conn, Manifest: m, Hash: manifestHash}
+			if e = r.useBusinessReportBinding(ctx, tx, x); e != nil {
+				return out, e
+			}
+			if x.businessBinding != "" {
+				if e = lockBusinessReportPolicy(ctx, tx, x.businessBinding); e != nil {
+					return out, e
+				}
+				var definition []byte
+				if e = tx.QueryRow(ctx, `SELECT definition FROM sys_report_versions WHERE id=$1 AND report_id=$2`, m.VersionID, id).Scan(&definition); e != nil {
+					return out, managedError(e)
+				}
+				if e = json.Unmarshal(definition, &x.Definition); e != nil {
+					return out, e
+				}
+				if m.ContentHash != reportDigest(x.Definition) {
+					return out, ErrManagedConflict
+				}
+				if _, _, _, e = r.businessReportPolicy(ctx, tx, x); e != nil {
+					return out, e
+				}
+				if kind == "publish" {
+					if decider == nil {
+						return out, ErrManagedConflict
+					}
+					if e = r.confirmReportPublicationPolicy(ctx, tx, x, *decider, submitter, validationID); e != nil {
+						return out, e
+					}
+				}
 			}
 			contractHash := ""
 			if m.Contract != nil {
@@ -204,12 +295,28 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 			// conditions. A historical restore still validates the current
 			// account, audience, impact and publication number above/below.
 			if !wasPublished {
-				var role *string
-				if e = tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, decider).Scan(&role); e != nil {
+				var eligible bool
+				if e = tx.QueryRow(ctx, `SELECT dbhub_has_capability($1,'report_review')`, decider).Scan(&eligible); e != nil {
 					return out, e
 				}
-				if role == nil || *role != "admin" || decider == nil {
+				if !eligible || decider == nil {
 					return out, ErrManagedConflict
+				}
+				basis, err := reportBusinessOwnerForReview(ctx, tx, reviewID)
+				if err != nil {
+					return out, err
+				}
+				if err = basis.checkValidation(ownerVersion); err != nil {
+					return out, err
+				}
+				if err = reportBusinessReviewer(ctx, tx, basis, *decider); err != nil {
+					return out, err
+				}
+				if basis.current == nil && basis.proposed != nil {
+					if err = checkReportBusinessSupervisor(ctx, tx, *basis.proposed); err != nil {
+						return out, err
+					}
+					initialBusinessOwner = basis.proposed
 				}
 				if e = reportReviewerBenefit(ctx, tx, reviewID, m.UserIDs, m.GroupIDs, *decider); e != nil {
 					return out, e
@@ -246,25 +353,35 @@ func (r *ManagedReportRepository) Release(ctx context.Context, key string, id, e
 		} else if active == nil {
 			return out, ErrManagedConflict
 		}
-		out.Version = number + 1
-		e = tx.QueryRow(ctx, `INSERT INTO sys_report_releases(report_id,number,kind,review_id,performed_by,performer_name) VALUES($1,$2,$3,$4,$5,(SELECT username FROM sys_users WHERE id=$5)) RETURNING id`, id, out.Version, kind, selected, ActorID(ctx)).Scan(&out.ID)
-		if e != nil {
-			return out, e
+		if initialBusinessOwner != nil {
+			if _, e = tx.Exec(ctx, `UPDATE sys_managed_reports SET business_owner_id=$2,business_owner_version=1 WHERE id=$1`, id, *initialBusinessOwner); e != nil {
+				return out, e
+			}
 		}
-		var next *int64
-		if selected != nil {
-			next = &out.ID
-		}
-		_, e = tx.Exec(ctx, `UPDATE sys_managed_reports SET publication_no=$2,active_release_id=$3,updated_at=now() WHERE id=$1`, id, out.Version, next)
-		if e == nil && selected != nil {
-			_, e = tx.Exec(ctx, `UPDATE sys_access_requests ar SET status='fulfilled',actual_publication_no=$2,version=version+1 WHERE ar.review_id=$1 AND ar.status='approved_pending_release' AND ar.expires_at>now() AND (ar.target_user_id IS NULL OR dbhub_member_role(ar.target_user_id) IS NOT NULL) AND EXISTS(SELECT 1 FROM sys_report_reviews rv WHERE rv.id=$1 AND ((rv.manifest->'user_ids') @> jsonb_build_array(ar.target_user_id) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(rv.manifest->'group_ids') g JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=ar.target_user_id) OR rv.manifest->'group_ids' @> jsonb_build_array(ar.target_group_id)))`, reviewID, out.Version)
-		}
-		if e == nil && kind == "unpublish" {
-			_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'cancelled' END,decision_reason='报表已下线',version=version+1 WHERE report_id=$1 AND status IN('pending','processing','approved_pending_release')`, id)
-		}
-		return out, e
+		return appendReportRelease(ctx, tx, id, number, kind, selected, true)
 	})
 }
+func appendReportRelease(ctx context.Context, tx pgx.Tx, id, number int64, kind string, selected *int64, fulfillAccess bool) (ReportCommandResult, error) {
+	out := ReportCommandResult{}
+	out.Version = number + 1
+	e := tx.QueryRow(ctx, `INSERT INTO sys_report_releases(report_id,number,kind,review_id,performed_by,performer_name) VALUES($1,$2,$3,$4,$5,(SELECT username FROM sys_users WHERE id=$5)) RETURNING id`, id, out.Version, kind, selected, ActorID(ctx)).Scan(&out.ID)
+	if e != nil {
+		return out, e
+	}
+	var next *int64
+	if selected != nil {
+		next = &out.ID
+	}
+	_, e = tx.Exec(ctx, `UPDATE sys_managed_reports SET publication_no=$2,active_release_id=$3,updated_at=now() WHERE id=$1`, id, out.Version, next)
+	if e == nil && selected != nil && fulfillAccess {
+		_, e = tx.Exec(ctx, `UPDATE sys_access_requests ar SET status='fulfilled',actual_publication_no=$2,version=version+1 WHERE ar.review_id=$1 AND ar.status='approved_pending_release' AND ar.expires_at>now() AND (ar.target_user_id IS NULL OR dbhub_member_role(ar.target_user_id) IS NOT NULL) AND EXISTS(SELECT 1 FROM sys_report_reviews rv WHERE rv.id=$1 AND ((rv.manifest->'user_ids') @> jsonb_build_array(ar.target_user_id) OR EXISTS(SELECT 1 FROM jsonb_array_elements_text(rv.manifest->'group_ids') g JOIN sys_user_group_members gm ON gm.group_id=g.value::bigint WHERE gm.user_id=ar.target_user_id) OR rv.manifest->'group_ids' @> jsonb_build_array(ar.target_group_id)))`, *selected, out.Version)
+	}
+	if e == nil && kind == "unpublish" {
+		_, e = tx.Exec(ctx, `UPDATE sys_access_requests SET status=CASE WHEN expires_at<=now() THEN 'expired' ELSE 'cancelled' END,decision_reason='报表已下线',version=version+1 WHERE report_id=$1 AND status IN('pending','processing','approved_pending_release')`, id)
+	}
+	return out, e
+}
+
 func (r *ManagedReportRepository) Releases(ctx context.Context, id int64, limit, offset int) ([]ReportRelease, int64, error) {
 	if _, e := r.Get(ctx, id); e != nil {
 		return nil, 0, e
@@ -289,16 +406,25 @@ func (r *ManagedReportRepository) Releases(ctx context.Context, id int64, limit,
 	return out, total, rows.Err()
 }
 func (r *ManagedReportRepository) Published(ctx context.Context, q string, limit, offset int) ([]PublishedReport, int64, error) {
+	return r.published(ctx, q, limit, offset, false)
+}
+func (r *ManagedReportRepository) MetricCatalog(ctx context.Context, q string, limit, offset int) ([]PublishedReport, int64, error) {
+	return r.published(ctx, q, limit, offset, true)
+}
+func (r *ManagedReportRepository) published(ctx context.Context, q string, limit, offset int, onlyContracts bool) ([]PublishedReport, int64, error) {
 	base := ` FROM sys_managed_reports m JOIN sys_report_releases re ON re.id=m.active_release_id
  JOIN sys_report_reviews rv ON rv.id=re.review_id AND rv.status='approved' JOIN sys_report_versions v ON v.id=rv.version_id
  JOIN sys_report_accounts a ON a.id=rv.account_id AND a.enabled JOIN sys_source_definitions d ON d.id=a.definition_revision_id AND d.enabled AND d.visibility='global'
- WHERE ($1='' OR v.definition->>'name' ILIKE '%'||$1||'%' OR v.definition->>'description' ILIKE '%'||$1||'%') AND ` + reportAudience
+ WHERE ($1='' OR v.definition->>'name' ILIKE '%'||$1||'%' OR v.definition->>'description' ILIKE '%'||$1||'%' OR v.definition->'data_contract'->>'semantic_key' ILIKE '%'||$1||'%' OR v.definition->'data_contract'->>'meaning' ILIKE '%'||$1||'%') AND ` + reportAudience
+	if onlyContracts {
+		base += ` AND NULLIF(v.definition->'data_contract','null'::jsonb) IS NOT NULL`
+	}
 	args := []any{q, ActorID(ctx)}
 	var total int64
 	if e := r.pool.QueryRow(ctx, `SELECT count(*)`+base, args...).Scan(&total); e != nil {
 		return nil, 0, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT m.id,v.definition->>'name',v.definition->>'description',v.number,m.publication_no,v.definition->>'chart_type',v.definition->'chart_config'`+base+` ORDER BY re.created_at DESC,m.id DESC LIMIT $3 OFFSET $4`, append(args, limit, offset)...)
+	rows, e := r.pool.Query(ctx, `SELECT m.id,v.definition->>'name',v.definition->>'description',v.number,m.publication_no,v.definition->>'chart_type',v.definition->'chart_config',COALESCE(v.definition->'parameters','[]'::jsonb),v.definition->'data_contract',v.definition->'export_policy'`+base+` ORDER BY re.created_at DESC,m.id DESC LIMIT $3 OFFSET $4`, append(args, limit, offset)...)
 	if e != nil {
 		return nil, 0, e
 	}
@@ -306,7 +432,7 @@ func (r *ManagedReportRepository) Published(ctx context.Context, q string, limit
 	out := []PublishedReport{}
 	for rows.Next() {
 		var p PublishedReport
-		if e = rows.Scan(&p.ID, &p.Name, &p.Description, &p.Version, &p.PublicationNo, &p.ChartType, &p.ChartConfig); e != nil {
+		if e = rows.Scan(&p.ID, &p.Name, &p.Description, &p.Version, &p.PublicationNo, &p.ChartType, &p.ChartConfig, &p.Parameters, &p.DataContract, &p.ExportPolicy); e != nil {
 			return nil, 0, e
 		}
 		out = append(out, p)

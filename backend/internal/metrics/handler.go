@@ -63,6 +63,9 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Internal("查询最近记录失败", err))
 		return
 	}
+	if claims.IAM != nil && claims.IAM.Target && !auth.HasAction(claims, "query.read") {
+		recent = nil
+	}
 
 	httpx.OK(w, map[string]any{
 		"kpi": map[string]int64{

@@ -16,7 +16,7 @@ func NewAutomation(cfg *config.Config, log *slog.Logger, deps *Deps) *automation
 		return nil
 	}
 	drivers := connectorruntime.NewConfigured(cfg.JDBCURL, cfg.JDBCToken)
-	return &automation.Service{Repo: db.NewAutomationRepository(deps.UserRepo), Users: deps.UserRepo, Conns: deps.Conns, Tunnels: deps.Tunnels, Assets: assetapi.NewHandler(deps.Conns, deps.Tunnels, deps.Meta, deps.UserRepo, deps.History, log, drivers), Drivers: drivers, Journal: deps.AuditJournal, Config: cfg.Operations, Log: log}
+	return &automation.Service{IAMFingerprint:deps.IAMRouteFingerprint,Repo: db.NewAutomationRepository(deps.UserRepo), Users: deps.UserRepo, Conns: deps.Conns, Tunnels: deps.Tunnels, Assets: assetapi.NewHandler(deps.Conns, deps.Tunnels, deps.Meta, deps.UserRepo, deps.History, log, drivers), Drivers: drivers, Journal: deps.AuditJournal, Config: cfg.Operations, Log: log, Subscriptions: deps.Conns.ReportSubscriptions(), Queries: deps.Queries, Webhook: cfg.NotificationWebhook}
 }
 func StartAutomation(ctx context.Context, cfg *config.Config, log *slog.Logger, deps *Deps) *automation.Service {
 	service := NewAutomation(cfg, log, deps)

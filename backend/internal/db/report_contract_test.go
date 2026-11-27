@@ -98,3 +98,58 @@ func TestPresentationKeepsContractBoundary(t *testing.T) {
 		t.Fatal("display name collided with an original field")
 	}
 }
+
+func TestContractAdditionalChartFields(t *testing.T) {
+	heatmap := &DataContract{
+		ChartType: "heatmap",
+		Schema: []ContractColumn{
+			{Name: "city", Type: "string"},
+			{Name: "period", Type: "date"},
+			{Name: "amount", Type: "number"},
+		},
+		Dimensions: []string{"city", "period"},
+		Metrics:    []string{"amount"},
+	}
+	heatmapConfig := json.RawMessage(`{"dimension":"city","heatmap_y":"period","metrics":["amount"]}`)
+	if err := ValidateContractMapping(heatmap, heatmapConfig); err != nil {
+		t.Fatal(err)
+	}
+	heatmap.Dimensions = []string{"period", "city"}
+	if err := ValidateContractMapping(heatmap, heatmapConfig); err == nil {
+		t.Fatal("heatmap axes were swapped without updating the declared mapping")
+	}
+
+	scatter := &DataContract{
+		ChartType:  "scatter",
+		Schema:     []ContractColumn{{Name: "weight", Type: "lossless_numeric"}, {Name: "amount", Type: "integer"}},
+		Dimensions: []string{"weight"},
+		Metrics:    []string{"amount"},
+	}
+	scatterConfig := json.RawMessage(`{"dimension":"weight","metrics":["amount"]}`)
+	if err := ValidateContractMapping(scatter, scatterConfig); err != nil {
+		t.Fatal(err)
+	}
+	for i := range scatter.Schema {
+		kind := scatter.Schema[i].Type
+		scatter.Schema[i].Type = "string"
+		if err := ValidateContractMapping(scatter, scatterConfig); err == nil {
+			t.Fatalf("non-numeric scatter axis %s was accepted", scatter.Schema[i].Name)
+		}
+		scatter.Schema[i].Type = kind
+	}
+
+	histogram := &DataContract{
+		ChartType:  "histogram",
+		Schema:     []ContractColumn{{Name: "bucket", Type: "string"}, {Name: "frequency", Type: "integer"}},
+		Dimensions: []string{"bucket"},
+		Metrics:    []string{"frequency"},
+	}
+	histogramConfig := json.RawMessage(`{"dimension":"bucket","metrics":["frequency"]}`)
+	if err := ValidateContractMapping(histogram, histogramConfig); err != nil {
+		t.Fatal(err)
+	}
+	histogram.Schema[1].Type = "number"
+	if err := ValidateContractMapping(histogram, histogramConfig); err == nil {
+		t.Fatal("histogram frequency without an integer declaration was accepted")
+	}
+}

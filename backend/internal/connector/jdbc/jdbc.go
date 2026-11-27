@@ -220,7 +220,11 @@ func (s *Session) Execute(ctx context.Context, q connector.ExecuteRequest) (*con
 		return nil, connector.Unsupported("此模板未启用 SQL 方言")
 	}
 	opt := q.Options
-	if opt.MaxRows <= 0 || opt.MaxRows > 10000 {
+	rowLimit := 10000
+	if opt.LargeResult {
+		rowLimit = 100000
+	}
+	if opt.MaxRows <= 0 || opt.MaxRows > rowLimit {
 		opt.MaxRows = 1000
 	}
 	if opt.Timeout <= 0 || opt.Timeout > 120*time.Second {
@@ -263,6 +267,7 @@ func (s *Session) Execute(ctx context.Context, q connector.ExecuteRequest) (*con
 	p["read_only"] = q.ReadOnly
 	p["cursor"] = q.Query
 	p["max_rows"] = opt.MaxRows
+	p["large_result"] = opt.LargeResult
 	p["max_bytes"] = opt.MaxBytes
 	p["budget_ms"] = budget(ctx, 120000)
 	var result struct {

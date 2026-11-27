@@ -19,6 +19,7 @@ func UserStoreUnavailable(err error) bool {
 
 // User 系统用户实体（对齐 sys_users 表）。
 type User struct {
+	AuthVersion  int64
 	ID           int64
 	Username     string
 	Role         string

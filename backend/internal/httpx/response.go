@@ -16,8 +16,12 @@ const (
 	CodeUnauthorized = 40100
 	CodeForbidden    = 40300
 	CodeNotFound     = 40400
-	CodeConflict     = 40900
-	CodeInternal     = 50000
+	// CodeRedisKeyNotFound distinguishes an absent key from an unavailable source.
+	CodeRedisKeyNotFound = 40401
+	CodeConflict         = 40900
+	// CodeQueryDeliveryBlocked preserves the execution receipt while withholding its result.
+	CodeQueryDeliveryBlocked = 40902
+	CodeInternal             = 50000
 )
 
 // AppError 业务错误统一结构，Err 为内部错误，不会序列化暴露给前端。

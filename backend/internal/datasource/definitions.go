@@ -27,6 +27,10 @@ func (h *Handler) Definitions(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, e)
 		return
 	}
+	if filter.View == "managed" && !db.ActorAction(r.Context(), "source.definition.manage", isAdmin(claimsOf(r))) {
+		httpx.Fail(w, httpx.Forbidden("当前身份无权管理共享数据源"))
+		return
+	}
 	items, total, e := h.conns.SearchDefinitions(r.Context(), filter)
 	if e != nil {
 		httpx.Fail(w, httpx.Internal("加载数据源目录失败", e))

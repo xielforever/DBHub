@@ -54,7 +54,7 @@ func (r *ManagedReportRepository) DashboardDependencies(ctx context.Context, id 
 		}
 		item.Kind = kind
 		item.Name = d.Name
-		if owner != ActorID(ctx) && !ActorAdmin(ctx) {
+		if owner != ActorID(ctx) && !ActorDashboardReviewer(ctx) {
 			item.ID = 0
 			item.Name = "受限仪表盘"
 			item.Version = 0

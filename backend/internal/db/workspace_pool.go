@@ -5,13 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"strconv"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/iam"
 )
 
 type workspaceKey struct{}
@@ -39,8 +40,10 @@ var ErrWorkspaceRequired = errors.New("请选择有效工作空间")
 // Every metadata operation uses a non-owner connection and transaction-local
 // scope. Commit/rollback clears all GUCs before a connection returns to the pool.
 type ScopedPool struct {
+	root        *pgxpool.Pool
 	runtime     *pgxpool.Pool
 	maintenance *pgxpool.Pool
+	leases      *pgxpool.Pool
 	role        string
 }
 
@@ -70,26 +73,16 @@ func configureScopedRuntime(ctx context.Context, owner *pgxpool.Pool) error {
 	role := "dbhub_runtime_" + hex.EncodeToString(key[:8])
 	password := hex.EncodeToString(key)
 	quoted := pgx.Identifier{role}.Sanitize()
-	if _, e := owner.Exec(ctx, "CREATE ROLE "+quoted+" LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '"+password+"'"); e != nil {
-		return fmt.Errorf("创建受限元数据运行角色失败: %w", e)
-	}
 	cleanup := func() {
 		_, _ = owner.Exec(context.WithoutCancel(ctx), "DROP OWNED BY "+quoted)
 		_, _ = owner.Exec(context.WithoutCancel(ctx), "DROP ROLE "+quoted)
 	}
-	grants := []string{"GRANT USAGE ON SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + quoted,
-		"GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + quoted,
-		"GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + quoted,
-		"REVOKE INSERT,UPDATE,DELETE ON sys_users,sys_roles,sys_workspaces,sys_workspace_members,sys_workspace_creation_commands,schema_migrations FROM " + quoted,
-		"REVOKE SELECT ON sys_users FROM " + quoted,
-		"GRANT SELECT(id,username,email,role_id,is_active,last_login_at,created_at,updated_at) ON sys_users TO " + quoted}
-	for _, sql := range grants {
-		if _, e := owner.Exec(ctx, sql); e != nil {
-			cleanup()
-			return e
-		}
+	if e := provisionScopedRuntime(ctx, owner, schema, quoted, password); e != nil {
+		return e
 	}
 	cfg := owner.Config().Copy()
+	cfg.ConnConfig.RuntimeParams["dbhub.runtime_bridge"] = iam.RuntimeBridge
+	cfg.ConnConfig.RuntimeParams["application_name"] = "dbhub-iam:" + iam.RuntimeBridge + ":runtime"
 	cfg.ConnConfig.User = role
 	cfg.ConnConfig.Password = password
 	cfg.MinConns = 0
@@ -103,16 +96,123 @@ func configureScopedRuntime(ctx context.Context, owner *pgxpool.Pool) error {
 		cleanup()
 		return e
 	}
-	scopedRegistry.Store(owner, &ScopedPool{runtime: runtime, maintenance: owner, role: role})
+	leaseCfg := owner.Config().Copy()
+	leaseCfg.ConnConfig.User = role
+	leaseCfg.ConnConfig.Password = password
+	leaseCfg.ConnConfig.RuntimeParams["dbhub.runtime_bridge"] = iam.RuntimeBridge
+	leaseCfg.ConnConfig.RuntimeParams["application_name"] = "dbhub-iam:" + iam.RuntimeBridge + ":lease"
+	leaseCfg.MinConns = 0
+	// Keep the configured application limit. A small floor lets two source
+	// workers coexist with an HTTP cancellation/read request on tiny test pools.
+	leaseCfg.MaxConns = max(owner.Config().MaxConns, 4)
+	leases, e := pgxpool.NewWithConfig(ctx, leaseCfg)
+	if e != nil {
+		runtime.Close()
+		cleanup()
+		return e
+	}
+	maintenanceCfg := owner.Config().Copy()
+	maintenanceCfg.MinConns = 0
+	maintenanceCfg.ConnConfig.RuntimeParams["dbhub.runtime_bridge"] = iam.RuntimeBridge
+	maintenanceCfg.ConnConfig.RuntimeParams["application_name"] = "dbhub-iam:" + iam.RuntimeBridge + ":maintenance"
+	maintenance, e := pgxpool.NewWithConfig(ctx, maintenanceCfg)
+	if e != nil {
+		leases.Close()
+		runtime.Close()
+		cleanup()
+		return e
+	}
+	managed := &ScopedPool{runtime: runtime, maintenance: maintenance, leases: leases, role: role, root: owner}
+	scopedRegistry.Store(owner, managed)
+	scopedRegistry.Store(maintenance, managed)
 	return nil
 }
+
+// provisionScopedRuntime publishes a fresh limited role and all of its original
+// grants atomically. One catalog transaction avoids dozens of small commits on
+// every process start. The migration lock also keeps the protected-table roster
+// stable until all IAM mutation grants have been removed.
+func provisionScopedRuntime(ctx context.Context, owner *pgxpool.Pool, schema, quoted, password string) error {
+	tx, err := owner.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.WithoutCancel(ctx))
+	var database string
+	if err = tx.QueryRow(ctx, `SELECT current_database()`).Scan(&database); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_database()||':'||current_schema()||':dbhub-migrate',0))`); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname=current_schema() AND tablename LIKE 'sys_iam_%' ORDER BY tablename`)
+	if err != nil {
+		return err
+	}
+	var protected []string
+	for rows.Next() {
+		var table string
+		if err = rows.Scan(&table); err != nil {
+			break
+		}
+		protected = append(protected, pgx.Identifier{schema, table}.Sanitize())
+	}
+	rows.Close()
+	if err == nil {
+		err = rows.Err()
+	}
+	if err != nil {
+		return err
+	}
+	statements := []string{
+		"CREATE ROLE " + quoted + " LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '" + password + "'",
+		"GRANT CONNECT ON DATABASE " + pgx.Identifier{database}.Sanitize() + " TO " + quoted,
+		"GRANT USAGE ON SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + quoted,
+		"GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + quoted,
+		"GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + quoted,
+		"REVOKE INSERT,UPDATE,DELETE ON sys_users,sys_roles,sys_workspaces,sys_workspace_members,sys_workspace_creation_commands,schema_migrations FROM " + quoted,
+		"REVOKE INSERT,UPDATE,DELETE ON sys_iam_capabilities,sys_iam_menus,sys_iam_workspace_state,sys_iam_role_revisions,sys_iam_assignments,sys_iam_delegations,sys_iam_proposals,sys_iam_bundles,sys_iam_legacy_envelopes,sys_iam_revocations FROM " + quoted,
+		"REVOKE SELECT ON sys_users FROM " + quoted,
+		"GRANT SELECT(id,username,email,role_id,is_active,last_login_at,created_at,updated_at) ON sys_users TO " + quoted,
+	}
+	for _, table := range protected {
+		statements = append(statements, "REVOKE INSERT,UPDATE,DELETE ON "+table+" FROM "+quoted)
+	}
+	for _, guard := range []string{"dbhub_connection_list(TEXT,TEXT,BIGINT)", "dbhub_inbox_todos(BIGINT,BOOLEAN)", "dbhub_iam_runtime_current()", "dbhub_iam_runtime_admit(BIGINT,BIGINT,TEXT,BIGINT,BIGINT,BIGINT,TEXT,TEXT)", "dbhub_iam_builtin_role(BIGINT,TEXT)"} {
+		statements = append(statements, "GRANT EXECUTE ON FUNCTION "+pgx.Identifier{schema}.Sanitize()+"."+guard+" TO "+quoted)
+	}
+	batch := &pgx.Batch{}
+	for _, statement := range statements {
+		batch.Queue(statement)
+	}
+	results := tx.SendBatch(ctx, batch)
+	for range statements {
+		if _, err = results.Exec(); err != nil {
+			_ = results.Close()
+			return err
+		}
+	}
+	if err = results.Close(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 func CloseScopedRuntime(owner *pgxpool.Pool) {
 	if v, ok := scopedRegistry.LoadAndDelete(owner); ok {
 		p := v.(*ScopedPool)
+		scopedRegistry.Delete(p.maintenance)
+		scopedRegistry.Delete(p.root)
 		p.runtime.Close()
+		if p.leases != nil {
+			p.leases.Close()
+		}
+		if p.maintenance != p.root {
+			p.maintenance.Close()
+		}
 		q := pgx.Identifier{p.role}.Sanitize()
-		_, _ = owner.Exec(context.Background(), "DROP OWNED BY "+q)
-		_, _ = owner.Exec(context.Background(), "DROP ROLE "+q)
+		_, _ = p.root.Exec(context.Background(), "DROP OWNED BY "+q)
+		_, _ = p.root.Exec(context.Background(), "DROP ROLE "+q)
 	}
 }
 func (p *ScopedPool) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -138,7 +238,15 @@ func (p *ScopedPool) begin(ctx context.Context, options pgx.TxOptions) (pgx.Tx, 
 	} else if c, ok := actorRole(ctx); ok {
 		role = c
 	}
-	_, e = tx.Exec(ctx, `SELECT set_config('dbhub.workspace_id',$1,true),set_config('dbhub.actor_id',$2,true),set_config('dbhub.actor_role',$3,true),set_config('dbhub.member_version',$4,true)`, strconv.FormatInt(WorkspaceID(ctx), 10), strconv.FormatInt(ActorID(ctx), 10), role, strconv.FormatInt(MemberEpoch(ctx), 10))
+	authorizationEpoch, configVersion := int64(0), int64(0)
+	if c, ok := auth.ClaimsFromContext(ctx); ok && c != nil && c.IAM != nil {
+		authorizationEpoch, configVersion = c.IAM.AuthorizationEpoch, c.IAM.ConfigVersion
+	}
+	action := ""
+	if c, ok := auth.ClaimsFromContext(ctx); ok && c != nil {
+		action = c.CurrentAction
+	}
+	_, e = tx.Exec(ctx, `SELECT set_config('dbhub.workspace_id',$1,true),set_config('dbhub.actor_id',$2,true),set_config('dbhub.actor_role',$3,true),set_config('dbhub.member_version',$4,true),set_config('dbhub.authorization_epoch',$5,true),set_config('dbhub.config_version',$6,true),set_config('dbhub.action_id',$7,true)`, strconv.FormatInt(WorkspaceID(ctx), 10), strconv.FormatInt(ActorID(ctx), 10), role, strconv.FormatInt(MemberEpoch(ctx), 10), strconv.FormatInt(authorizationEpoch, 10), strconv.FormatInt(configVersion, 10), action)
 	if e != nil {
 		_ = tx.Rollback(context.WithoutCancel(ctx))
 		return nil, e

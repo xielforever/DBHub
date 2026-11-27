@@ -16,20 +16,25 @@ import (
 	"github.com/user/dbhub/internal/config"
 	"github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
+	"github.com/user/dbhub/internal/queryapi"
 )
 
 type Service struct {
-	Repo    *db.AutomationRepository
-	Users   *db.UserRepository
-	Conns   *db.ConnectionRepository
-	Tunnels *db.TunnelRepository
-	Assets  *assetapi.Handler
-	Drivers *connectorruntime.Runtime
-	Journal *auditlog.Journal
-	Config  config.OperationsConfig
-	Log     *slog.Logger
-	cancel  context.CancelFunc
-	done    chan struct{}
+	IAMFingerprint string
+	Repo           *db.AutomationRepository
+	Users          *db.UserRepository
+	Conns          *db.ConnectionRepository
+	Tunnels        *db.TunnelRepository
+	Assets         *assetapi.Handler
+	Drivers        *connectorruntime.Runtime
+	Journal        *auditlog.Journal
+	Config         config.OperationsConfig
+	Log            *slog.Logger
+	Subscriptions  *db.ReportSubscriptionRepository
+	Queries        *queryapi.Handler
+	Webhook        config.NotificationWebhookConfig
+	cancel         context.CancelFunc
+	done           chan struct{}
 }
 
 func (s *Service) Start(parent context.Context) {
@@ -49,6 +54,21 @@ func (s *Service) Start(parent context.Context) {
 				}
 				if _, e := s.RunOne(ctx); e != nil && !errors.Is(e, db.ErrNotFound) && ctx.Err() == nil {
 					s.Log.Warn("后台数据源任务暂未完成", "stage", "worker")
+				}
+				if _, e := s.RunSubscription(ctx); e != nil && !errors.Is(e, db.ErrNotFound) && ctx.Err() == nil {
+					s.Log.Warn("订阅任务暂未完成", "stage", "subscription")
+				}
+				if _, e := s.RunFormalExport(ctx); e != nil && !errors.Is(e, db.ErrNotFound) && ctx.Err() == nil {
+					s.Log.Warn("正式报表导出任务暂未完成", "stage", "report-export")
+				}
+				if _, e := s.RunTeamDelivery(ctx); e != nil && !errors.Is(e, db.ErrNotFound) && ctx.Err() == nil {
+					s.Log.Warn("团队订阅期次暂未完成", "stage", "report-team-delivery")
+				}
+				if _, e := s.RunDashboardDelivery(ctx); e != nil && !errors.Is(e, db.ErrNotFound) && ctx.Err() == nil {
+					s.Log.Warn("仪表盘交付暂未完成", "stage", "dashboard-delivery")
+				}
+				if e := s.RunWebhook(ctx); e != nil && !errors.Is(e, db.ErrNotFound) && ctx.Err() == nil {
+					s.Log.Warn("外部投递暂未完成", "stage", "webhook")
 				}
 				select {
 				case <-ctx.Done():
@@ -142,6 +162,20 @@ func (s *Service) RunOne(parent context.Context) (*db.SourceTask, error) {
 	}
 	started := time.Now()
 	ctx, e = s.actorContext(ctx, t.ActorID, t.WorkspaceID, t.MemberVersion)
+	if e == nil && t.PermissionBridge != "" && t.PermissionBridge != "legacy-frozen-v1" && t.PermissionBridge != "phase1-bridge-2" {
+		e = db.ErrAutomationDenied
+	}
+	var release func()
+	if e == nil {
+		action := "connection.manage"
+		if t.Kind == "check" {
+			action = "connection.use"
+		}
+		ctx, release, e = s.iamTaskLease(ctx, action, "source.definition.manage")
+		if release != nil {
+			defer release()
+		}
+	}
 	var conn *db.Connection
 	var password string
 	var tunnel *db.SSHTunnel
@@ -153,7 +187,7 @@ func (s *Service) RunOne(parent context.Context) (*db.SourceTask, error) {
 	}
 	if e == nil && t.Kind == "collect" {
 		claims, _ := auth.ClaimsFromContext(ctx)
-		if claims.Role != "admin" && claims.Role != "developer" {
+		if !auth.FunctionalAction(claims, "connection.manage", claims.Role == "admin" || claims.Role == "developer" || auth.HasCapability(claims, "datasource_manage")) && !(claims.IAM != nil && claims.IAM.Target && auth.HasAction(claims, "source.definition.manage")) {
 			e = db.ErrAutomationDenied
 		}
 	}
@@ -190,6 +224,9 @@ func (s *Service) RunOne(parent context.Context) (*db.SourceTask, error) {
 				case <-ticker.C:
 					pollCtx, pollCancel := context.WithTimeout(ctx, time.Second)
 					active, err := s.Repo.SourceTaskRunning(pollCtx, t)
+					if err == nil {
+						err = s.Users.IAMCurrent(pollCtx)
+					}
 					pollCancel()
 					if err != nil || !active {
 						cancel()
@@ -250,6 +287,11 @@ func (s *Service) RunOne(parent context.Context) (*db.SourceTask, error) {
 	}
 	finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
 	defer finishCancel()
+	if e == nil {
+		if currentErr := s.Users.IAMCurrent(context.WithoutCancel(ctx)); currentErr != nil {
+			status, phase, result, check = "stale", "当前资格已变化，结果未交付", map[string]any{}, nil
+		}
+	}
 	finished, finishErr := s.Repo.FinishSourceTask(finishCtx, t, status, phase, result, check)
 	rec.Status = 0
 	rec.Context.Outcome = "unknown"
@@ -272,6 +314,22 @@ func (s *Service) RunOne(parent context.Context) (*db.SourceTask, error) {
 func (s *Service) Tick(parent context.Context) error {
 	ctx, cancel := context.WithTimeout(parent, 15*time.Second)
 	defer cancel()
+	if s.IAMFingerprint != "" {
+		if e := s.Users.IAMHeartbeat(ctx, "worker", s.IAMFingerprint); e != nil {
+			return e
+		}
+	}
+	if e := s.Users.IAMSettleRestrictions(ctx); e != nil {
+		return e
+	}
+	if s.Subscriptions != nil {
+		if _, e := s.Subscriptions.GenerateDue(ctx); e != nil {
+			return e
+		}
+		if e := errors.Join(s.scheduleTeamPeriods(ctx), s.scheduleDashboardDeliveries(ctx), s.Subscriptions.PurgeDeliveryPayloads(ctx)); e != nil {
+			return e
+		}
+	}
 	if e := s.Repo.WorkerHeartbeat(ctx); e != nil {
 		return e
 	}
@@ -290,7 +348,7 @@ func (s *Service) Tick(parent context.Context) error {
 		}
 		if bindErr == nil && schedule.Kind == "collect" {
 			claims, _ := auth.ClaimsFromContext(actorCtx)
-			if (claims.Role != "admin" && claims.Role != "developer") || !s.Drivers.Capabilities(conn).Collect {
+			if (!auth.FunctionalAction(claims, "connection.manage", claims.Role == "admin" || claims.Role == "developer" || auth.HasCapability(claims, "datasource_manage")) && !(claims.IAM != nil && claims.IAM.Target && auth.HasAction(claims, "source.definition.manage"))) || !s.Drivers.Capabilities(conn).Collect {
 				bindErr = db.ErrAutomationDenied
 			}
 		}
@@ -303,7 +361,24 @@ func (s *Service) Tick(parent context.Context) error {
 			}
 			return bindErr
 		}
-		if e = s.Repo.TickSourceSchedule(actorCtx, schedule, conn); e != nil {
+		var release func()
+		action := "connection.manage"
+		if schedule.Kind == "check" {
+			action = "connection.use"
+		}
+		actorCtx, release, bindErr = s.iamTaskLease(actorCtx, action, "source.definition.manage")
+		if bindErr != nil {
+			if invalidBinding(bindErr) || errors.Is(bindErr, db.ErrAutomationDenied) {
+				if e = s.Repo.PauseSourceSchedule(ctx, schedule); e != nil {
+					return e
+				}
+				continue
+			}
+			return bindErr
+		}
+		e = s.Repo.TickSourceSchedule(actorCtx, schedule, conn)
+		release()
+		if e != nil {
 			return e
 		}
 	}

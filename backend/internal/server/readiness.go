@@ -28,7 +28,15 @@ func readinessHandler(cfg *config.Config, h *health.Handler, deps *Deps) http.Ha
 				unavailable()
 				return
 			}
-			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			timeout := cfg.ReadinessTimeout
+			if timeout <= 0 {
+				timeout = 2 * time.Second
+			}
+			redisTimeout := cfg.RedisProbeTimeout
+			if redisTimeout <= 0 {
+				redisTimeout = 500 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 			if deps.UserRepo != nil && deps.UserRepo.Ready(ctx) != nil {
 				unavailable()
@@ -36,7 +44,7 @@ func readinessHandler(cfg *config.Config, h *health.Handler, deps *Deps) http.Ha
 			}
 			// Bound command I/O even for clients whose default options ignore the
 			// context deadline during a socket read. The clone shares its pool.
-			if deps.Redis != nil && deps.Redis.WithTimeout(500*time.Millisecond).Ping(ctx).Err() != nil {
+			if deps.Redis != nil && deps.Redis.WithTimeout(redisTimeout).Ping(ctx).Err() != nil {
 				unavailable()
 				return
 			}

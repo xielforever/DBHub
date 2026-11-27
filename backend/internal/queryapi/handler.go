@@ -11,9 +11,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/user/dbhub/internal/auditctx"
 	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/connector"
 	target "github.com/user/dbhub/internal/connectorruntime"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
@@ -30,21 +32,36 @@ type Handler struct {
 	controls *db.QueryControls
 	metrics  *queryMetrics
 	drivers  *target.Runtime
+	scripts  *db.SnippetRepository
 }
 
 func NewHandler(conns *db.ConnectionRepository, tunnels *db.TunnelRepository, history *db.HistoryRepository, log *slog.Logger, controls *db.QueryControls, runtimes ...*target.Runtime) *Handler {
 	return &Handler{conns: conns, tunnels: tunnels, history: history, log: log, txs: newTransactions(), jobs: newJobs(), controls: controls, metrics: newQueryMetrics(), drivers: target.Default(runtimes)}
 }
 
+func (h *Handler) SetScripts(repo *db.SnippetRepository) { h.scripts = repo }
+
+// VerifyScriptDatabase checks the chosen database with the caller's connection.
+func (h *Handler) VerifyScriptDatabase(r *http.Request, id int64, database string) error {
+	_, _, closeTarget, err := h.openRelational(r, id, database)
+	if err == nil {
+		closeTarget()
+	}
+	return err
+}
+
 type executeRequest struct {
-	RequestID     string         `json:"request_id"`
-	ConnectionID  int64          `json:"connection_id"`
-	Database      string         `json:"database"`
-	SQL           string         `json:"sql"`
-	TransactionID string         `json:"transaction_id"`
-	TimeoutMS     int            `json:"timeout_ms"`
-	MaxRows       int            `json:"max_rows"`
-	Params        map[string]any `json:"params"`
+	previewContract  *db.DataContract
+	reportParameters []db.ReportParameter
+	RequestID        string         `json:"request_id"`
+	ConnectionID     int64          `json:"connection_id"`
+	Database         string         `json:"database"`
+	SQL              string         `json:"sql"`
+	TransactionID    string         `json:"transaction_id"`
+	TimeoutMS        int            `json:"timeout_ms"`
+	MaxRows          int            `json:"max_rows"`
+	Params           map[string]any `json:"params"`
+	ScriptID         int64          `json:"script_id,omitempty"`
 }
 
 func claimsOf(r *http.Request) *auth.Claims {
@@ -330,6 +347,11 @@ func (h *Handler) RedisValue(w http.ResponseWriter, r *http.Request) {
 	defer closeFn()
 	val, err := target.InspectKey(r.Context(), handle, key)
 	if err != nil {
+		var connectorErr *connector.Error
+		if errors.As(err, &connectorErr) && connectorErr.Kind == "not_found" {
+			httpx.Fail(w, httpx.New(httpx.CodeRedisKeyNotFound, "Redis 键已不存在", err))
+			return
+		}
 		httpx.Fail(w, httpx.BadRequest(safeErr(err)))
 		return
 	}
@@ -451,6 +473,9 @@ func safeErr(err error) string {
 func firstN(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }

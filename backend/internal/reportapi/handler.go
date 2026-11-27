@@ -7,7 +7,6 @@ import (
 	"github.com/user/dbhub/internal/auth"
 	"github.com/user/dbhub/internal/db"
 	"github.com/user/dbhub/internal/httpx"
-	"github.com/user/dbhub/internal/sqlparse"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -28,20 +27,24 @@ func NewHandler(reports *db.ReportRepository, conns *db.ConnectionRepository, lo
 func claimsOf(r *http.Request) *auth.Claims { c, _ := auth.ClaimsFromContext(r.Context()); return c }
 
 type createRequest struct {
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	ConnectionID int64           `json:"connection_id"`
-	Database     string          `json:"database"`
-	SQL          string          `json:"sql"`
-	ChartType    string          `json:"chart_type"`
-	ChartConfig  json.RawMessage `json:"chart_config"`
-	Visibility   string          `json:"visibility"`
-	RequestID    string          `json:"request_id"`
+	Parameters   []db.ReportParameter `json:"parameters"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
+	ConnectionID int64                `json:"connection_id"`
+	Database     string               `json:"database"`
+	SQL          string               `json:"sql"`
+	ChartType    string               `json:"chart_type"`
+	ChartConfig  json.RawMessage      `json:"chart_config"`
+	Visibility   string               `json:"visibility"`
+	RequestID    string               `json:"request_id"`
 }
 
 var creationKeyPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func validateFields(rep *db.Report) error {
+	if e := db.ValidateReportParameters(rep.Parameters); e != nil {
+		return httpx.BadRequest(e.Error())
+	}
 	rep.Name = strings.TrimSpace(rep.Name)
 	rep.Description = strings.TrimSpace(rep.Description)
 	rep.SQLText = strings.TrimSpace(rep.SQLText)
@@ -64,18 +67,15 @@ func validateFields(rep *db.Report) error {
 		return httpx.BadRequest("可见性非法")
 	}
 	switch rep.ChartType {
-	case "table", "bar", "line", "pie", "metric":
+	case "table", "bar", "line", "pie", "metric", "pivot", "stacked_bar", "dual_axis",
+		"horizontal_bar", "area", "scatter", "histogram", "funnel", "heatmap":
 	default:
 		return httpx.BadRequest("图表类型非法")
 	}
 	if rep.ChartConfig == nil {
 		rep.ChartConfig = json.RawMessage(`{}`)
 	}
-	var cfg struct {
-		Dimension string            `json:"dimension,omitempty"`
-		Metrics   []string          `json:"metrics,omitempty"`
-		Display   *db.ReportDisplay `json:"display,omitempty"`
-	}
+	var cfg db.ReportChartConfig
 	dec := json.NewDecoder(bytes.NewReader(rep.ChartConfig))
 	dec.DisallowUnknownFields()
 	if len(rep.ChartConfig) > 16384 || dec.Decode(&cfg) != nil || string(rep.ChartConfig) == "null" {
@@ -97,11 +97,14 @@ func validateFields(rep *db.Report) error {
 	if rep.ChartType != "table" && len(cfg.Metrics) == 0 {
 		return httpx.BadRequest("请选择数值指标")
 	}
-	if (rep.ChartType == "bar" || rep.ChartType == "line" || rep.ChartType == "pie") && strings.TrimSpace(cfg.Dimension) == "" {
+	if rep.ChartType != "table" && rep.ChartType != "metric" && strings.TrimSpace(cfg.Dimension) == "" {
 		return httpx.BadRequest("请选择维度字段")
 	}
 	if (rep.ChartType == "pie" || rep.ChartType == "metric") && len(cfg.Metrics) != 1 {
 		return httpx.BadRequest("饼图和指标卡只接受一个指标")
+	}
+	if err := db.ValidateReportChartExtras(rep.ChartType, cfg); err != nil {
+		return httpx.BadRequest(err.Error())
 	}
 	rep.ChartConfig, _ = json.Marshal(cfg)
 	return nil
@@ -118,7 +121,7 @@ func (h *Handler) validateConnection(r *http.Request, rep *db.Report) error {
 	if !caps.SQL || !caps.EnforcedReadOnly || conn.DefinitionRevisionID == nil {
 		return httpx.BadRequest("该连接暂不支持报表所需的只读 SQL")
 	}
-	if err = sqlparse.ValidateReport(rep.SQLText, conn.SQLDialect()); err != nil {
+	if err = db.ValidateReportSQL(rep.SQLText, conn.SQLDialect(), rep.Parameters); err != nil {
 		return httpx.BadRequest(err.Error())
 	}
 	rep.DefinitionRevisionID = *conn.DefinitionRevisionID
@@ -151,7 +154,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.BadRequest("创建编号必须为非空 UUID"))
 		return
 	}
-	rep := &db.Report{Name: in.Name, Description: in.Description, ConnectionID: in.ConnectionID, DatabaseName: in.Database, SQLText: in.SQL, ChartType: in.ChartType, ChartConfig: in.ChartConfig, Visibility: in.Visibility, OwnerUserID: claimsOf(r).Subject, CreationKey: in.RequestID}
+	rep := &db.Report{Parameters: in.Parameters, Name: in.Name, Description: in.Description, ConnectionID: in.ConnectionID, DatabaseName: in.Database, SQLText: in.SQL, ChartType: in.ChartType, ChartConfig: in.ChartConfig, Visibility: in.Visibility, OwnerUserID: claimsOf(r).Subject, CreationKey: in.RequestID}
 	if err := validateFields(rep); err != nil {
 		httpx.Fail(w, err)
 		return
@@ -240,15 +243,16 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRequest struct {
-	Name         *string         `json:"name"`
-	Description  *string         `json:"description"`
-	ConnectionID *int64          `json:"connection_id"`
-	Database     *string         `json:"database"`
-	SQL          *string         `json:"sql"`
-	ChartType    *string         `json:"chart_type"`
-	ChartConfig  json.RawMessage `json:"chart_config"`
-	Visibility   *string         `json:"visibility"`
-	Version      int64           `json:"version"`
+	Parameters   *[]db.ReportParameter `json:"parameters"`
+	Name         *string               `json:"name"`
+	Description  *string               `json:"description"`
+	ConnectionID *int64                `json:"connection_id"`
+	Database     *string               `json:"database"`
+	SQL          *string               `json:"sql"`
+	ChartType    *string               `json:"chart_type"`
+	ChartConfig  json.RawMessage       `json:"chart_config"`
+	Visibility   *string               `json:"visibility"`
+	Version      int64                 `json:"version"`
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +278,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.Fail(w, httpx.Conflict("报表版本已变化，请重新加载后核对"))
 		return
 	}
-	definitionChanged := in.ConnectionID != nil || in.Database != nil || in.SQL != nil || in.ChartType != nil || in.ChartConfig != nil
+	definitionChanged := in.ConnectionID != nil || in.Database != nil || in.SQL != nil || in.ChartType != nil || in.ChartConfig != nil || in.Parameters != nil
+	if in.Parameters != nil {
+		rep.Parameters = *in.Parameters
+	}
 	if in.Name != nil {
 		rep.Name = *in.Name
 	}

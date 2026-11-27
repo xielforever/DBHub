@@ -66,14 +66,18 @@ func (r *ManagedReportRepository) AccountConnection(ctx context.Context, id int6
 		return nil, "", e
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	if e = reportActor(ctx, tx, true, false); e != nil {
+	var allowed bool
+	if e = tx.QueryRow(ctx, `SELECT dbhub_scope_allowed() AND (dbhub_has_capability($1,'report_review') OR dbhub_has_capability($1,'datasource_manage'))`, ActorID(ctx)).Scan(&allowed); e != nil {
 		return nil, "", e
+	}
+	if !allowed {
+		return nil, "", ErrManagedDenied
 	}
 	c, p, _, e := r.loadAccount(ctx, tx, id)
 	return c, p, e
 }
 func (r *ManagedReportRepository) Accounts(ctx context.Context) ([]ReportAccount, error) {
-	if !ActorAdmin(ctx) {
+	if !ActorReportReviewer(ctx) && !ActorCapability(ctx, "datasource_manage") {
 		return nil, ErrManagedDenied
 	}
 	rows, e := r.pool.Query(ctx, `SELECT a.id,a.name,a.definition_revision_id,d.name,a.username,a.enabled,a.version,a.credential_generation,

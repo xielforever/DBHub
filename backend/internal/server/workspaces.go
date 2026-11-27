@@ -24,9 +24,19 @@ func workspaceRouting(next http.Handler) http.Handler {
 		const prefix = "/api/v1/workspaces/"
 		if strings.HasPrefix(r.URL.Path, prefix) {
 			parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, prefix), "/", 2)
-			if id, e := strconv.ParseInt(parts[0], 10, 64); e != nil || id <= 0 {
+			pathID, e := strconv.ParseInt(parts[0], 10, 64)
+			if e != nil || pathID <= 0 {
 				httpx.Fail(w, httpx.NotFound("工作空间不存在"))
 				return
+			}
+			// Also covers legacy members/policy routes which bind their path ID
+			// inside the handler rather than through workspaceAuth.
+			if value := r.Header.Get("X-Workspace-ID"); value != "" {
+				headerID, err := strconv.ParseInt(value, 10, 64)
+				if err != nil || headerID != pathID {
+					httpx.Fail(w, httpx.BadRequest("工作空间路径与请求头不一致"))
+					return
+				}
 			}
 			if len(parts) == 2 && parts[1] != "members" && parts[1] != "policy" && !strings.HasPrefix(parts[1], "members/") {
 				id, e := strconv.ParseInt(parts[0], 10, 64)
@@ -48,22 +58,37 @@ func workspaceAuth(users *db.UserRepository) middleware.Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id, _ := r.Context().Value(requestedWorkspace{}).(int64)
-			if value := r.Header.Get("X-Workspace-ID"); value != "" && id == 0 {
-				var e error
-				id, e = strconv.ParseInt(value, 10, 64)
-				if e != nil || id <= 0 {
+			if pathID := r.PathValue("workspace"); pathID != "" {
+				id, _ = strconv.ParseInt(pathID, 10, 64)
+			}
+			if value := r.Header.Get("X-Workspace-ID"); value != "" {
+				headerID, e := strconv.ParseInt(value, 10, 64)
+				if e != nil || headerID <= 0 {
 					httpx.Fail(w, httpx.NotFound("工作空间不存在"))
 					return
 				}
+				if id != 0 && id != headerID {
+					httpx.Fail(w, httpx.BadRequest("工作空间路径与请求头不一致"))
+					return
+				}
+				id = headerID
 			}
 			ctx, e := users.BindWorkspace(r.Context(), id)
 			if e != nil {
 				if errors.Is(e, db.ErrWorkspaceRequired) {
 					httpx.JSON(w, 428, httpx.Envelope{Code: 42800, Message: e.Error()})
-				} else {
+				} else if errors.Is(e, db.ErrNotFound) {
+					w.Header().Set("X-DBHub-Permission-State", "invalid_membership")
 					httpx.Fail(w, httpx.NotFound("工作空间不存在或成员资格已失效"))
+				} else {
+					w.Header().Set("X-DBHub-Permission-State", "unavailable")
+					httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "权限服务暂不可用，请稍后重试"})
 				}
 				return
+			}
+			if c, ok := auth.ClaimsFromContext(ctx); ok && c.IAM != nil {
+				w.Header().Set("X-DBHub-IAM-Epoch", strconv.FormatInt(c.IAM.AuthorizationEpoch, 10))
+				w.Header().Set("X-DBHub-IAM-Config", strconv.FormatInt(c.IAM.ConfigVersion, 10))
 			}
 			auditctx.Update(ctx, func(d *auditctx.Data) {
 				d.WorkspaceID = db.WorkspaceID(ctx)
@@ -75,26 +100,28 @@ func workspaceAuth(users *db.UserRepository) middleware.Middleware {
 				httpx.JSON(w, 503, httpx.Envelope{Code: 50300, Message: "审计存储暂不可用，请稍后重试"})
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(ctx))
+			functionalGuard(users, next, w, r.WithContext(ctx))
 		})
 	}
 }
-func registerWorkspaces(mux *http.ServeMux, users *db.UserRepository, identity middleware.Middleware) {
+func registerWorkspaces(mux httpx.RouteRegistrar, users *db.UserRepository, identity middleware.Middleware, navigationIdentity middleware.Middleware) {
+	memberAuth := func(next http.Handler) http.Handler { return identity(workspaceAuth(users)(next)) }
 	mux.Handle("GET /api/v1/platform/status", middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		httpx.OK(w, map[string]bool{"is_platform_admin": users.IsPlatformAdmin(r.Context())})
+		httpx.OK(w, map[string]bool{"is_platform_admin": users.IsPlatformAdmin(r.Context()), "can_governance_recover": users.HasRecoveryRegistration(r.Context())})
 	}), identity))
 	mux.Handle("GET /api/v1/workspaces", middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		out, e := users.Workspaces(r.Context())
+		out, e := users.WorkspacesDirectory(r.Context())
 		if e != nil {
 			httpx.JSON(w, 500, httpx.Envelope{Code: 50000, Message: "读取工作空间失败"})
 			return
 		}
 		httpx.OK(w, out)
-	}), identity))
+	}), navigationIdentity))
 	mux.Handle("POST /api/v1/workspaces", middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var in struct {
-			Name      string `json:"name"`
-			RequestID string `json:"request_id"`
+			Name             string `json:"name"`
+			RequestID        string `json:"request_id"`
+			PermissionMatrix bool   `json:"permission_matrix"`
 		}
 		if httpx.DecodeJSON(w, r, &in) != nil {
 			httpx.Fail(w, httpx.BadRequest("参数无效"))
@@ -104,7 +131,13 @@ func registerWorkspaces(mux *http.ServeMux, users *db.UserRepository, identity m
 			httpx.Fail(w, httpx.BadRequest("request_id 必须为非空UUID"))
 			return
 		}
-		out, e := users.CreateWorkspace(r.Context(), in.Name, in.RequestID)
+		var out *db.Workspace
+		var e error
+		if in.PermissionMatrix {
+			out, e = users.CreateMatrixWorkspace(r.Context(), in.Name, in.RequestID)
+		} else {
+			out, e = users.CreateWorkspace(r.Context(), in.Name, in.RequestID)
+		}
 		if e != nil {
 			switch {
 			case errors.Is(e, db.ErrManagedConflict):
@@ -142,7 +175,7 @@ func registerWorkspaces(mux *http.ServeMux, users *db.UserRepository, identity m
 		}
 		auditctx.Update(ctx, func(d *auditctx.Data) { d.WorkspaceID = wid })
 		httpx.OK(w, nil)
-	}), identity))
+	}), memberAuth))
 	mux.Handle("GET /api/v1/workspaces/{workspace}/members", middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wid, _ := strconv.ParseInt(r.PathValue("workspace"), 10, 64)
 		ctx, e := users.BindWorkspace(r.Context(), wid)
@@ -156,7 +189,7 @@ func registerWorkspaces(mux *http.ServeMux, users *db.UserRepository, identity m
 			return
 		}
 		httpx.OK(w, map[string]any{"items": out, "total": total})
-	}), identity))
+	}), memberAuth))
 	mux.Handle("POST /api/v1/workspaces/{workspace}/members", middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, _ := strconv.ParseInt(r.PathValue("workspace"), 10, 64)
 		ctx, e := users.BindWorkspace(r.Context(), id)
@@ -171,20 +204,25 @@ func registerWorkspaces(mux *http.ServeMux, users *db.UserRepository, identity m
 			auditctx.Update(ctx, func(d *auditctx.Data) { d.WorkspaceID = id })
 			e = users.AddMember(ctx, in.Username, in.Role)
 		}
+		if errors.Is(e, db.ErrManagedDenied) {
+			httpx.Fail(w, httpx.Forbidden(e.Error()))
+			return
+		}
 		if e != nil {
 			httpx.JSON(w, 409, httpx.Envelope{Code: 40900, Message: e.Error()})
 			return
 		}
 		httpx.OK(w, nil)
-	}), identity))
+	}), memberAuth))
 	mux.Handle("PATCH /api/v1/workspaces/{workspace}/members/{member}", middleware.Chain(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		wid, _ := strconv.ParseInt(r.PathValue("workspace"), 10, 64)
 		id, _ := strconv.ParseInt(r.PathValue("member"), 10, 64)
 		ctx, e := users.BindWorkspace(r.Context(), wid)
 		var in struct {
-			Role    string `json:"role"`
-			Active  *bool  `json:"active"`
-			Version int64  `json:"expected_version"`
+			Role         string    `json:"role"`
+			Active       *bool     `json:"active"`
+			Version      int64     `json:"expected_version"`
+			Capabilities *[]string `json:"capabilities"`
 		}
 		if e == nil {
 			e = httpx.DecodeJSON(w, r, &in)
@@ -194,12 +232,20 @@ func registerWorkspaces(mux *http.ServeMux, users *db.UserRepository, identity m
 		}
 		if e == nil {
 			auditctx.Update(ctx, func(d *auditctx.Data) { d.WorkspaceID = wid })
-			e = users.UpdateMembership(ctx, id, in.Role, in.Active, in.Version)
+			var options [][]string
+			if in.Capabilities != nil {
+				options = append(options, *in.Capabilities)
+			}
+			e = users.UpdateMembership(ctx, id, in.Role, in.Active, in.Version, options...)
+		}
+		if errors.Is(e, db.ErrManagedDenied) {
+			httpx.Fail(w, httpx.Forbidden(e.Error()))
+			return
 		}
 		if e != nil {
 			httpx.JSON(w, 409, httpx.Envelope{Code: 40900, Message: e.Error()})
 			return
 		}
 		httpx.OK(w, nil)
-	}), identity))
+	}), memberAuth))
 }

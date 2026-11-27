@@ -20,6 +20,9 @@ type managedFixture struct {
 
 func setupManaged(t *testing.T) *managedFixture {
 	a := setupAPI(t)
+	return setupManagedAPI(t, a)
+}
+func setupManagedAPI(t *testing.T, a *apiTest) *managedFixture {
 	ctx := context.Background()
 	conn, e := a.deps.Conns.Get(a.actor(), a.connID)
 	if e != nil {

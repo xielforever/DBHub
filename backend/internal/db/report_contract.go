@@ -3,7 +3,6 @@ package db
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"regexp"
 	"strings"
 	"time"
@@ -23,6 +22,7 @@ type ContractFreshness struct {
 	FutureSkew int64  `json:"max_future_skew_seconds"`
 }
 type DataContract struct {
+	Checks           []MetricCheck     `json:"metric_checks,omitempty"`
 	SemanticKey      string            `json:"semantic_key"`
 	Meaning          string            `json:"meaning"`
 	Schema           []ContractColumn  `json:"result_schema"`
@@ -103,20 +103,36 @@ func ValidateDataContract(c *DataContract, chart string) error {
 	if f.Mode == "watermark_column" && (!seen[f.Column] || f.MaxAge < 1 || f.MaxAge > 86400*30 || f.FutureSkew < 0 || f.FutureSkew > 60) {
 		return invalid()
 	}
-	return nil
+	return validateMetricChecks(c)
 }
 
 func ValidateContractMapping(c *DataContract, config json.RawMessage) error {
 	if err := validateContractDisplay(c, config); err != nil {
 		return err
 	}
+	if c != nil {
+		var mapping ReportChartConfig
+		if json.Unmarshal(config, &mapping) != nil {
+			return ErrManagedInput
+		}
+		if mapping.DrillThrough != nil {
+			for _, field := range mapping.DrillThrough.Bindings {
+				found := false
+				for _, column := range c.Schema {
+					if column.Name == field {
+						found = true
+					}
+				}
+				if !found {
+					return fmt.Errorf("%w: 下钻字段须包含在批准的结果契约中", ErrManagedInput)
+				}
+			}
+		}
+	}
 	if c == nil || c.ChartType == "table" {
 		return nil
 	}
-	var mapping struct {
-		Dimension string   `json:"dimension"`
-		Metrics   []string `json:"metrics"`
-	}
+	var mapping ReportChartConfig
 	if json.Unmarshal(config, &mapping) != nil {
 		return ErrManagedInput
 	}
@@ -124,8 +140,48 @@ func ValidateContractMapping(c *DataContract, config json.RawMessage) error {
 	if mapping.Dimension != "" {
 		dimensions = append(dimensions, mapping.Dimension)
 	}
+	if mapping.Pivot != nil {
+		dimensions = append(dimensions, mapping.Pivot.Column)
+	}
+	if mapping.HeatmapY != "" {
+		dimensions = append(dimensions, mapping.HeatmapY)
+	}
 	if reportDigest(dimensions) != reportDigest(c.Dimensions) || reportDigest(mapping.Metrics) != reportDigest(c.Metrics) {
 		return fmt.Errorf("%w: 图表维度和指标必须与数据契约映射一致", ErrManagedInput)
+	}
+	return validateContractChartTypes(c, mapping)
+}
+
+func validateContractChartTypes(c *DataContract, mapping ReportChartConfig) error {
+	switch c.ChartType {
+	case "horizontal_bar", "area", "scatter", "histogram", "funnel", "heatmap":
+	default:
+		return nil
+	}
+	if err := ValidateReportChartExtras(c.ChartType, mapping); err != nil {
+		return fmt.Errorf("%w: %v", ErrManagedInput, err)
+	}
+	types := make(map[string]string, len(c.Schema))
+	for _, column := range c.Schema {
+		types[column.Name] = column.Type
+	}
+	numeric := func(field string) bool {
+		switch types[field] {
+		case "integer", "number", "lossless_numeric":
+			return true
+		}
+		return false
+	}
+	if c.ChartType == "histogram" && types[mapping.Metrics[0]] != "integer" {
+		return fmt.Errorf("%w: 直方图频数须声明为整数字段", ErrManagedInput)
+	}
+	if c.ChartType == "scatter" && !numeric(mapping.Dimension) {
+		return fmt.Errorf("%w: 散点图横纵轴均须为数值字段", ErrManagedInput)
+	}
+	for _, field := range mapping.Metrics {
+		if !numeric(field) {
+			return fmt.Errorf("%w: 图表指标须声明为数值字段", ErrManagedInput)
+		}
 	}
 	return nil
 }
@@ -139,10 +195,11 @@ func approvedContract(c *DataContract, wid, source, account int64, database stri
 }
 
 type ContractResult struct {
-	QueryCompletedAt time.Time  `json:"query_completed_at"`
-	DataAsOf         *time.Time `json:"data_as_of"`
-	Freshness        string     `json:"freshness"`
-	ContractHash     string     `json:"contract_hash"`
+	Checks           []MetricCheckResult `json:"metric_checks,omitempty"`
+	QueryCompletedAt time.Time           `json:"query_completed_at"`
+	DataAsOf         *time.Time          `json:"data_as_of"`
+	Freshness        string              `json:"freshness"`
+	ContractHash     string              `json:"contract_hash"`
 }
 
 func ValidateContractResult(c *ApprovedContract, result *connector.ExecResult, now time.Time) (ContractResult, error) {
@@ -182,11 +239,11 @@ func ValidateContractResult(c *ApprovedContract, result *connector.ExecResult, n
 			}
 			switch col.Type {
 			case "integer", "lossless_numeric", "number":
-				if _, ok := new(big.Rat).SetString(fmt.Sprint(v)); !ok {
+				n, ok := contractDecimal(v)
+				if !ok {
 					return bad()
 				}
 				if col.Type == "integer" {
-					n, _ := new(big.Rat).SetString(fmt.Sprint(v))
 					if !n.IsInt() {
 						return bad()
 					}
@@ -222,6 +279,12 @@ func ValidateContractResult(c *ApprovedContract, result *connector.ExecResult, n
 				return bad()
 			}
 			data = &value
+		}
+	}
+	out.Checks = RunMetricChecks(&c.Declaration, result)
+	for _, check := range out.Checks {
+		if !check.Passed {
+			return out, fmt.Errorf("%w: 指标校验 %s 未通过", ErrManagedInput, check.ID)
 		}
 	}
 	if data != nil && !missingWatermark {

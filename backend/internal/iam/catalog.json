@@ -1,0 +1,1232 @@
+{
+  "version": "DBH-UX-IAM-D1.0",
+  "runtime_bridge": "phase1-foundation-1",
+  "activation_ready": false,
+  "capabilities": [
+    {
+      "id": "report.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.view",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.design",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page",
+        "report.view"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.submit",
+      "scope": "workspace",
+      "dependencies": [
+        "report.design"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.review",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "report.authorize",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.publish",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "report.offline",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "report.export",
+      "scope": "workspace",
+      "dependencies": [
+        "report.view"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.exportReview",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "report.subscribe",
+      "scope": "workspace",
+      "dependencies": [
+        "report.view"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.subscribeTeam",
+      "scope": "workspace",
+      "dependencies": [
+        "report.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.subscribeReview",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.stopEmergency",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.restoreEmergency",
+      "scope": "workspace",
+      "dependencies": [
+        "report.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.view",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.design",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page",
+        "dashboard.view"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.submit",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.design"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.review",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "dashboard.authorize",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.publish",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "dashboard.offline",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "report_review"
+      ]
+    },
+    {
+      "id": "dashboard.export",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.exportReview",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.subscribe",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.subscribeTeam",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.subscribeReview",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.stopEmergency",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "dashboard.restoreEmergency",
+      "scope": "workspace",
+      "dependencies": [
+        "dashboard.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "report.reveal",
+      "scope": "workspace",
+      "dependencies": [
+        "report.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "query.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "query.read",
+      "scope": "workspace",
+      "dependencies": [
+        "query.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "query.write",
+      "scope": "workspace",
+      "dependencies": [
+        "query.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "query.reconcile",
+      "scope": "workspace",
+      "dependencies": [
+        "query.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "catalog.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "catalog.metadata",
+      "scope": "workspace",
+      "dependencies": [
+        "catalog.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "catalog.preview",
+      "scope": "workspace",
+      "dependencies": [
+        "catalog.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "catalog.classify",
+      "scope": "workspace",
+      "dependencies": [
+        "catalog.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "connection.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "connection.use",
+      "scope": "workspace",
+      "dependencies": [
+        "connection.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "connection.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "connection.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "connection.proxy.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "connection.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "connection.task.view",
+      "scope": "workspace",
+      "dependencies": [
+        "connection.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "source.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "source.definition.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "source.account.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "source.driver.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "source.policy.map",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "source.task.view",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "source.runtime.view",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "source.runtime.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "source.page",
+        "source.runtime.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "metric.manage",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "operation.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "operation.apply",
+      "scope": "workspace",
+      "dependencies": [
+        "operation.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "operation.review",
+      "scope": "workspace",
+      "dependencies": [
+        "operation.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "operation_review"
+      ]
+    },
+    {
+      "id": "operation.execute",
+      "scope": "workspace",
+      "dependencies": [
+        "operation.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "operation.reconcile",
+      "scope": "workspace",
+      "dependencies": [
+        "operation.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "operation.template.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "operation.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "operation.account.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "operation.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "datasource_manage"
+      ]
+    },
+    {
+      "id": "change.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "change.apply",
+      "scope": "workspace",
+      "dependencies": [
+        "change.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "change.review",
+      "scope": "workspace",
+      "dependencies": [
+        "change.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "change.execute",
+      "scope": "workspace",
+      "dependencies": [
+        "change.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "change.reconcile",
+      "scope": "workspace",
+      "dependencies": [
+        "change.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "task.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin",
+        "developer",
+        "readonly"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.members.view",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.members.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page",
+        "space.members.view"
+      ],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.members.exit",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.menus.view",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.menus.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page",
+        "space.menus.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.roles.view",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.roles.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page",
+        "space.roles.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.assign.view",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.assign.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page",
+        "space.assign.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.resources.view",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.resources.request",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.resources.revoke",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.policy.view",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "space.policy.manage",
+      "scope": "workspace",
+      "dependencies": [
+        "space.page",
+        "space.policy.view"
+      ],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "audit.page",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "legacy",
+      "legacy_roles": [
+        "admin"
+      ],
+      "legacy_capabilities": [
+        "audit_view"
+      ]
+    },
+    {
+      "id": "audit.export",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "self.profile",
+      "scope": "self",
+      "dependencies": [],
+      "state": "identity",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "self.security",
+      "scope": "self",
+      "dependencies": [],
+      "state": "identity",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "notification.self",
+      "scope": "self",
+      "dependencies": [],
+      "state": "identity",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.identity.manage",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.sso.manage",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.space.create",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.space.manage",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.ops.view",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.backup.manage",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.restore.execute",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.audit.view",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "platform.governance.recover",
+      "scope": "platform",
+      "dependencies": [],
+      "state": "planned",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    },
+    {
+      "id": "source.manage",
+      "scope": "workspace",
+      "dependencies": [],
+      "state": "compatibility",
+      "legacy_roles": [],
+      "legacy_capabilities": []
+    }
+  ],
+  "menus": [
+    {
+      "id": "M01",
+      "label": "报表",
+      "group": "业务应用",
+      "capability": "report.page",
+      "path": "/reports"
+    },
+    {
+      "id": "M02",
+      "label": "仪表盘",
+      "group": "业务应用",
+      "capability": "dashboard.page",
+      "path": "/dashboards"
+    },
+    {
+      "id": "M03",
+      "label": "业务办理",
+      "group": "业务应用",
+      "capability": "operation.page",
+      "path": "/business-operations"
+    },
+    {
+      "id": "M04",
+      "label": "数据工作台",
+      "group": "数据工具",
+      "capability": "query.page",
+      "path": "/query"
+    },
+    {
+      "id": "M05",
+      "label": "数据目录",
+      "group": "数据工具",
+      "capability": "catalog.page",
+      "path": "/assets"
+    },
+    {
+      "id": "M06",
+      "label": "我的连接",
+      "group": "数据工具",
+      "capability": "connection.page",
+      "path": "/connections"
+    },
+    {
+      "id": "M07",
+      "label": "数据库变更工单",
+      "group": "数据工具",
+      "capability": "change.page",
+      "path": "/tickets"
+    },
+    {
+      "id": "M08",
+      "label": "待办中心",
+      "group": "协作",
+      "capability": "task.page",
+      "path": "/inbox"
+    },
+    {
+      "id": "M09",
+      "label": "数据管理",
+      "group": "管理",
+      "capability": "source.page",
+      "path": "/sources"
+    },
+    {
+      "id": "M10",
+      "label": "空间管理",
+      "group": "管理",
+      "capability": "space.page",
+      "path": "/space"
+    },
+    {
+      "id": "M11",
+      "label": "操作审计",
+      "group": "管理",
+      "capability": "audit.page",
+      "path": "/audit"
+    }
+  ],
+  "legacy_capabilities": [
+    {
+      "id": "report_review",
+      "actions": [
+        "report.review",
+        "report.publish",
+        "report.offline",
+        "report.exportReview",
+        "dashboard.review",
+        "dashboard.publish",
+        "dashboard.offline"
+      ]
+    },
+    {
+      "id": "datasource_manage",
+      "actions": [
+        "source.page",
+        "source.definition.manage",
+        "source.account.manage",
+        "source.driver.manage",
+        "source.task.view",
+        "operation.template.manage",
+        "operation.account.manage"
+      ]
+    },
+    {
+      "id": "audit_view",
+      "actions": [
+        "audit.page"
+      ]
+    },
+    {
+      "id": "operation_review",
+      "actions": [
+        "operation.review"
+      ]
+    }
+  ]
+}

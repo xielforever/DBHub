@@ -20,6 +20,22 @@ func ActorAdmin(ctx context.Context) bool {
 	c, ok := auth.ClaimsFromContext(ctx)
 	return ok && c != nil && c.Subject > 0 && c.Role == "admin"
 }
+func ActorCapability(ctx context.Context, capability string) bool {
+	c, _ := auth.ClaimsFromContext(ctx)
+	return auth.HasCapability(c, capability)
+}
+
+func ActorAction(ctx context.Context, action string, legacy bool) bool {
+	c, _ := auth.ClaimsFromContext(ctx)
+	return auth.FunctionalAction(c, action, legacy)
+}
+func ActorReportReviewer(ctx context.Context) bool { return ActorCapability(ctx, "report_review") }
+func ActorDashboardReviewer(ctx context.Context) bool {
+	return ActorAction(ctx, "dashboard.review", ActorCapability(ctx, "report_review"))
+}
+func ActorExportReviewer(ctx context.Context) bool {
+	return ActorAction(ctx, "report.exportReview", ActorCapability(ctx, "report_review"))
+}
 
 func requireCurrentActor(ctx context.Context, pool *ScopedPool) error {
 	c, ok := auth.ClaimsFromContext(ctx)
@@ -27,7 +43,7 @@ func requireCurrentActor(ctx context.Context, pool *ScopedPool) error {
 		return ErrNotFound
 	}
 	var valid bool
-	e := pool.QueryRow(ctx, `SELECT COALESCE(dbhub_member_role($1)=$2,false)`, c.Subject, c.Role).Scan(&valid)
+	e := pool.QueryRow(ctx, `SELECT dbhub_scope_allowed()`).Scan(&valid)
 	if e != nil {
 		return e
 	}

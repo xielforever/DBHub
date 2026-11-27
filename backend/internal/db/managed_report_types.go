@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/user/dbhub/internal/auditctx"
+	"github.com/user/dbhub/internal/auth"
 	crypto "github.com/user/dbhub/pkg/crypto"
 )
 
@@ -21,39 +22,60 @@ var ErrManagedInput = errors.New("正式报表参数无效")
 var ErrManagedDenied = errors.New("没有此报表操作权限，或相关账号与数据源已停用")
 
 type ManagedReportRepository struct {
-	pool   *ScopedPool
-	cipher *crypto.Cipher
+	pool                  *ScopedPool
+	cipher                *crypto.Cipher
+	phase2ReportIsolation string
 }
 
 func (r *ConnectionRepository) ManagedReports() *ManagedReportRepository {
-	return &ManagedReportRepository{r.pool, r.cipher}
+	return &ManagedReportRepository{pool: r.pool, cipher: r.cipher, phase2ReportIsolation: r.phase2ReportIsolation}
 }
 
 // ReportDefinition never contains personal connection IDs or authentication.
 type ReportDefinition struct {
-	DataContract *DataContract   `json:"data_contract,omitempty"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	DefinitionID int64           `json:"definition_revision_id"`
-	Database     string          `json:"database_name"`
-	SQL          string          `json:"sql_text"`
-	ChartType    string          `json:"chart_type"`
-	ChartConfig  json.RawMessage `json:"chart_config"`
+	Promotion    *ReportPromotion    `json:"promotion,omitempty"`
+	ExportPolicy *ReportExportPolicy `json:"export_policy,omitempty"`
+	Parameters   []ReportParameter   `json:"parameters,omitempty"`
+	DataContract *DataContract       `json:"data_contract,omitempty"`
+	Name         string              `json:"name"`
+	Description  string              `json:"description"`
+	DefinitionID int64               `json:"definition_revision_id"`
+	Database     string              `json:"database_name"`
+	SQL          string              `json:"sql_text"`
+	ChartType    string              `json:"chart_type"`
+	ChartConfig  json.RawMessage     `json:"chart_config"`
+}
+
+// Promotion records an immutable source. It carries no account, audience or
+// credential authority; the destination is always a new unsubmitted draft.
+type ReportPromotion struct {
+	ReportID     int64  `json:"source_report_id"`
+	VersionID    int64  `json:"source_version_id"`
+	Version      int64  `json:"source_version"`
+	ReviewID     int64  `json:"source_review_id"`
+	ContentHash  string `json:"source_content_hash"`
+	DefinitionID int64  `json:"source_definition_revision_id"`
 }
 type ManagedReport struct {
-	ID              int64            `json:"id"`
-	OwnerID         int64            `json:"owner_id"`
-	OwnerName       string           `json:"owner_name"`
-	Draft           ReportDefinition `json:"draft"`
-	DraftVersion    int64            `json:"draft_version"`
-	LatestVersion   int64            `json:"latest_version"`
-	PublicationNo   int64            `json:"publication_no"`
-	ActiveReleaseID *int64           `json:"active_release_id"`
-	UpdatedAt       time.Time        `json:"updated_at"`
-	ConnectionID    int64            `json:"connection_id"`
-	PendingCount    int64            `json:"pending_count"`
-	ActiveReviewID  *int64           `json:"active_review_id"`
-	ActiveVersion   *int64           `json:"active_version"`
+	BusinessOwnerID          *int64           `json:"business_owner_id,omitempty"`
+	BusinessOwnerName        string           `json:"business_owner_name,omitempty"`
+	BusinessOwnerVersion     int64            `json:"business_owner_version"`
+	BusinessOwnerRequired    bool             `json:"business_owner_required"`
+	CanTransferBusinessOwner bool             `json:"can_transfer_business_owner"`
+	CanReview                bool             `json:"can_review"`
+	ID                       int64            `json:"id"`
+	OwnerID                  int64            `json:"owner_id"`
+	OwnerName                string           `json:"owner_name"`
+	Draft                    ReportDefinition `json:"draft"`
+	DraftVersion             int64            `json:"draft_version"`
+	LatestVersion            int64            `json:"latest_version"`
+	PublicationNo            int64            `json:"publication_no"`
+	ActiveReleaseID          *int64           `json:"active_release_id"`
+	UpdatedAt                time.Time        `json:"updated_at"`
+	ConnectionID             int64            `json:"connection_id"`
+	PendingCount             int64            `json:"pending_count"`
+	ActiveReviewID           *int64           `json:"active_review_id"`
+	ActiveVersion            *int64           `json:"active_version"`
 }
 type ReportAccount struct {
 	ID           int64  `json:"id"`
@@ -67,6 +89,8 @@ type ReportAccount struct {
 	ReportCount  int64  `json:"report_count"`
 }
 type ReportVersion struct {
+	CanReview      bool                    `json:"can_review"`
+	ApprovalStage  string                  `json:"approval_stage,omitempty"`
 	AudienceChange *ReportAudienceProposal `json:"audience_change,omitempty"`
 	ID             int64                   `json:"id"`
 	ReportID       int64                   `json:"report_id"`
@@ -106,19 +130,26 @@ type ReportRelease struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 type PublishedReport struct {
-	ID            int64           `json:"id"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description"`
-	Version       int64           `json:"version"`
-	PublicationNo int64           `json:"publication_no"`
-	ChartType     string          `json:"chart_type"`
-	ChartConfig   json.RawMessage `json:"chart_config"`
+	ExportPolicy  *ReportExportPolicy `json:"export_policy,omitempty"`
+	DataContract  *DataContract       `json:"data_contract,omitempty"`
+	Parameters    []ReportParameter   `json:"parameters,omitempty"`
+	ID            int64               `json:"id"`
+	Name          string              `json:"name"`
+	Description   string              `json:"description"`
+	Version       int64               `json:"version"`
+	PublicationNo int64               `json:"publication_no"`
+	ChartType     string              `json:"chart_type"`
+	ChartConfig   json.RawMessage     `json:"chart_config"`
 }
 
 // ManagedExecution is internal. Never serialize credentials or a frozen SQL
 // definition into a viewer response, execution receipt, or ordinary history.
 type ManagedExecution struct {
 	AdditionalCheck                                       func(context.Context) error
+	BusinessPlan                                          *BusinessOutputPlan
+	businessBinding                                       string
+	businessOwnerVersion                                  *int64
+	custodyDashboard                                      *custodyDashboardTile
 	ReportID, Version, PublicationNo, ReviewID, AccountID int64
 	AccountVersion, Generation                            int64
 	Manifest                                              ReportManifest
@@ -131,9 +162,13 @@ type ManagedExecution struct {
 	Author, Approver, Publisher                           string
 }
 type ReportCommandResult struct {
-	IDs     []int64 `json:"ids,omitempty"`
-	ID      int64   `json:"id"`
-	Version int64   `json:"version,omitempty"`
+	BusinessOwnerID         *int64  `json:"business_owner_id,omitempty"`
+	PreviousBusinessOwnerID *int64  `json:"previous_business_owner_id,omitempty"`
+	DependencyCount         *int64  `json:"dependency_count,omitempty"`
+	ApprovalStage           string  `json:"approval_stage,omitempty"`
+	IDs                     []int64 `json:"ids,omitempty"`
+	ID                      int64   `json:"id"`
+	Version                 int64   `json:"version,omitempty"`
 }
 
 func canonicalReportJSON(value any) []byte {
@@ -157,14 +192,26 @@ func managedError(err error) error {
 	return err
 }
 func reportActor(ctx context.Context, tx pgx.Tx, admin, writer bool) error {
+	if c, ok := auth.ClaimsFromContext(ctx); ok && c != nil && c.IAM != nil && c.IAM.Target {
+		var valid bool
+		e := tx.QueryRow(ctx, `SELECT dbhub_scope_allowed() AND $1<>'' AND dbhub_iam_has_action(dbhub_actor(),$1)`, c.CurrentAction).Scan(&valid)
+		if e != nil {
+			return e
+		}
+		if !valid {
+			return ErrManagedDenied
+		}
+		return nil
+	}
 	var role string
-	if e := tx.QueryRow(ctx, `SELECT role_code FROM sys_workspace_members WHERE user_id=$1 AND workspace_id=dbhub_workspace() AND active AND dbhub_scope_allowed()`, ActorID(ctx)).Scan(&role); e != nil {
+	var reviewer bool
+	if e := tx.QueryRow(ctx, `SELECT role_code,dbhub_has_capability(user_id,'report_review') FROM sys_workspace_members WHERE user_id=$1 AND workspace_id=dbhub_workspace() AND active AND dbhub_scope_allowed()`, ActorID(ctx)).Scan(&role, &reviewer); e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrManagedDenied
 		}
 		return e
 	}
-	if admin && role != "admin" || writer && role != "admin" && role != "developer" {
+	if admin && !reviewer || writer && role != "admin" && role != "developer" {
 		return ErrManagedDenied
 	}
 	return nil
@@ -176,7 +223,26 @@ func (r *ManagedReportRepository) command(ctx context.Context, key, op string, i
 		return result, e
 	}
 	defer tx.Rollback(context.WithoutCancel(ctx))
-	if e = reportActor(ctx, tx, admin, writer); e != nil {
+	if (op == "transfer" || op == "dashboard-transfer") && !ActorAdmin(ctx) {
+		return result, ErrManagedDenied
+	}
+	if op == "business-owner-transfer" {
+		var allowed bool
+		if e = tx.QueryRow(ctx, `SELECT dbhub_report_lock_platform_admin()`).Scan(&allowed); e != nil {
+			return result, e
+		}
+		if !allowed {
+			return result, ErrManagedDenied
+		}
+	} else if op == "account-create" || op == "account-update" {
+		var allowed bool
+		if e = tx.QueryRow(ctx, `SELECT dbhub_scope_allowed() AND dbhub_has_capability($1,'datasource_manage')`, ActorID(ctx)).Scan(&allowed); e != nil {
+			return result, e
+		}
+		if !allowed {
+			return result, ErrManagedDenied
+		}
+	} else if e = reportActor(ctx, tx, admin, writer); e != nil {
 		return result, e
 	}
 	auditctx.Update(ctx, func(d *auditctx.Data) { d.CommandRequestID = key; d.CommandOperation = op })

@@ -27,10 +27,13 @@ type AccessRequest struct {
 }
 
 func (r *ManagedReportRepository) AccessRequests(ctx context.Context) ([]AccessRequest, error) {
-	if _, e := r.pool.Exec(ctx, `UPDATE sys_access_requests SET status='expired',version=version+1 WHERE id IN(SELECT id FROM sys_access_requests WHERE expires_at<=now() AND status IN('pending','processing','approved_pending_release') AND (requester_id=$1 OR $2) LIMIT 500)`, ActorID(ctx), ActorAdmin(ctx)); e != nil {
+	// The route can bind task.page for admission. Review visibility depends on
+	// the actor's review actions even when they also qualify through task.page.
+	canReview := ActorAction(ctx, "report.review", ActorReportReviewer(ctx)) || ActorAction(ctx, "dashboard.review", false)
+	if _, e := r.pool.Exec(ctx, `UPDATE sys_access_requests SET status='expired',version=version+1 WHERE id IN(SELECT id FROM sys_access_requests WHERE expires_at<=now() AND status IN('pending','processing','approved_pending_release') AND (requester_id=$1 OR $2) LIMIT 500)`, ActorID(ctx), canReview); e != nil {
 		return nil, e
 	}
-	rows, e := r.pool.Query(ctx, `SELECT id,requester_id,report_id,dashboard_id,reason,target_user_id,target_group_id,decision_reason,CASE WHEN expires_at<=now() AND status IN('pending','processing','approved_pending_release') THEN 'expired' ELSE status END,version,assigned_to,review_id,actual_publication_no,expires_at FROM sys_access_requests WHERE requester_id=$1 OR target_user_id=$1 OR $2 ORDER BY id DESC LIMIT 100`, ActorID(ctx), ActorAdmin(ctx))
+	rows, e := r.pool.Query(ctx, `SELECT id,requester_id,report_id,dashboard_id,reason,target_user_id,target_group_id,decision_reason,CASE WHEN expires_at<=now() AND status IN('pending','processing','approved_pending_release') THEN 'expired' ELSE status END,version,assigned_to,review_id,actual_publication_no,expires_at FROM sys_access_requests WHERE requester_id=$1 OR target_user_id=$1 OR $2 ORDER BY id DESC LIMIT 100`, ActorID(ctx), canReview)
 	if e != nil {
 		return nil, e
 	}
@@ -41,7 +44,7 @@ func (r *ManagedReportRepository) AccessRequests(ctx context.Context) ([]AccessR
 		if e = rows.Scan(&a.ID, &a.RequesterID, &a.ReportID, &a.DashboardID, &a.Reason, &a.TargetUserID, &a.TargetGroupID, &a.DecisionReason, &a.Status, &a.Version, &a.AssignedTo, &a.ReviewID, &a.ActualNo, &a.ExpiresAt); e != nil {
 			return nil, e
 		}
-		if !ActorAdmin(ctx) {
+		if !canReview {
 			a.ReportID = 0
 		}
 		out = append(out, a)
@@ -109,11 +112,11 @@ func (r *ManagedReportRepository) AccessAction(ctx context.Context, key string, 
 			}
 			status = "rejected"
 		case "assign":
-			var role *string
-			if e := tx.QueryRow(ctx, `SELECT dbhub_member_role($1)`, assignee).Scan(&role); e != nil {
+			var eligible bool
+			if e := tx.QueryRow(ctx, `SELECT dbhub_has_capability($1,'report_review')`, assignee).Scan(&eligible); e != nil {
 				return out, e
 			}
-			if role == nil || *role != "admin" {
+			if !eligible {
 				return out, ErrManagedInput
 			}
 		default:
@@ -185,7 +188,7 @@ func (r *ManagedReportRepository) AudienceChange(ctx context.Context, key string
 		if e != nil {
 			return out, e
 		}
-		if owner != ActorID(ctx) && !ActorAdmin(ctx) {
+		if owner != ActorID(ctx) && !ActorReportReviewer(ctx) {
 			return out, ErrManagedDenied
 		}
 		if no != in.BaseNo {

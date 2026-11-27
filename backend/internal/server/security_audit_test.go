@@ -31,13 +31,20 @@ func TestSecurityAuditIndependentApprovals(t *testing.T) {
 	reviewer := securityReviewer(a)
 	t.Run("ticket", func(t *testing.T) {
 		a.t = t
-		created := a.call("POST", "/tickets", a.admin, map[string]any{"title": "independent review", "table": a.table, "connection_id": a.connID, "sql": "UPDATE " + a.table + " SET secret='approved' WHERE id=1"}, 200)
+		created := a.call("POST", "/tickets", a.admin, map[string]any{"title": "independent review", "table": a.table, "connection_id": a.connID, "sql": "UPDATE " + a.table + " SET secret='approved' WHERE id=1 RETURNING secret"}, 200)
 		path := fmt.Sprintf("/tickets/%.0f", created["id"])
 		a.call("POST", path+"/status", a.admin, map[string]any{"status": "approved"}, 409)
 		a.call("POST", path+"/execute", a.admin, nil, 409)
 		a.call("POST", path+"/status", reviewer, map[string]any{"status": "approved"}, 200)
 		a.call("POST", path+"/status", reviewer, map[string]any{"status": "rejected"}, 409)
-		a.call("POST", path+"/execute", a.admin, nil, 200)
+		result := a.call("POST", path+"/execute", a.admin, nil, 200)["result"].(map[string]any)
+		if result["affected_rows"] != float64(1) || result["rows"] != nil || result["columns"] != nil {
+			t.Fatalf("expected a summary for one affected row without returned data, got %#v", result)
+		}
+		stored := a.call("GET", path, a.admin, nil, 200)["execution_result"].(map[string]any)
+		if stored["affected_rows"] != result["affected_rows"] || stored["rows"] != nil || stored["columns"] != nil {
+			t.Fatalf("stored ticket did not retain the same summary, got %#v", stored)
+		}
 		a.call("POST", path+"/execute", a.admin, nil, 409)
 	})
 	t.Run("export", func(t *testing.T) {
@@ -347,8 +354,8 @@ func TestSecurityAuditReportBeneficiaryCannotBypassProposal(t *testing.T) {
 func TestSecurityAuditCookieMutationNeedsCSRFHeader(t *testing.T) {
 	a := setupAPI(t)
 	for _, csrf := range []bool{false, true} {
-		body := strings.NewReader(`{"name":"CSRF regression","sql_text":"SELECT 1","visibility":"private"}`)
-		req, err := http.NewRequest("POST", a.server.URL+"/api/v1/snippets", body)
+		body := strings.NewReader(`{"name":"CSRF regression","content":"SELECT 1","script_type":"postgres"}`)
+		req, err := http.NewRequest("POST", a.server.URL+"/api/v1/query/scripts", body)
 		if err != nil {
 			t.Fatal(err)
 		}

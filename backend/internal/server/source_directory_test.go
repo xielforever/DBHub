@@ -4,12 +4,65 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/user/dbhub/internal/auth"
-	"github.com/user/dbhub/internal/db"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/user/dbhub/internal/auth"
+	"github.com/user/dbhub/internal/db"
 )
+
+func TestManagedSourceDirectory(t *testing.T) {
+	a := setupAPI(t)
+	base, err := a.deps.Conns.Get(a.actor(), a.connID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := db.ConfigOf(base)
+	cfg.Environment, cfg.Database = "test", "managed_test_database"
+	old := a.call("POST", "/datasource-definitions", a.admin, map[string]any{
+		"name": "managed-directory-fixture", "visibility": "global", "config": cfg,
+	}, 201)
+	a.call("POST", "/datasource-definitions", a.admin, map[string]any{
+		"name": "managed-directory-fixture private", "visibility": "private", "config": cfg,
+	}, 201)
+	cfg.Environment, cfg.Database = "prod", "managed_production_database"
+	latest := a.call("POST", fmt.Sprintf("/datasource-definitions/%d/revisions", int64(old["id"].(float64))), a.admin, map[string]any{
+		"name": "managed-directory-fixture", "visibility": "global", "config": cfg,
+	}, 201)
+	a.call("PATCH", fmt.Sprintf("/datasource-definitions/%d/status", int64(latest["id"].(float64))), a.admin, map[string]any{
+		"enabled": false, "confirmed": true, "expected_binding_count": 0, "expected_report_count": 0,
+	}, 200)
+
+	managed := "/datasource-definitions?view=managed"
+	match := "&keyword=MANAGED_PRODUCTION_DATABASE&type=postgres&environment=prod&status=disabled&page_size=1"
+	found := a.call("GET", managed+match, a.admin, nil, 200)
+	items := found["items"].([]any)
+	if found["total"] != float64(1) || len(items) != 1 || items[0].(map[string]any)["id"] != latest["id"] {
+		t.Fatal("managed filter omitted the latest disabled revision", found)
+	}
+	next := a.call("GET", managed+match+"&page=2", a.admin, nil, 200)
+	if next["total"] != float64(1) || len(next["items"].([]any)) != 0 {
+		t.Fatal("filter did not apply before pagination", next)
+	}
+	for _, query := range []string{
+		"&keyword=managed-directory-fixture&environment=test",
+		"&keyword=managed_test_database",
+		"&keyword=managed-directory-fixture&status=enabled",
+	} {
+		if got := a.call("GET", managed+query, a.admin, nil, 200); got["total"] != float64(0) {
+			t.Fatal("managed filter included a private or superseded revision", query, got)
+		}
+	}
+	a.call("GET", managed+match, a.developer, nil, 403)
+	for _, query := range []string{"&type=invalid", "&environment=invalid", "&status=invalid"} {
+		a.call("GET", managed+query, a.admin, nil, 400)
+	}
+	shared := "/datasource-definitions?view=shared&keyword=managed-directory-fixture"
+	if got := a.call("GET", shared, a.developer, nil, 200); got["total"] != float64(0) {
+		t.Fatal("personal source picker included a disabled or private definition", got)
+	}
+}
 
 func TestSourceAudienceAndDirectory(t *testing.T) {
 	a := setupAPI(t)
@@ -32,6 +85,9 @@ func TestSourceAudienceAndDirectory(t *testing.T) {
 			a.call("POST", path+"/connections", token, identity, 404)
 		}
 		a.call("GET", path+"/access", a.developer, nil, 404)
+		if shared := a.call("GET", "/datasource-definitions?view=shared&keyword=库存团队目录", a.developer, nil, 200); shared["total"] != float64(0) {
+			t.Fatal("shared picker exposed a restricted definition")
+		}
 		a.call("GET", "/user-groups", a.developer, nil, 403)
 		a.call("POST", "/datasource-definitions", a.admin, map[string]any{"name": "invalid audience", "visibility": "global", "access_mode": "invalid", "config": cfg}, 400)
 		a.call("POST", "/user-groups", a.admin, map[string]any{"name": "", "member_ids": []int64{}}, 400)
@@ -48,6 +104,16 @@ func TestSourceAudienceAndDirectory(t *testing.T) {
 
 	gp := fmt.Sprintf("/user-groups/%d", gid)
 	access([]int64{2}, []int64{gid}, 1, 200)
+	t.Run("shared-picker-excludes-private-definitions", func(t *testing.T) {
+		a.t = t
+		a.call("POST", "/datasource-definitions", a.developer, map[string]any{"name": "库存团队目录个人定义", "visibility": "private", "config": cfg}, 201)
+		shared := a.call("GET", "/datasource-definitions?view=shared&keyword=库存团队目录&page_size=1", a.developer, nil, 200)
+		items := shared["items"].([]any)
+		if shared["total"] != float64(1) || len(items) != 1 || items[0].(map[string]any)["id"] != definition["id"] {
+			t.Fatal("shared picker must exclude private definitions before pagination", shared)
+		}
+	})
+	a.t = t
 	dev := a.call("POST", path+"/connections", a.developer, identity, 201)
 	devID := int64(dev["id"].(float64))
 	devPath := fmt.Sprintf("/connections/%d", devID)

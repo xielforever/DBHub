@@ -33,3 +33,15 @@ func TestASTLineage(t *testing.T) {
 		t.Fatal("invalid SQL fabricated lineage")
 	}
 }
+
+func TestParameterizedReportHistoryLineage(t *testing.T) {
+	for _, dialect := range []string{"postgres", "mysql"} {
+		result, err := ParseTables("SELECT ':literal' AS label, id FROM mall.orders WHERE id=:order_id", dialect)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.All) != 1 || result.All[0].String() != "mall.orders" {
+			t.Fatalf("named value became a table: %+v", result)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 var ErrSession = errors.New("会话已失效")
 
 type session struct {
+	CreatedAt       time.Time `json:"created_at"`
 	UserID          int64     `json:"user_id"`
 	RefreshID       string    `json:"refresh_id"`
 	PasswordVersion string    `json:"password_version"`
@@ -30,11 +32,18 @@ func NewSessionStore(client *redis.Client) *SessionStore {
 	return &SessionStore{client: client, memory: map[string]session{}}
 }
 func passwordVersion(user *User) string {
-	sum := sha256.Sum256([]byte(user.PasswordHash))
+	value := user.PasswordHash
+	if user.AuthVersion > 0 {
+		value += ":identity-security:" + strconv.FormatInt(user.AuthVersion, 10)
+	}
+	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
+
+// PasswordVersion also binds identity challenges to the current MFA configuration.
+func PasswordVersion(user *User) string { return passwordVersion(user) }
 func (s *SessionStore) Create(ctx context.Context, sid, jti string, user *User, ttl time.Duration) error {
-	value := session{UserID: user.ID, RefreshID: jti, PasswordVersion: passwordVersion(user), Expires: time.Now().Add(ttl)}
+	value := session{UserID: user.ID, RefreshID: jti, PasswordVersion: passwordVersion(user), Expires: time.Now().Add(ttl), CreatedAt: time.Now().UTC()}
 	if s.client != nil {
 		raw, e := json.Marshal(value)
 		if e != nil {
@@ -86,6 +95,7 @@ func (s *SessionStore) Validate(ctx context.Context, claims *Claims, user *User)
 	if value.UserID != user.ID || user.ID != claims.Subject || value.PasswordVersion != passwordVersion(user) || time.Now().After(value.Expires) {
 		return ErrSession
 	}
+	claims.SessionCreatedAt = value.CreatedAt
 	return nil
 }
 func (s *SessionStore) Rotate(ctx context.Context, old *Claims, newID string, user *User, ttl time.Duration) error {

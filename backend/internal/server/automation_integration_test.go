@@ -322,10 +322,29 @@ func TestAutomationSourceTasks(t *testing.T) {
 	t.Run("workspace-isolation-and-no-owner-secret-bypass", func(t *testing.T) {
 		a.t = t
 		job := a.call("POST", "/source-tasks", a.admin, map[string]any{"connection_id": a.connID, "kind": "check", "request_id": testRequestID()}, 202)
+		filter := fmt.Sprintf("?connection_id=%d", a.connID)
+		page := a.call("GET", "/source-tasks"+filter+"&page_size=1", a.admin, nil, 200)
+		items := page["items"].([]any)
+		if len(items) != 1 || items[0].(map[string]any)["id"] != job["id"] {
+			t.Fatal("connection filter omitted the newest task", page)
+		}
+		if other := a.call("GET", "/source-tasks"+filter, a.readonly, nil, 200); other["total"] != float64(0) {
+			t.Fatal("connection filter returned another actor's tasks", other)
+		}
+		plans := a.call("GET", "/source-schedules"+filter, a.admin, nil, 200)["items"].([]any)
+		if len(plans) == 0 {
+			t.Fatal("connection filter omitted saved plans")
+		}
+		if other := a.call("GET", "/source-schedules"+filter, a.readonly, nil, 200)["items"].([]any); len(other) != 0 {
+			t.Fatal("connection filter returned another actor's plans", other)
+		}
+		for _, path := range []string{"/source-tasks", "/source-schedules"} {
+			a.call("GET", path+"?connection_id=0", a.admin, nil, 400)
+		}
 		created := a.call("POST", "/workspaces", a.admin, map[string]any{"request_id": testRequestID(), "name": "任务隔离空间"}, 200)
 		base := fmt.Sprintf("/workspaces/%d", int64(created["id"].(float64)))
 		a.call("GET", base+"/source-tasks/"+job["id"].(string), a.admin, nil, 404)
-		if a.call("GET", base+"/source-tasks", a.admin, nil, 200)["total"] != float64(0) {
+		if a.call("GET", base+"/source-tasks"+filter, a.admin, nil, 200)["total"] != float64(0) {
 			t.Fatal("cross-workspace task leak")
 		}
 		a.call("POST", base+"/source-tasks", a.admin, map[string]any{"connection_id": a.connID, "kind": "check", "request_id": testRequestID()}, 404)

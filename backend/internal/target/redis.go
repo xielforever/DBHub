@@ -102,19 +102,31 @@ func InspectKey(ctx context.Context, client *redis.Client, key string) (*RedisVa
 		seconds = -1
 	}
 	var value any
+	const maxPreviewItems = 10000
+	truncated := false
 	switch typ {
 	case "string":
 		value, e = client.Get(ctx, key).Result()
 	case "hash":
 		value, e = client.HGetAll(ctx, key).Result()
 	case "list":
-		value, e = client.LRange(ctx, key, 0, 9999).Result()
+		var members []string
+		members, e = client.LRange(ctx, key, 0, maxPreviewItems).Result()
+		if len(members) > maxPreviewItems {
+			truncated = true
+			members = members[:maxPreviewItems]
+		}
+		value = members
 	case "set":
 		value, e = client.SMembers(ctx, key).Result()
 	case "zset":
 		var members []redis.Z
-		members, e = client.ZRangeWithScores(ctx, key, 0, 9999).Result()
-		out := []map[string]any{}
+		members, e = client.ZRangeWithScores(ctx, key, 0, maxPreviewItems).Result()
+		if len(members) > maxPreviewItems {
+			truncated = true
+			members = members[:maxPreviewItems]
+		}
+		out := make([]map[string]any, 0, len(members))
 		for _, m := range members {
 			out = append(out, map[string]any{"member": m.Member, "score": m.Score})
 		}
@@ -129,5 +141,5 @@ func InspectKey(ctx context.Context, client *redis.Client, key string) (*RedisVa
 	if e != nil {
 		return nil, e
 	}
-	return &RedisValue{Key: key, Type: typ, TTL: seconds, Size: size, Value: value}, nil
+	return &RedisValue{Key: key, Type: typ, TTL: seconds, Size: size, Value: value, Truncated: truncated}, nil
 }
