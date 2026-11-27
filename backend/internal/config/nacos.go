@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -175,6 +176,34 @@ func (c *nacosClient) getConfig(ctx context.Context) (string, error) {
 	}
 	if status != http.StatusOK {
 		return "", fmt.Errorf("Nacos 配置读取失败（HTTP %d）", status)
+	}
+	return decodeConfigResponse(body)
+}
+
+// decodeConfigResponse 兼容控制台 API 的 JSON 包装与原始 properties 文本。
+func decodeConfigResponse(body []byte) (string, error) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return "", errors.New("Nacos 配置内容为空")
+	}
+	if trimmed[0] == '{' {
+		var payload struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+			Data    struct {
+				Content string `json:"content"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(trimmed, &payload); err != nil {
+			return "", errors.New("Nacos 配置响应解析失败")
+		}
+		if payload.Code != 0 {
+			return "", fmt.Errorf("Nacos 配置读取失败（code %d）", payload.Code)
+		}
+		if strings.TrimSpace(payload.Data.Content) == "" {
+			return "", errors.New("Nacos 配置内容为空")
+		}
+		return payload.Data.Content, nil
 	}
 	return string(body), nil
 }

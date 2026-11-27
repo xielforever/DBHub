@@ -55,7 +55,11 @@ func newFakeNacos(t *testing.T, content *atomic.Value, requireToken bool) *httpt
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		_, _ = w.Write([]byte(content.Load().(string)))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code":    0,
+			"message": "success",
+			"data":    map[string]string{"content": content.Load().(string)},
+		})
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
