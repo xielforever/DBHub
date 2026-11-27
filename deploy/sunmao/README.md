@@ -12,7 +12,7 @@ DBHub 的常规发布通道：Gitee 镜像仓检出 → 集群内 kaniko 构建�
    - `gitee`：Gitee Token，用于检出。
    - `swr-auth`：类型 `swr_auth`，`registry=swr.cn-east-2.myhuaweicloud.com`，`username/password` 为 SWR AK/SK。
    - `dbhub-kubeconfig`：类型 `kubeconfig`，内容为可管理 `dbhub` 命名空间的 kubeconfig，用于 `helm_deploy` 跨命名空间发布。
-4. **集群资源**：`dbhub` 命名空间已存在 `dbhub-runtime`、`default-secret`、`dbhub-datastore-ca`、`dbhub-report44-fixture-ca`、`dbhub-postgres`、`dbhub-redis`。
+4. **集群资源**：`dbhub` 命名空间已存在 `dbhub-runtime`、`default-secret`、`dbhub-datastore-ca`、`dbhub-report44-fixture-ca`。元数据库与缓存使用 `infra` 命名空间的共享实例：`infra-core-postgres`（库 `dbhub`、角色 `dbhub_owner`、TLS `sslmode=verify-ca`，CA 以 `infra-ca.crt` 挂在 `dbhub-datastore-ca`）与 `infra-core-redis`（逻辑库 5），连接串由 Nacos 配置 `dbhub.properties` 下发；`dbhub` 命名空间原有的 `dbhub-postgres`、`dbhub-redis` 及其 PVC、凭据 Secret 已全部删除，本环境不再保留本地数据存储，也无旧库回退路径。
 5. **Nacos**：`dbhub` namespace 下的 `dbhub.properties` 已存在；`dbhub-runtime` 需包含 `DBHUB_NACOS_USERNAME`/`DBHUB_NACOS_PASSWORD`。
 6. **Gitee WebHook**：URL 指向 SunMao `/api/webhooks/gitee`，口令与 `SUNMAO_WEBHOOK_SECRET` 一致，事件选 Push。
 
