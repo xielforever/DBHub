@@ -1,0 +1,188 @@
+name: dbhub-cce-release
+description: "DBHub：Gitee 检出 → kaniko 构建 → Helm 发布到 CCE dbhub（webhook 默认只构建校验，手动触发传 DEPLOY=true 才发布）"
+
+env:
+  REGISTRY: swr.cn-east-2.myhuaweicloud.com/dx_x2era
+  NAMESPACE: dbhub
+  RELEASE: dbhub
+  KUBECONFIG_CRED: dbhub-kubeconfig
+  ELB_ID: "<现有 CCE ELB ID>"
+  TARGET_ALLOWLIST: "<数据源目标地址白名单>"
+
+params:
+  - name: DEPLOY
+    type: bool
+    default: "false"
+    description: "true 时执行 Helm 发布；false 只构建并渲染校验"
+
+steps:
+  - type: print
+    name: start
+    message: "DBHub branch=${BRANCH} commit=${COMMIT_SHA_SHORT} build=#${BUILD_NUMBER} deploy=${DEPLOY}"
+
+  - type: git_clone
+    name: clone
+    url: ""
+    branch: main
+    credential: gitee
+    workspace: true
+
+  - type: kaniko_build
+    name: build-backend
+    dockerfile: backend/Dockerfile.kaniko
+    context: backend
+    destination: ${REGISTRY}/dbhub-backend:${COMMIT_SHA_SHORT}-${BUILD_NUMBER}
+    credential: swr-auth
+    workspace: true
+    timeout_secs: 1800
+    resources: {cpu: "4", memory: 8Gi}
+
+  - type: kaniko_build
+    name: build-frontend
+    dockerfile: frontend/Dockerfile.kaniko
+    context: frontend
+    destination: ${REGISTRY}/dbhub-frontend:${COMMIT_SHA_SHORT}-${BUILD_NUMBER}
+    credential: swr-auth
+    workspace: true
+    timeout_secs: 1800
+    resources: {cpu: "2", memory: 4Gi}
+
+  - type: helm_deploy
+    name: render-check
+    action: template
+    release: ${RELEASE}
+    namespace: ${NAMESPACE}
+    chart: deploy/helm/dbhub
+    workspace: true
+    kubeconfig_credential: ${KUBECONFIG_CRED}
+    when: '${DEPLOY} != "true"'
+    values_inline: |
+      imagePullSecrets:
+        - name: default-secret
+      existingSecret: dbhub-runtime
+      config:
+        DBHUB_TARGET_ALLOWLIST: "${TARGET_ALLOWLIST}"
+      backend:
+        replicas: 1
+        image:
+          repository: ${REGISTRY}/dbhub-backend
+          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          pullPolicy: IfNotPresent
+        audit:
+          size: 2Gi
+          storageClass: csi-disk
+          existingClaim: ""
+        extraVolumes:
+          - name: datastore-ca
+            configMap:
+              name: dbhub-datastore-ca
+        extraVolumeMounts:
+          - name: datastore-ca
+            mountPath: /etc/dbhub/trust
+            readOnly: true
+      frontend:
+        replicas: 1
+        image:
+          repository: ${REGISTRY}/dbhub-frontend
+          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          pullPolicy: IfNotPresent
+        service:
+          type: LoadBalancer
+          externalTrafficPolicy: Cluster
+          nodePort: 30591
+          annotations:
+            kubernetes.io/elb.class: union
+            kubernetes.io/elb.health-check-flag: "off"
+            kubernetes.io/elb.id: ${ELB_ID}
+            kubernetes.io/elb.lb-algorithm: ROUND_ROBIN
+            kubernetes.io/elb.security-pool-protocol: "off"
+      ingress:
+        enabled: false
+      jdbc:
+        enabled: false
+      backup:
+        enabled: false
+
+  - type: helm_deploy
+    name: release
+    action: upgrade
+    release: ${RELEASE}
+    namespace: ${NAMESPACE}
+    chart: deploy/helm/dbhub
+    workspace: true
+    kubeconfig_credential: ${KUBECONFIG_CRED}
+    when: '${DEPLOY} == "true"'
+    atomic: true
+    wait: true
+    timeout_secs: 900
+    values_inline: |
+      imagePullSecrets:
+        - name: default-secret
+      existingSecret: dbhub-runtime
+      config:
+        DBHUB_TARGET_ALLOWLIST: "${TARGET_ALLOWLIST}"
+      backend:
+        replicas: 1
+        image:
+          repository: ${REGISTRY}/dbhub-backend
+          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          pullPolicy: IfNotPresent
+        audit:
+          size: 2Gi
+          storageClass: csi-disk
+          existingClaim: ""
+        extraVolumes:
+          - name: datastore-ca
+            configMap:
+              name: dbhub-datastore-ca
+        extraVolumeMounts:
+          - name: datastore-ca
+            mountPath: /etc/dbhub/trust
+            readOnly: true
+      frontend:
+        replicas: 1
+        image:
+          repository: ${REGISTRY}/dbhub-frontend
+          tag: "${COMMIT_SHA_SHORT}-${BUILD_NUMBER}"
+          pullPolicy: IfNotPresent
+        service:
+          type: LoadBalancer
+          externalTrafficPolicy: Cluster
+          nodePort: 30591
+          annotations:
+            kubernetes.io/elb.class: union
+            kubernetes.io/elb.health-check-flag: "off"
+            kubernetes.io/elb.id: ${ELB_ID}
+            kubernetes.io/elb.lb-algorithm: ROUND_ROBIN
+            kubernetes.io/elb.security-pool-protocol: "off"
+      ingress:
+        enabled: false
+      jdbc:
+        enabled: false
+      backup:
+        enabled: false
+
+  - type: http_request
+    name: verify-frontend
+    url: http://dbhub-dbhub-frontend.dbhub.svc.cluster.local/healthz
+    method: GET
+    expect_status: 200
+    when: '${DEPLOY} == "true"'
+
+  - type: http_request
+    name: verify-api-ready
+    url: http://dbhub-dbhub-backend.dbhub.svc.cluster.local:8080/api/ready
+    method: GET
+    expect_status: 200
+    when: '${DEPLOY} == "true"'
+
+  - type: http_request
+    name: verify-api-health
+    url: http://dbhub-dbhub-backend.dbhub.svc.cluster.local:8080/api/health
+    method: GET
+    expect_status: 200
+    when: '${DEPLOY} == "true"'
+
+  - type: print
+    name: done
+    message: "DBHub 完成：images=${REGISTRY}/dbhub-*:${COMMIT_SHA_SHORT}-${BUILD_NUMBER} deploy=${DEPLOY}"

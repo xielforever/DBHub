@@ -9,6 +9,7 @@ DBHub 提供四种部署入口，使用同一后端、静态前端与生产环�
 | Docker Compose | 根目录 `docker-compose.prod.yaml`，可叠加 `docker-compose.ops.yaml` | 单机/虚拟机，优先推荐 |
 | Docker CLI | `python3 deploy/docker/manage.py` | 只安装 Docker Engine，不使用 Compose |
 | Helm / Kubernetes | `deploy/helm/dbhub` | 已有集群、Ingress、StorageClass 与 Secret 管理 |
+| SunMao 流水线 | [sunmao](sunmao/) | CCE 集群内 kaniko 构建 + Helm 发布；DBHub 常规发布通道 |
 | 源码 / systemd | `sh deploy/source/build.sh`、`deploy/source/*.service` | Linux 主机、本地编译、企业主机运维 |
 
 第一版均以**单后端实例**为支持范围。工作台活动事务仍在进程内，Helm 禁止后端多副本，更新使用 Recreate；前端可独立扩容。部署入口可用不等于生产准入完成，生产要求、升级和恢复见[部署运维指南](../docs/部署运维/部署运维指南.md)。
@@ -124,6 +125,12 @@ python scripts/deploy/xyc_release.py --apply --docker-wsl Ubuntu-24.04 `
 ```
 
 脚本核对目标、现有 ELB 和依赖，构建当前工作区的前后端镜像，推送到 values 指定的 SWR 仓库并读回摘要。每次发布将带摘要的完整 values、Git HEAD 和构建快照指纹写入本地的 `.local-docs/helm/xyc-releases/`。应用就绪后，脚本比对 PostgreSQL 迁移记录与构建快照，并经本机临时转发验证前端、健康接口、登录身份和会话退出。失败步骤会返回非零状态，已推送镜像和部署结果可在相应仓库及 Helm 发布记录中核对。ELB 外部访问策略仍由环境运维管理。回退镜像时使用含当前 ELB 配置的 values，Helm 第 1 版的历史清单记录的是 ClusterIP。
+
+## SunMao 流水线
+
+目标为 CCE 集群 `xyc` 的 `dbhub` 命名空间。流水线从 Gitee 镜像仓检出源码，在集群内用 kaniko 构建前后端镜像并推送 SWR，再通过 kubeconfig 凭证执行 Helm 发布，最后做 HTTP 就绪探测。webhook 触发时只构建并渲染校验；正式发布需手动触发并传 `DEPLOY=true`。
+
+前置条件与操作步骤见 [sunmao/README.md](sunmao/README.md)，流水线定义见 [sunmao/pipeline.yaml](sunmao/pipeline.yaml)。该通道不提供镜像摘要固定、流水线内迁移比对与 `helm lint`，这些仍由 `scripts/deploy/xyc_release.py` 覆盖。
 
 ## 源码 / systemd
 

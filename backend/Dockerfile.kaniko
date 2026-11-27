@@ -1,0 +1,24 @@
+# DBHub 后端生产镜像（kaniko 兼容版，供 SunMao 流水线使用）。
+# 与 backend/Dockerfile 产物一致；不使用 BuildKit 的 RUN --mount 语法。
+ARG IMAGE_VERSION=swr.cn-east-2.myhuaweicloud.com/dx_x2era/golang:1.26.9-bookworm
+FROM ${IMAGE_VERSION} AS builder
+WORKDIR /src
+# libpg_query 依赖 CGO；vendor 目录已随构建上下文提供。
+ENV CGO_ENABLED=1 GOTOOLCHAIN=local GOFLAGS=-mod=vendor
+COPY . .
+RUN go build -p=4 -trimpath -o /out/server ./cmd/server && \
+    go build -p=4 -trimpath -o /out/healthcheck ./cmd/healthcheck
+
+FROM swr.cn-east-2.myhuaweicloud.com/dx_x2era/debian:bookworm-slim AS runtime
+WORKDIR /app
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+COPY --from=builder /out/server ./server
+COPY --from=builder /out/healthcheck ./healthcheck
+RUN install -d -m 0700 -o 65532 -g 65532 /var/lib/dbhub/audit
+USER 65532:65532
+EXPOSE 8080
+ENV APP_ENV=production
+ENV DBHUB_AUDIT_DIR=/var/lib/dbhub/audit
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 CMD ["./healthcheck"]
+CMD ["./server"]
