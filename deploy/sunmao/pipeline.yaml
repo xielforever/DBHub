@@ -74,8 +74,15 @@ steps:
           existingClaim: ""
         extraVolumes:
           - name: datastore-ca
-            configMap:
-              name: dbhub-datastore-ca
+            projected:
+              sources:
+                - configMap:
+                    name: dbhub-datastore-ca
+                - configMap:
+                    name: dbhub-report44-fixture-ca
+                    items:
+                      - key: report44-fixture-ca.pem
+                        path: report44-fixture-ca.pem
         extraVolumeMounts:
           - name: datastore-ca
             mountPath: /etc/dbhub/trust
@@ -133,8 +140,15 @@ steps:
           existingClaim: ""
         extraVolumes:
           - name: datastore-ca
-            configMap:
-              name: dbhub-datastore-ca
+            projected:
+              sources:
+                - configMap:
+                    name: dbhub-datastore-ca
+                - configMap:
+                    name: dbhub-report44-fixture-ca
+                    items:
+                      - key: report44-fixture-ca.pem
+                        path: report44-fixture-ca.pem
         extraVolumeMounts:
           - name: datastore-ca
             mountPath: /etc/dbhub/trust
